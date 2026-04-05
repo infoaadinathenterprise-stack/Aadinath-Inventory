@@ -7,650 +7,255 @@
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
 <style>
   :root {
-    --bg: #0f0f0f;
-    --surface: #1a1a1a;
-    --surface2: #242424;
-    --border: #2e2e2e;
-    --accent: #f5a623;
-    --accent2: #e8521a;
-    --text: #f0f0f0;
-    --muted: #888;
-    --danger: #e84040;
-    --success: #3ecf6a;
-    --radius: 12px;
+    --bg: #0f0f0f; --surface: #1a1a1a; --surface2: #242424;
+    --border: #2e2e2e; --accent: #f5a623; --text: #f0f0f0;
+    --muted: #888; --danger: #e84040; --success: #3ecf6a;
+    --hold: #7c6af5; --radius: 12px;
   }
-
   * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'DM Sans', sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; font-size: 14px; }
 
-  body {
-    font-family: 'DM Sans', sans-serif;
-    background: var(--bg);
-    color: var(--text);
-    min-height: 100vh;
-    font-size: 14px;
-  }
+  /* LOGIN */
+  #loginScreen { display: none; position: fixed; inset: 0; background: var(--bg); z-index: 9999; align-items: center; justify-content: center; padding: 24px; }
+  #loginScreen.active { display: flex; }
+  .login-box { width: 100%; max-width: 340px; }
+  .login-logo { font-family: 'Bebas Neue', sans-serif; font-size: 40px; letter-spacing: 3px; color: var(--accent); text-align: center; line-height: 1; margin-bottom: 4px; }
+  .login-sub { text-align: center; font-size: 11px; letter-spacing: 3px; color: var(--muted); text-transform: uppercase; margin-bottom: 40px; }
+  .login-field { margin-bottom: 14px; }
+  .login-field label { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); margin-bottom: 6px; }
+  .login-field input { width: 100%; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; color: var(--text); padding: 13px 16px; font-family: 'DM Sans', sans-serif; font-size: 15px; outline: none; transition: border-color 0.2s; }
+  .login-field input:focus { border-color: var(--accent); }
+  .login-btn { width: 100%; padding: 14px; background: var(--accent); color: #000; border: none; border-radius: 10px; font-family: 'DM Sans', sans-serif; font-size: 15px; font-weight: 700; cursor: pointer; margin-top: 8px; transition: opacity 0.2s; }
+  .login-btn:hover { opacity: 0.88; }
+  .login-error { color: var(--danger); font-size: 13px; text-align: center; margin-top: 12px; min-height: 20px; }
+
+  /* APP */
+  #appContent { display: none; }
+  #appContent.active { display: block; }
 
   /* HEADER */
-  header {
-    background: var(--surface);
-    border-bottom: 1px solid var(--border);
-    padding: 14px 16px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    position: sticky;
-    top: 0;
-    z-index: 100;
-  }
-
-  .logo {
-    font-family: 'Bebas Neue', sans-serif;
-    font-size: 22px;
-    letter-spacing: 2px;
-    color: var(--accent);
-    line-height: 1;
-  }
-
-  .logo span {
-    display: block;
-    font-family: 'DM Sans', sans-serif;
-    font-size: 10px;
-    letter-spacing: 3px;
-    color: var(--muted);
-    text-transform: uppercase;
-    font-weight: 400;
-  }
-
-  .header-right {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-  }
-
-  .stock-badge {
-    background: var(--surface2);
-    border: 1px solid var(--border);
-    border-radius: 20px;
-    padding: 5px 12px;
-    font-size: 12px;
-    color: var(--muted);
-  }
-
-  .stock-badge b { color: var(--accent); }
+  header { background: var(--surface); border-bottom: 1px solid var(--border); padding: 12px 16px; display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; z-index: 100; gap: 8px; flex-wrap: wrap; }
+  .logo { font-family: 'Bebas Neue', sans-serif; font-size: 20px; letter-spacing: 2px; color: var(--accent); line-height: 1; flex-shrink: 0; }
+  .logo span { display: block; font-family: 'DM Sans', sans-serif; font-size: 9px; letter-spacing: 2px; color: var(--muted); text-transform: uppercase; font-weight: 400; }
+  .header-right { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+  .user-pill { background: var(--surface2); border: 1px solid var(--border); border-radius: 20px; padding: 4px 10px; font-size: 11px; color: var(--muted); }
+  .user-pill b { color: var(--accent); }
+  #pendingBadgeBtn { display: none; background: var(--hold); color: #fff; border: none; border-radius: 8px; padding: 6px 12px; font-size: 12px; font-family: 'DM Sans', sans-serif; font-weight: 600; cursor: pointer; }
+  .logout-btn { background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; color: var(--muted); padding: 6px 10px; font-size: 12px; font-family: 'DM Sans', sans-serif; cursor: pointer; }
+  .logout-btn:hover { color: var(--danger); border-color: var(--danger); }
 
   /* MAIN */
   main { padding: 16px; max-width: 900px; margin: 0 auto; }
 
   /* STATS */
-  .stats {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 10px;
-    margin-bottom: 16px;
-  }
+  .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 16px; }
+  .stat-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px; text-align: center; }
+  .stat-card .num { font-family: 'Bebas Neue', sans-serif; font-size: 28px; color: var(--accent); line-height: 1; }
+  .stat-card .label { font-size: 11px; color: var(--muted); margin-top: 4px; text-transform: uppercase; letter-spacing: 1px; }
 
-  .stat-card {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    padding: 14px;
-    text-align: center;
-  }
-
-  .stat-card .num {
-    font-family: 'Bebas Neue', sans-serif;
-    font-size: 28px;
-    color: var(--accent);
-    line-height: 1;
-  }
-
-  .stat-card .label {
-    font-size: 11px;
-    color: var(--muted);
-    margin-top: 4px;
-    text-transform: uppercase;
-    letter-spacing: 1px;
-  }
+  /* PENDING PANEL */
+  #pendingPanel { display: none; background: var(--surface); border: 1px solid var(--hold); border-radius: var(--radius); margin-bottom: 16px; overflow: hidden; }
+  #pendingPanel.active { display: block; }
+  .pending-header { background: rgba(124,106,245,0.15); padding: 12px 16px; display: flex; align-items: center; justify-content: space-between; }
+  .pending-header h3 { font-size: 13px; font-weight: 600; color: var(--hold); text-transform: uppercase; letter-spacing: 1px; }
+  .pending-list { padding: 8px; display: flex; flex-direction: column; gap: 6px; }
+  .pending-item { background: var(--surface2); border-radius: 10px; padding: 12px; display: flex; align-items: center; gap: 10px; }
+  .pending-info { flex: 1; min-width: 0; }
+  .pending-name { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .pending-meta { font-size: 11px; color: var(--muted); margin-top: 3px; }
+  .pending-qty { font-family: 'Bebas Neue', sans-serif; font-size: 22px; flex-shrink: 0; }
+  .pending-qty.add { color: var(--success); }
+  .pending-qty.minus { color: var(--danger); }
+  .pending-actions { display: flex; gap: 6px; flex-shrink: 0; }
+  .p-btn { padding: 6px 12px; border-radius: 8px; border: none; font-size: 13px; font-weight: 700; cursor: pointer; font-family: 'DM Sans', sans-serif; }
+  .p-approve { background: var(--success); color: #000; }
+  .p-reject  { background: var(--danger);  color: #fff; }
 
   /* CONTROLS */
-  .controls {
-    display: flex;
-    gap: 10px;
-    margin-bottom: 14px;
-    flex-wrap: wrap;
-  }
-
-  .search-wrap {
-    flex: 1;
-    min-width: 180px;
-    position: relative;
-  }
-
-  .search-wrap input {
-    width: 100%;
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    color: var(--text);
-    padding: 10px 14px 10px 36px;
-    font-family: 'DM Sans', sans-serif;
-    font-size: 14px;
-    outline: none;
-    transition: border-color 0.2s;
-  }
-
+  .controls { display: flex; gap: 10px; margin-bottom: 14px; }
+  .search-wrap { flex: 1; position: relative; }
+  .search-wrap input { width: 100%; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text); padding: 10px 14px 10px 36px; font-family: 'DM Sans', sans-serif; font-size: 14px; outline: none; transition: border-color 0.2s; }
   .search-wrap input:focus { border-color: var(--accent); }
+  .search-wrap .icon { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: var(--muted); }
 
-  .search-wrap .icon {
-    position: absolute;
-    left: 12px;
-    top: 50%;
-    transform: translateY(-50%);
-    color: var(--muted);
-    font-size: 14px;
-  }
+  /* TABS */
+  .filter-tabs-wrapper { position: relative; margin-bottom: 14px; }
+  .filter-tabs { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 4px; scroll-behavior: smooth; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+  .filter-tabs::-webkit-scrollbar { display: none; }
+  .tab { padding: 6px 14px; border-radius: 20px; border: 1px solid var(--border); background: var(--surface); color: var(--muted); font-size: 12px; cursor: pointer; white-space: nowrap; transition: all 0.2s; font-family: 'DM Sans', sans-serif; flex-shrink: 0; }
+  .tab.active { background: var(--accent); color: #000; border-color: var(--accent); font-weight: 600; }
+  .tabs-scroll-btn { position: absolute; top: 50%; transform: translateY(-60%); width: 28px; height: 28px; border-radius: 50%; border: 1px solid var(--border); background: var(--surface2); color: var(--text); font-size: 14px; display: flex; align-items: center; justify-content: center; cursor: pointer; z-index: 10; box-shadow: 0 2px 8px rgba(0,0,0,0.4); }
+  .tabs-scroll-btn.left { left: 0; }
+  .tabs-scroll-btn.right { right: 0; }
 
-  select {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    color: var(--text);
-    padding: 10px 14px;
-    font-family: 'DM Sans', sans-serif;
-    font-size: 13px;
-    outline: none;
-    cursor: pointer;
-  }
+  /* PRODUCT CARDS */
+  .product-list { display: flex; flex-direction: column; gap: 8px; }
+  .product-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px; display: flex; align-items: center; gap: 12px; transition: border-color 0.2s; }
+  .product-card:hover { border-color: #444; }
+  .product-type-badge { background: var(--surface2); border-radius: 8px; padding: 6px 8px; font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; white-space: nowrap; min-width: 64px; text-align: center; line-height: 1.3; flex-shrink: 0; }
+  .product-info { flex: 1; min-width: 0; }
+  .product-name { font-weight: 600; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .product-meta { font-size: 11px; color: var(--muted); margin-top: 3px; }
+  .product-sku { font-size: 11px; color: var(--accent); margin-top: 2px; font-weight: 500; }
+  .stock-pill { display: flex; flex-direction: column; align-items: center; min-width: 56px; flex-shrink: 0; }
+  .stock-num { font-family: 'Bebas Neue', sans-serif; font-size: 24px; line-height: 1; }
+  .stock-num.zero { color: var(--danger); }
+  .stock-num.low  { color: var(--accent); }
+  .stock-num.ok   { color: var(--success); }
+  .stock-label { font-size: 9px; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; }
+  .hold-label { font-size: 10px; color: var(--hold); font-weight: 600; margin-top: 2px; }
+  .card-actions { display: flex; flex-direction: column; gap: 6px; flex-shrink: 0; }
+  .icon-btn { background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; color: var(--text); width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 14px; transition: background 0.2s; }
+  .icon-btn:hover { background: #333; }
+  .icon-btn.stock-adj { background: rgba(124,106,245,0.15); border-color: var(--hold); }
 
-  select:focus { border-color: var(--accent); }
-
-  .btn {
-    padding: 10px 18px;
-    border-radius: var(--radius);
-    border: none;
-    font-family: 'DM Sans', sans-serif;
-    font-size: 13px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: opacity 0.2s, transform 0.1s;
-    white-space: nowrap;
-  }
-
+  /* BUTTONS */
+  .btn { padding: 10px 18px; border-radius: var(--radius); border: none; font-family: 'DM Sans', sans-serif; font-size: 13px; font-weight: 600; cursor: pointer; transition: opacity 0.2s, transform 0.1s; white-space: nowrap; }
   .btn:active { transform: scale(0.97); }
   .btn-primary { background: var(--accent); color: #000; }
   .btn-primary:hover { opacity: 0.88; }
+  .btn-ghost { background: var(--surface2); color: var(--text); border: 1px solid var(--border); }
+  .btn-hold { background: var(--hold); color: #fff; }
   .btn-danger { background: var(--danger); color: #fff; }
-  .btn-danger:hover { opacity: 0.85; }
-  .btn-ghost {
-    background: var(--surface2);
-    color: var(--text);
-    border: 1px solid var(--border);
-  }
-
-  /* PRODUCT LIST */
-  .product-list { display: flex; flex-direction: column; gap: 8px; }
-
-  .product-card {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    padding: 14px;
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    transition: border-color 0.2s;
-  }
-
-  .product-card:hover { border-color: #444; }
-
-  .product-type-badge {
-    background: var(--surface2);
-    border-radius: 8px;
-    padding: 6px 10px;
-    font-size: 10px;
-    color: var(--muted);
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    white-space: nowrap;
-    min-width: 70px;
-    text-align: center;
-    line-height: 1.3;
-  }
-
-  .product-info { flex: 1; min-width: 0; }
-
-  .product-name {
-    font-weight: 600;
-    font-size: 14px;
-    color: var(--text);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  .product-meta {
-    font-size: 11px;
-    color: var(--muted);
-    margin-top: 3px;
-  }
-
-  .product-sku {
-    font-size: 11px;
-    color: var(--accent);
-    margin-top: 2px;
-    font-weight: 500;
-  }
-
-  .stock-pill {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    min-width: 50px;
-  }
-
-  .stock-num {
-    font-family: 'Bebas Neue', sans-serif;
-    font-size: 24px;
-    line-height: 1;
-  }
-
-  .stock-num.zero { color: var(--danger); }
-  .stock-num.low { color: var(--accent); }
-  .stock-num.ok { color: var(--success); }
-
-  .stock-label {
-    font-size: 9px;
-    color: var(--muted);
-    text-transform: uppercase;
-    letter-spacing: 1px;
-  }
-
-  .card-actions {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-  }
-
-  .icon-btn {
-    background: var(--surface2);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    color: var(--text);
-    width: 32px;
-    height: 32px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
-    font-size: 14px;
-    transition: background 0.2s;
-  }
-
-  .icon-btn:hover { background: #333; }
-  .icon-btn.del:hover { background: var(--danger); border-color: var(--danger); }
-
-  /* EMPTY STATE */
-  .empty {
-    text-align: center;
-    padding: 60px 20px;
-    color: var(--muted);
-  }
-
-  .empty .big { font-size: 40px; margin-bottom: 10px; }
-  .empty p { font-size: 14px; }
 
   /* MODAL */
-  .modal-overlay {
-    display: none;
-    position: fixed;
-    inset: 0;
-    background: rgba(0,0,0,0.7);
-    z-index: 200;
-    align-items: flex-end;
-    justify-content: center;
-    backdrop-filter: blur(4px);
-  }
-
+  .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 200; align-items: flex-end; justify-content: center; backdrop-filter: blur(4px); }
   .modal-overlay.active { display: flex; }
-
-  .modal {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 20px 20px 0 0;
-    width: 100%;
-    max-width: 600px;
-    max-height: 90vh;
-    overflow-y: auto;
-    padding: 24px 20px 32px;
-    animation: slideUp 0.3s ease;
-  }
-
-  @keyframes slideUp {
-    from { transform: translateY(100%); }
-    to { transform: translateY(0); }
-  }
-
-  .modal-handle {
-    width: 40px;
-    height: 4px;
-    background: var(--border);
-    border-radius: 2px;
-    margin: 0 auto 20px;
-  }
-
-  .modal h2 {
-    font-family: 'Bebas Neue', sans-serif;
-    font-size: 22px;
-    letter-spacing: 1px;
-    color: var(--accent);
-    margin-bottom: 20px;
-  }
-
-  .form-group {
-    margin-bottom: 14px;
-  }
-
-  .form-group label {
-    display: block;
-    font-size: 11px;
-    text-transform: uppercase;
-    letter-spacing: 1px;
-    color: var(--muted);
-    margin-bottom: 6px;
-    font-weight: 500;
-  }
-
-  .form-group input,
-  .form-group select,
-  .form-group textarea {
-    width: 100%;
-    background: var(--surface2);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    color: var(--text);
-    padding: 11px 14px;
-    font-family: 'DM Sans', sans-serif;
-    font-size: 14px;
-    outline: none;
-    transition: border-color 0.2s;
-  }
-
-  .form-group input:focus,
-  .form-group select:focus { border-color: var(--accent); }
-
+  .modal { background: var(--surface); border: 1px solid var(--border); border-radius: 20px 20px 0 0; width: 100%; max-width: 600px; max-height: 92vh; overflow-y: auto; padding: 20px 20px 36px; animation: slideUp 0.3s ease; }
+  @keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
+  .modal-handle { width: 40px; height: 4px; background: var(--border); border-radius: 2px; margin: 0 auto 18px; }
+  .modal h2 { font-family: 'Bebas Neue', sans-serif; font-size: 22px; letter-spacing: 1px; color: var(--accent); margin-bottom: 18px; }
+  .form-group { margin-bottom: 13px; }
+  .form-group label { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); margin-bottom: 5px; font-weight: 500; }
+  .form-group input, .form-group select, .form-group textarea { width: 100%; background: var(--surface2); border: 1px solid var(--border); border-radius: 10px; color: var(--text); padding: 11px 14px; font-family: 'DM Sans', sans-serif; font-size: 14px; outline: none; transition: border-color 0.2s; }
+  .form-group input:focus, .form-group select:focus, .form-group textarea:focus { border-color: var(--accent); }
+  .form-group textarea { resize: vertical; min-height: 70px; }
   .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-
-  .modal-actions {
-    display: flex;
-    gap: 10px;
-    margin-top: 20px;
-  }
-
+  .modal-actions { display: flex; gap: 10px; margin-top: 18px; }
   .modal-actions .btn { flex: 1; padding: 13px; font-size: 14px; }
 
-  /* TOAST */
-  .toast {
-    position: fixed;
-    bottom: 24px;
-    left: 50%;
-    transform: translateX(-50%) translateY(80px);
-    background: var(--surface2);
-    border: 1px solid var(--border);
-    border-radius: 30px;
-    padding: 12px 24px;
-    font-size: 13px;
-    font-weight: 500;
-    z-index: 999;
-    transition: transform 0.3s ease;
-    white-space: nowrap;
-  }
+  /* STOCK ADJUST */
+  .stock-adjust { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+  .adj-btn { width: 38px; height: 38px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface2); color: var(--text); font-size: 20px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-weight: 600; flex-shrink: 0; }
+  .adj-btn:hover { background: #333; }
+  .adj-input { flex: 1; text-align: center; background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; color: var(--text); padding: 8px; font-size: 18px; font-family: 'DM Sans', sans-serif; outline: none; }
 
-  .toast.show { transform: translateX(-50%) translateY(0); }
-  .toast.success { border-color: var(--success); color: var(--success); }
-  .toast.error { border-color: var(--danger); color: var(--danger); }
+  /* TYPE TOGGLE */
+  .type-toggle { display: flex; gap: 8px; margin-bottom: 14px; }
+  .type-toggle button { flex: 1; padding: 10px; border-radius: 10px; border: 2px solid var(--border); background: var(--surface2); color: var(--muted); font-family: 'DM Sans', sans-serif; font-size: 14px; font-weight: 600; cursor: pointer; transition: all 0.2s; }
+  .type-toggle button.active-add { border-color: var(--success); color: var(--success); background: rgba(62,207,106,0.1); }
+  .type-toggle button.active-minus { border-color: var(--danger); color: var(--danger); background: rgba(232,64,64,0.1); }
 
-  /* LOADER */
-  .loader {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 60px;
-    color: var(--muted);
-    gap: 10px;
-  }
+  /* AUTOCOMPLETE */
+  .ac-wrap { position: relative; }
+  .ac-list { position: absolute; top: calc(100% + 4px); left: 0; right: 0; background: #1e1e1e; border: 1px solid var(--accent); border-radius: 10px; z-index: 500; max-height: 180px; overflow-y: auto; box-shadow: 0 8px 24px rgba(0,0,0,0.5); }
+  .ac-item { padding: 10px 14px; font-size: 13px; cursor: pointer; border-bottom: 1px solid var(--border); transition: background 0.15s; }
+  .ac-item:last-child { border-bottom: none; }
+  .ac-item:hover { background: var(--surface2); }
+  .ac-item mark { background: transparent; color: var(--accent); font-weight: 700; }
 
-  .spinner {
-    width: 20px;
-    height: 20px;
-    border: 2px solid var(--border);
-    border-top-color: var(--accent);
-    border-radius: 50%;
-    animation: spin 0.7s linear infinite;
-  }
-
-  @keyframes spin { to { transform: rotate(360deg); } }
-
-  /* CONFIRM DIALOG */
-  .confirm-overlay {
-    display: none;
-    position: fixed;
-    inset: 0;
-    background: rgba(0,0,0,0.8);
-    z-index: 300;
-    align-items: center;
-    justify-content: center;
-    padding: 20px;
-  }
-
+  /* CONFIRM */
+  .confirm-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.8); z-index: 300; align-items: center; justify-content: center; padding: 20px; }
   .confirm-overlay.active { display: flex; }
-
-  .confirm-box {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    padding: 24px;
-    max-width: 320px;
-    width: 100%;
-    text-align: center;
-  }
-
+  .confirm-box { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 24px; max-width: 320px; width: 100%; text-align: center; }
   .confirm-box .icon { font-size: 36px; margin-bottom: 12px; }
   .confirm-box h3 { font-size: 16px; font-weight: 600; margin-bottom: 8px; }
   .confirm-box p { font-size: 13px; color: var(--muted); margin-bottom: 20px; }
   .confirm-actions { display: flex; gap: 10px; }
   .confirm-actions .btn { flex: 1; }
 
-  /* AUTOCOMPLETE */
-  .ac-wrap { position: relative; }
-  .ac-list {
-    position: absolute;
-    top: calc(100% + 4px);
-    left: 0; right: 0;
-    background: #1e1e1e;
-    border: 1px solid var(--accent);
-    border-radius: 10px;
-    z-index: 500;
-    max-height: 180px;
-    overflow-y: auto;
-    box-shadow: 0 8px 24px rgba(0,0,0,0.5);
-  }
-  .ac-item {
-    padding: 10px 14px;
-    font-size: 13px;
-    cursor: pointer;
-    border-bottom: 1px solid var(--border);
-    transition: background 0.15s;
-  }
-  .ac-item:last-child { border-bottom: none; }
-  .ac-item:hover, .ac-item.selected { background: var(--surface2); }
-  .ac-item mark {
-    background: transparent;
-    color: var(--accent);
-    font-weight: 700;
-  }
+  /* TOAST */
+  .toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%) translateY(80px); background: var(--surface2); border: 1px solid var(--border); border-radius: 30px; padding: 12px 24px; font-size: 13px; font-weight: 500; z-index: 999; transition: transform 0.3s ease; white-space: nowrap; }
+  .toast.show { transform: translateX(-50%) translateY(0); }
+  .toast.success { border-color: var(--success); color: var(--success); }
+  .toast.error   { border-color: var(--danger);  color: var(--danger); }
+  .toast.info    { border-color: var(--hold);    color: var(--hold); }
 
-  /* STOCK ADJUST */
-  .stock-adjust {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    margin-top: 10px;
-  }
-
-  .adj-btn {
-    width: 36px;
-    height: 36px;
-    border-radius: 8px;
-    border: 1px solid var(--border);
-    background: var(--surface2);
-    color: var(--text);
-    font-size: 18px;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-weight: 600;
-  }
-
-  .adj-btn:hover { background: #333; }
-
-  .adj-input {
-    width: 60px;
-    text-align: center;
-    background: var(--surface2);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    color: var(--text);
-    padding: 8px;
-    font-size: 16px;
-    font-family: 'DM Sans', sans-serif;
-    outline: none;
-  }
-
-  /* FILTER TABS */
-  .filter-tabs-wrapper {
-    position: relative;
-    margin-bottom: 14px;
-  }
-
-  .filter-tabs {
-    display: flex;
-    gap: 6px;
-    overflow-x: auto;
-    padding-bottom: 4px;
-    padding-left: 2px;
-    padding-right: 2px;
-    scrollbar-width: none;
-    scroll-behavior: smooth;
-    -webkit-overflow-scrolling: touch;
-  }
-
-  .filter-tabs::-webkit-scrollbar { display: none; }
-
-  .tab {
-    padding: 6px 14px;
-    border-radius: 20px;
-    border: 1px solid var(--border);
-    background: var(--surface);
-    color: var(--muted);
-    font-size: 12px;
-    cursor: pointer;
-    white-space: nowrap;
-    transition: all 0.2s;
-    font-family: 'DM Sans', sans-serif;
-    flex-shrink: 0;
-  }
-
-  .tab.active {
-    background: var(--accent);
-    color: #000;
-    border-color: var(--accent);
-    font-weight: 600;
-  }
-
-  .tabs-scroll-btn {
-    position: absolute;
-    top: 50%;
-    transform: translateY(-60%);
-    width: 28px;
-    height: 28px;
-    border-radius: 50%;
-    border: 1px solid var(--border);
-    background: var(--surface2);
-    color: var(--text);
-    font-size: 13px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
-    z-index: 10;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.4);
-  }
-
-  .tabs-scroll-btn.left { left: 0; }
-  .tabs-scroll-btn.right { right: 0; }
+  /* MISC */
+  .empty { text-align: center; padding: 60px 20px; color: var(--muted); }
+  .empty .big { font-size: 40px; margin-bottom: 10px; }
+  .loader { display: flex; align-items: center; justify-content: center; padding: 60px; color: var(--muted); gap: 10px; }
+  .spinner { width: 20px; height: 20px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.7s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .info-box { background: rgba(124,106,245,0.1); border: 1px solid var(--hold); border-radius: 10px; padding: 10px 14px; font-size: 12px; color: var(--hold); margin-bottom: 14px; }
 </style>
 </head>
 <body>
 
-<header>
-  <div class="logo">
-    Aadinath
-    <span>Enterprise · Inventory</span>
+<!-- LOGIN -->
+<div id="loginScreen" class="active">
+  <div class="login-box">
+    <div class="login-logo">Aadinath</div>
+    <div class="login-sub">Enterprise · Inventory</div>
+    <div class="login-field">
+      <label>Username</label>
+      <input type="text" id="loginUser" placeholder="admin / akshat" autocomplete="off">
+    </div>
+    <div class="login-field">
+      <label>Password</label>
+      <input type="password" id="loginPass" placeholder="Enter password" onkeydown="if(event.key==='Enter')doLogin()">
+    </div>
+    <button class="login-btn" onclick="doLogin()">Login</button>
+    <div class="login-error" id="loginError"></div>
   </div>
+</div>
+
+<!-- APP -->
+<div id="appContent">
+
+<header>
+  <div class="logo">Aadinath<span>Enterprise · Inventory</span></div>
   <div class="header-right">
-    <div class="stock-badge">Total: <b id="totalCount">—</b></div>
+    <div class="user-pill" id="userPill">—</div>
+    <button id="pendingBadgeBtn" onclick="togglePendingPanel()">⏳ <span id="pendingCount">0</span> Pending</button>
     <button class="btn btn-primary" onclick="openAddModal()">+ Add</button>
+    <button class="logout-btn" onclick="doLogout()">Logout</button>
   </div>
 </header>
 
 <main>
-  <!-- Stats -->
   <div class="stats">
-    <div class="stat-card">
-      <div class="num" id="statTotal">—</div>
-      <div class="label">Products</div>
-    </div>
-    <div class="stat-card">
-      <div class="num" id="statInStock">—</div>
-      <div class="label">In Stock</div>
-    </div>
-    <div class="stat-card">
-      <div class="num" id="statZero">—</div>
-      <div class="label">Out of Stock</div>
-    </div>
+    <div class="stat-card"><div class="num" id="statTotal">—</div><div class="label">Products</div></div>
+    <div class="stat-card"><div class="num" id="statInStock">—</div><div class="label">In Stock</div></div>
+    <div class="stat-card"><div class="num" id="statZero">—</div><div class="label">Out of Stock</div></div>
   </div>
 
-  <!-- Controls -->
+  <!-- Pending Panel (admin only) -->
+  <div id="pendingPanel">
+    <div class="pending-header">
+      <h3>⏳ Pending Stock Requests</h3>
+      <span style="font-size:12px;color:var(--muted)">Approve or reject</span>
+    </div>
+    <div class="pending-list" id="pendingList"></div>
+  </div>
+
   <div class="controls">
     <div class="search-wrap">
       <span class="icon">🔍</span>
-      <input type="text" id="searchInput" placeholder="Search products..." oninput="filterProducts()">
+      <input type="text" id="searchInput" placeholder="Search products..." oninput="renderProducts()">
     </div>
   </div>
 
-  <!-- Filter Tabs -->
   <div class="filter-tabs-wrapper">
     <div class="tabs-scroll-btn left" onclick="scrollTabs(-150)">&#8249;</div>
     <div class="filter-tabs" id="filterTabs">
-      <div class="tab active" onclick="setTypeFilter('ALL', this)">All</div>
+      <div class="tab active" onclick="setTypeFilter('ALL',this)">All</div>
     </div>
     <div class="tabs-scroll-btn right" onclick="scrollTabs(150)">&#8250;</div>
   </div>
 
-  <!-- Product List -->
   <div id="productList" class="product-list">
     <div class="loader"><div class="spinner"></div> Loading inventory...</div>
   </div>
 </main>
+</div>
 
-<!-- Add/Edit Modal -->
-<div class="modal-overlay" id="modalOverlay" onclick="closeModalOnBg(event)">
+<!-- PRODUCT MODAL (Add / Edit) -->
+<div class="modal-overlay" id="productModal" onclick="closeModalOnBg(event,'productModal')">
   <div class="modal">
     <div class="modal-handle"></div>
-    <h2 id="modalTitle">Add Product</h2>
+    <h2 id="productModalTitle">Add Product</h2>
     <input type="hidden" id="editId">
-
     <div class="form-row">
       <div class="form-group">
         <label>Product Name *</label>
@@ -667,7 +272,6 @@
         </div>
       </div>
     </div>
-
     <div class="form-row">
       <div class="form-group">
         <label>Brand</label>
@@ -684,11 +288,10 @@
         </div>
       </div>
     </div>
-
     <div class="form-row">
       <div class="form-group">
         <label>SKU <span style="color:var(--accent);font-size:10px;">(auto-generated)</span></label>
-        <input type="text" id="f_sku" placeholder="Auto-generated from type & brand" readonly style="opacity:0.6;cursor:not-allowed;">
+        <input type="text" id="f_sku" placeholder="Auto from type & brand" readonly style="opacity:0.6;cursor:not-allowed;">
       </div>
       <div class="form-group">
         <label>Unit of Measure</label>
@@ -698,330 +301,520 @@
         </div>
       </div>
     </div>
-
-    <div class="form-group">
-      <label>Current Stock *</label>
+    <div class="form-group" id="stockFieldWrap">
+      <label>Current Stock <span id="stockHintLabel" style="color:var(--hold);font-size:10px;display:none;">⏳ will need admin approval</span></label>
       <div class="stock-adjust">
         <button class="adj-btn" onclick="adjustStock(-1)">−</button>
         <input type="number" id="f_stock" class="adj-input" value="0" min="0">
         <button class="adj-btn" onclick="adjustStock(1)">+</button>
       </div>
     </div>
-
     <div class="form-group">
       <label>Reorder Level</label>
       <input type="number" id="f_reorder" placeholder="0" value="0" min="0">
     </div>
-
     <div class="modal-actions">
-      <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-ghost" onclick="closeModal('productModal')">Cancel</button>
       <button class="btn btn-primary" onclick="saveProduct()">Save Product</button>
     </div>
   </div>
 </div>
 
-<!-- Confirm Delete -->
-<div class="confirm-overlay" id="confirmOverlay">
-  <div class="confirm-box">
-    <div class="icon">🗑️</div>
-    <h3>Delete Product?</h3>
-    <p id="confirmText">This cannot be undone.</p>
-    <div class="confirm-actions">
-      <button class="btn btn-ghost" onclick="closeConfirm()">Cancel</button>
-      <button class="btn btn-danger" onclick="confirmDelete()">Delete</button>
+<!-- STOCK ADJUST MODAL -->
+<div class="modal-overlay" id="stockModal" onclick="closeModalOnBg(event,'stockModal')">
+  <div class="modal">
+    <div class="modal-handle"></div>
+    <h2>Adjust Stock</h2>
+    <input type="hidden" id="adjProductId">
+    <div class="form-group">
+      <label>Product</label>
+      <input type="text" id="adjProductName" readonly style="opacity:0.7;">
+    </div>
+    <div class="form-group">
+      <label>Current Stock</label>
+      <input type="text" id="adjCurrentStock" readonly style="opacity:0.7;">
+    </div>
+    <div class="form-group">
+      <label>Action</label>
+      <div class="type-toggle">
+        <button id="btnAdd" onclick="setAdjType('ADD')" class="active-add">+ Add Stock</button>
+        <button id="btnMinus" onclick="setAdjType('MINUS')">− Remove Stock</button>
+      </div>
+    </div>
+    <div class="form-group">
+      <label>Quantity</label>
+      <div class="stock-adjust">
+        <button class="adj-btn" onclick="adjustAdjQty(-1)">−</button>
+        <input type="number" id="adjQty" class="adj-input" value="1" min="1">
+        <button class="adj-btn" onclick="adjustAdjQty(1)">+</button>
+      </div>
+    </div>
+    <div class="form-group">
+      <label>Reason / Note *</label>
+      <textarea id="adjNote" placeholder="e.g. Moved to Main Store, Sold, Damaged..."></textarea>
+    </div>
+    <div class="info-box" id="adjInfoBox">⏳ This request will be sent to Admin for approval before stock is updated.</div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal('stockModal')">Cancel</button>
+      <button class="btn btn-hold" id="adjSubmitBtn" onclick="submitStockRequest()">Submit Request</button>
     </div>
   </div>
 </div>
 
-<!-- Toast -->
+<!-- CONFIRM -->
+<div class="confirm-overlay" id="confirmOverlay">
+  <div class="confirm-box">
+    <div class="icon" id="confirmIcon">⚠️</div>
+    <h3 id="confirmTitle">Are you sure?</h3>
+    <p id="confirmText">This cannot be undone.</p>
+    <div class="confirm-actions">
+      <button class="btn btn-ghost" onclick="closeConfirm()">Cancel</button>
+      <button class="btn btn-primary" id="confirmOkBtn" onclick="confirmAction()">Confirm</button>
+    </div>
+  </div>
+</div>
+
 <div class="toast" id="toast"></div>
 
 <script>
-  const SUPABASE_URL = 'https://mculftdutoavwueluyma.supabase.co';
-  const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1jdWxmdGR1dG9hdnd1ZWx1eW1hIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ0Mjk2NzAsImV4cCI6MjA5MDAwNTY3MH0.s-OLgLDXR5aN3uQlS5yAO2sk6Bot0TibtI4qFjrzZh4';
+const SUPABASE_URL = 'https://mculftdutoavwueluyma.supabase.co';
+const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1jdWxmdGR1dG9hdnd1ZWx1eW1hIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ0Mjk2NzAsImV4cCI6MjA5MDAwNTY3MH0.s-OLgLDXR5aN3uQlS5yAO2sk6Bot0TibtI4qFjrzZh4';
+const H = { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}`, 'Content-Type': 'application/json', 'Prefer': 'return=representation' };
 
-  const headers = {
-    'apikey': SUPABASE_KEY,
-    'Authorization': `Bearer ${SUPABASE_KEY}`,
-    'Content-Type': 'application/json',
-    'Prefer': 'return=representation'
+const USERS = {
+  'admin':  { password: 'Aadinath@2018', name: 'Anjan',  role: 'admin', db_id: 1 },
+  'akshat': { password: 'Akshat@2003',   name: 'Akshat', role: 'staff', db_id: 2 }
+};
+
+let currentUser = null, allProducts = [], pendingRequests = [], activeType = 'ALL', adjType = 'ADD', confirmCb = null;
+
+// ── AUTH ───────────────────────────────
+function checkSession() {
+  const u = sessionStorage.getItem('ae_user');
+  if (u && USERS[u]) { currentUser = { username: u, ...USERS[u] }; showApp(); }
+  else document.getElementById('loginScreen').classList.add('active');
+}
+
+function doLogin() {
+  const u = document.getElementById('loginUser').value.trim().toLowerCase();
+  const p = document.getElementById('loginPass').value;
+  const err = document.getElementById('loginError');
+  if (USERS[u] && USERS[u].password === p) {
+    sessionStorage.setItem('ae_user', u);
+    currentUser = { username: u, ...USERS[u] };
+    err.textContent = '';
+    showApp();
+  } else {
+    err.textContent = 'Invalid username or password.';
+    document.getElementById('loginPass').value = '';
+  }
+}
+
+function showApp() {
+  document.getElementById('loginScreen').classList.remove('active');
+  document.getElementById('appContent').classList.add('active');
+  document.getElementById('userPill').innerHTML = `<b>${currentUser.name}</b> · ${currentUser.role}`;
+  if (currentUser.role === 'admin') document.getElementById('pendingBadgeBtn').style.display = 'inline-flex';
+  fetchAll();
+}
+
+function doLogout() {
+  sessionStorage.removeItem('ae_user');
+  currentUser = null;
+  document.getElementById('appContent').classList.remove('active');
+  document.getElementById('loginScreen').classList.add('active');
+  ['loginUser','loginPass'].forEach(id => document.getElementById(id).value = '');
+  document.getElementById('loginError').textContent = '';
+}
+
+// ── FETCH ──────────────────────────────
+async function fetchAll() {
+  await fetchProducts();
+  if (currentUser.role === 'admin') await fetchPending();
+}
+
+async function fetchProducts() {
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/products?select=*&active_status=eq.true&order=product_name.asc`, { headers: H });
+    if (!res.ok) throw new Error(await res.text());
+    allProducts = await res.json();
+    buildAcData(); renderStats(); renderTypeTabs(); renderProducts();
+  } catch(e) {
+    document.getElementById('productList').innerHTML = `<div class="empty"><div class="big">⚠️</div><p>${e.message}</p></div>`;
+  }
+}
+
+async function fetchPending() {
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/stock_requests?status=eq.PENDING&select=*`, { headers: H });
+    if (!res.ok) throw new Error(await res.text());
+    pendingRequests = await res.json();
+    renderPending(); renderProducts();
+  } catch(e) { console.error(e); }
+}
+
+// ── STATS ──────────────────────────────
+function renderStats() {
+  document.getElementById('statTotal').textContent   = allProducts.length;
+  document.getElementById('statInStock').textContent = allProducts.filter(p => p.current_stock > 0).length;
+  document.getElementById('statZero').textContent    = allProducts.filter(p => p.current_stock === 0).length;
+}
+
+// ── PENDING PANEL ──────────────────────
+function renderPending() {
+  const count = pendingRequests.length;
+  document.getElementById('pendingCount').textContent = count;
+  const btn = document.getElementById('pendingBadgeBtn');
+  if (count === 0) { btn.style.display = 'none'; document.getElementById('pendingPanel').classList.remove('active'); return; }
+  btn.style.display = 'inline-flex';
+  document.getElementById('pendingList').innerHTML = pendingRequests.map(r => {
+    const p = allProducts.find(x => x.product_id === r.product_id);
+    const pName = p ? p.product_name : `Product #${r.product_id}`;
+    const isAdd = r.request_type === 'ADJUSTMENT_IN' || r.request_type === 'PURCHASE_IN';
+    return `
+      <div class="pending-item">
+        <div class="pending-info">
+          <div class="pending-name">${pName}</div>
+          <div class="pending-meta">${r.request_type.replace(/_/g,' ')} · ${r.notes || 'No note'} · by Akshat</div>
+        </div>
+        <div class="pending-qty ${isAdd ? 'add' : 'minus'}">${isAdd ? '+' : '−'}${r.quantity}</div>
+        <div class="pending-actions">
+          <button class="p-btn p-approve" onclick="handlePending(${r.request_id},'APPROVED',${r.product_id},'${r.request_type}',${r.quantity})">✓</button>
+          <button class="p-btn p-reject"  onclick="handlePending(${r.request_id},'REJECTED',${r.product_id},'${r.request_type}',${r.quantity})">✕</button>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+function togglePendingPanel() {
+  document.getElementById('pendingPanel').classList.toggle('active');
+}
+
+async function handlePending(requestId, decision, productId, requestType, quantity) {
+  try {
+    const r1 = await fetch(`${SUPABASE_URL}/rest/v1/stock_requests?request_id=eq.${requestId}`, {
+      method: 'PATCH', headers: H,
+      body: JSON.stringify({ status: decision, approved_by: currentUser.db_id, approved_at: new Date().toISOString() })
+    });
+    if (!r1.ok) throw new Error(await r1.text());
+
+    if (decision === 'APPROVED') {
+      const product = allProducts.find(p => p.product_id === productId);
+      if (!product) throw new Error('Product not found');
+      const isAdd = requestType === 'ADJUSTMENT_IN' || requestType === 'PURCHASE_IN';
+      const newStock = isAdd ? product.current_stock + quantity : Math.max(0, product.current_stock - quantity);
+      const r2 = await fetch(`${SUPABASE_URL}/rest/v1/products?product_id=eq.${productId}`, {
+        method: 'PATCH', headers: H, body: JSON.stringify({ current_stock: newStock })
+      });
+      if (!r2.ok) throw new Error(await r2.text());
+      showToast('Approved & stock updated ✓', 'success');
+    } else {
+      showToast('Request rejected', 'error');
+    }
+    await fetchAll();
+  } catch(e) { showToast('Error: ' + e.message, 'error'); }
+}
+
+// ── TABS & FILTER ──────────────────────
+function renderTypeTabs() {
+  const types = ['ALL', ...new Set(allProducts.map(p => p.type).filter(Boolean).sort())];
+  document.getElementById('filterTabs').innerHTML = types.map(t =>
+    `<div class="tab ${t === activeType ? 'active' : ''}" onclick="setTypeFilter('${t}',this)">${t === 'ALL' ? 'All' : t}</div>`
+  ).join('');
+}
+
+function setTypeFilter(type, el) {
+  activeType = type;
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  el.classList.add('active');
+  renderProducts();
+}
+
+function scrollTabs(amount) { document.getElementById('filterTabs').scrollBy({ left: amount, behavior: 'smooth' }); }
+
+// ── RENDER PRODUCTS ────────────────────
+function renderProducts() {
+  const q = document.getElementById('searchInput').value.toLowerCase().trim();
+  let list = allProducts;
+  if (activeType !== 'ALL') list = list.filter(p => p.type === activeType);
+  if (q) list = list.filter(p =>
+    (p.product_name||'').toLowerCase().includes(q) ||
+    (p.brand||'').toLowerCase().includes(q) ||
+    (p.model||'').toLowerCase().includes(q) ||
+    (p.stock_keeping_unit||'').toLowerCase().includes(q) ||
+    (p.type||'').toLowerCase().includes(q)
+  );
+
+  // Hold quantities per product
+  const holdMap = {};
+  pendingRequests.forEach(r => {
+    const isAdd = r.request_type === 'ADJUSTMENT_IN' || r.request_type === 'PURCHASE_IN';
+    holdMap[r.product_id] = (holdMap[r.product_id] || 0) + (isAdd ? r.quantity : -r.quantity);
+  });
+
+  const el = document.getElementById('productList');
+  if (!list.length) { el.innerHTML = `<div class="empty"><div class="big">📦</div><p>No products found.</p></div>`; return; }
+
+  const isAdmin = currentUser.role === 'admin';
+  el.innerHTML = list.map(p => {
+    const stock = p.current_stock ?? 0;
+    const hold  = holdMap[p.product_id] || 0;
+    const cls   = stock === 0 ? 'zero' : stock <= (p.reorder_level || 2) ? 'low' : 'ok';
+    const holdHtml = hold !== 0 ? `<div class="hold-label">${hold > 0 ? '+' : ''}${hold} on hold</div>` : '';
+    return `
+      <div class="product-card">
+        <div class="product-type-badge">${p.type || '—'}</div>
+        <div class="product-info">
+          <div class="product-name">${p.product_name}</div>
+          <div class="product-meta">${[p.brand, p.model].filter(Boolean).join(' · ') || '—'} · ${p.unit_of_measure || 'Piece'}</div>
+          <div class="product-sku">${p.stock_keeping_unit || ''}</div>
+        </div>
+        <div class="stock-pill">
+          <div class="stock-num ${cls}">${stock}</div>
+          <div class="stock-label">Stock</div>
+          ${holdHtml}
+        </div>
+        <div class="card-actions">
+          ${isAdmin ? `<div class="icon-btn" onclick="openEditModal(${p.product_id})" title="Edit">✏️</div>` : ''}
+          <div class="icon-btn stock-adj" onclick="openStockModal(${p.product_id})" title="Adjust Stock">📦</div>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+// ── ADD / EDIT PRODUCT ─────────────────
+function openAddModal() {
+  document.getElementById('productModalTitle').textContent = 'Add Product';
+  document.getElementById('editId').value = '';
+  ['f_name','f_type','f_brand','f_model','f_sku'].forEach(id => document.getElementById(id).value = '');
+  document.getElementById('f_unit').value = 'Piece';
+  document.getElementById('f_stock').value = 0;
+  document.getElementById('f_reorder').value = 0;
+  document.getElementById('stockFieldWrap').style.display = 'block';
+  document.getElementById('stockHintLabel').style.display = currentUser.role === 'staff' ? 'inline' : 'none';
+  document.getElementById('productModal').classList.add('active');
+}
+
+function openEditModal(id) {
+  const p = allProducts.find(x => x.product_id === id);
+  if (!p) return;
+  document.getElementById('productModalTitle').textContent = 'Edit Product';
+  document.getElementById('editId').value   = id;
+  document.getElementById('f_name').value  = p.product_name || '';
+  document.getElementById('f_type').value  = p.type || '';
+  document.getElementById('f_brand').value = p.brand || '';
+  document.getElementById('f_model').value = p.model || '';
+  document.getElementById('f_sku').value   = p.stock_keeping_unit || '';
+  document.getElementById('f_unit').value  = p.unit_of_measure || 'Piece';
+  document.getElementById('f_stock').value = p.current_stock ?? 0;
+  document.getElementById('f_reorder').value = p.reorder_level ?? 0;
+  document.getElementById('stockFieldWrap').style.display = 'block';
+  document.getElementById('stockHintLabel').style.display = currentUser.role === 'staff' ? 'inline' : 'none';
+  document.getElementById('productModal').classList.add('active');
+}
+
+async function saveProduct() {
+  const name = document.getElementById('f_name').value.trim();
+  if (!name) { showToast('Product name is required', 'error'); return; }
+  const payload = {
+    product_name: name,
+    type: document.getElementById('f_type').value.trim() || null,
+    brand: document.getElementById('f_brand').value.trim() || null,
+    model: document.getElementById('f_model').value.trim() || null,
+    stock_keeping_unit: document.getElementById('f_sku').value.trim() || null,
+    unit_of_measure: document.getElementById('f_unit').value.trim() || 'Piece',
+    reorder_level: parseInt(document.getElementById('f_reorder').value) || 0,
+    active_status: true
   };
+  const stockQty = parseInt(document.getElementById('f_stock').value) || 0;
 
-  let allProducts = [];
-  let activeType = 'ALL';
-  let deleteTarget = null;
-
-  // ── FETCH ──────────────────────────────────────────────
-  async function fetchProducts() {
-    try {
-      const res = await fetch(`${SUPABASE_URL}/rest/v1/products?select=*&active_status=eq.true&order=product_name.asc`, { headers });
-      if (!res.ok) throw new Error(await res.text());
-      allProducts = await res.json();
-      renderStats();
-      renderTypeTabs();
-      buildAcData();
-      renderProducts();
-    } catch (e) {
-      document.getElementById('productList').innerHTML = `<div class="empty"><div class="big">⚠️</div><p>Could not load products.<br>${e.message}</p></div>`;
-    }
+  // Admin sets stock directly; Staff starts at 0 and stock goes to pending
+  if (currentUser.role === 'admin') {
+    payload.current_stock = stockQty;
+  } else {
+    payload.current_stock = 0; // always starts at 0 for staff
   }
 
-  // ── STATS ──────────────────────────────────────────────
-  function renderStats() {
-    const total = allProducts.length;
-    const inStock = allProducts.filter(p => p.current_stock > 0).length;
-    const zero = allProducts.filter(p => p.current_stock === 0).length;
-    document.getElementById('statTotal').textContent = total;
-    document.getElementById('statInStock').textContent = inStock;
-    document.getElementById('statZero').textContent = zero;
-    document.getElementById('totalCount').textContent = total;
-  }
+  const editId = document.getElementById('editId').value;
+  try {
+    const res = editId
+      ? await fetch(`${SUPABASE_URL}/rest/v1/products?product_id=eq.${editId}`, { method: 'PATCH', headers: H, body: JSON.stringify(payload) })
+      : await fetch(`${SUPABASE_URL}/rest/v1/products`, { method: 'POST', headers: H, body: JSON.stringify(payload) });
+    if (!res.ok) throw new Error(await res.text());
 
-  // ── TYPE TABS ──────────────────────────────────────────
-  function renderTypeTabs() {
-    const types = ['ALL', ...new Set(allProducts.map(p => p.type).filter(Boolean).sort())];
-    const tabs = document.getElementById('filterTabs');
-    tabs.innerHTML = types.map(t =>
-      `<div class="tab ${t === activeType ? 'active' : ''}" onclick="setTypeFilter('${t}', this)">${t === 'ALL' ? 'All' : t}</div>`
-    ).join('');
-
-  }
-
-  function setTypeFilter(type, el) {
-    activeType = type;
-    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-    el.classList.add('active');
-    renderProducts();
-  }
-
-  // ── RENDER ─────────────────────────────────────────────
-  function filterProducts() { renderProducts(); }
-
-  function renderProducts() {
-    const q = document.getElementById('searchInput').value.toLowerCase().trim();
-    let filtered = allProducts;
-
-    if (activeType !== 'ALL') filtered = filtered.filter(p => p.type === activeType);
-    if (q) filtered = filtered.filter(p =>
-      (p.product_name || '').toLowerCase().includes(q) ||
-      (p.brand || '').toLowerCase().includes(q) ||
-      (p.model || '').toLowerCase().includes(q) ||
-      (p.stock_keeping_unit || '').toLowerCase().includes(q) ||
-      (p.type || '').toLowerCase().includes(q)
-    );
-
-    const list = document.getElementById('productList');
-
-    if (filtered.length === 0) {
-      list.innerHTML = `<div class="empty"><div class="big">📦</div><p>No products found.</p></div>`;
-      return;
-    }
-
-    list.innerHTML = filtered.map(p => {
-      const stock = p.current_stock ?? 0;
-      const stockClass = stock === 0 ? 'zero' : stock <= (p.reorder_level || 2) ? 'low' : 'ok';
-      return `
-        <div class="product-card">
-          <div class="product-type-badge">${p.type || '—'}</div>
-          <div class="product-info">
-            <div class="product-name">${p.product_name}</div>
-            <div class="product-meta">${[p.brand, p.model].filter(Boolean).join(' · ') || '—'} · ${p.unit_of_measure || 'Piece'}</div>
-            <div class="product-sku">${p.stock_keeping_unit || ''}</div>
-          </div>
-          <div class="stock-pill">
-            <div class="stock-num ${stockClass}">${stock}</div>
-            <div class="stock-label">Stock</div>
-          </div>
-          <div class="card-actions">
-            <div class="icon-btn" onclick="openEditModal(${p.product_id})" title="Edit">✏️</div>
-            <div class="icon-btn del" onclick="askDelete(${p.product_id}, '${p.product_name.replace(/'/g, "\\'")}')` + `" title="Delete">🗑️</div>
-          </div>
-        </div>`;
-    }).join('');
-  }
-
-  // ── ADD MODAL ──────────────────────────────────────────
-  function openAddModal() {
-    document.getElementById('modalTitle').textContent = 'Add Product';
-    document.getElementById('editId').value = '';
-    document.getElementById('f_name').value = '';
-    document.getElementById('f_type').value = '';
-    document.getElementById('f_brand').value = '';
-    document.getElementById('f_model').value = '';
-    document.getElementById('f_sku').value = '';
-    document.getElementById('f_unit').value = 'Piece';
-    document.getElementById('f_stock').value = 0;
-    document.getElementById('f_reorder').value = 0;
-    document.getElementById('modalOverlay').classList.add('active');
-  }
-
-  // ── EDIT MODAL ─────────────────────────────────────────
-  function openEditModal(id) {
-    const p = allProducts.find(x => x.product_id === id);
-    if (!p) return;
-    document.getElementById('modalTitle').textContent = 'Edit Product';
-    document.getElementById('editId').value = id;
-    document.getElementById('f_name').value = p.product_name || '';
-    document.getElementById('f_type').value = p.type || '';
-    document.getElementById('f_brand').value = p.brand || '';
-    document.getElementById('f_model').value = p.model || '';
-    document.getElementById('f_sku').value = p.stock_keeping_unit || '';
-    document.getElementById('f_unit').value = p.unit_of_measure || 'Piece';
-    document.getElementById('f_stock').value = p.current_stock ?? 0;
-    document.getElementById('f_reorder').value = p.reorder_level ?? 0;
-    document.getElementById('modalOverlay').classList.add('active');
-  }
-
-  function closeModal() { document.getElementById('modalOverlay').classList.remove('active'); }
-  function closeModalOnBg(e) { if (e.target === document.getElementById('modalOverlay')) closeModal(); }
-
-  // ── AUTOCOMPLETE ───────────────────────────────────────
-  const acData = { names: [], types: [], brands: [], models: [], units: [] };
-
-  function buildAcData() {
-    acData.names  = [...new Set(allProducts.map(p => p.product_name).filter(Boolean))].sort();
-    acData.types  = [...new Set(allProducts.map(p => p.type).filter(Boolean))].sort();
-    acData.brands = [...new Set(allProducts.map(p => p.brand).filter(Boolean))].sort();
-    acData.models = [...new Set(allProducts.map(p => p.model).filter(Boolean))].sort();
-    acData.units  = [...new Set(allProducts.map(p => p.unit_of_measure).filter(Boolean))].sort();
-  }
-
-  function acShow(fieldId, dataKey) {
-    const input = document.getElementById(fieldId);
-    const list  = document.getElementById('ac_' + fieldId);
-    const q = input.value.toLowerCase().trim();
-    if (!q) { list.style.display = 'none'; return; }
-    const matches = acData[dataKey].filter(v => v.toLowerCase().includes(q)).slice(0, 8);
-    if (!matches.length) { list.style.display = 'none'; return; }
-    list.innerHTML = matches.map(v => {
-      const hi = v.replace(new RegExp(`(${q})`, 'gi'), '<mark>$1</mark>');
-      return `<div class="ac-item" onmousedown="acPick('${fieldId}','${v.replace(/'/g,"\\'")}','${dataKey}')">${hi}</div>`;
-    }).join('');
-    list.style.display = 'block';
-  }
-
-  function acPick(fieldId, value, dataKey) {
-    document.getElementById(fieldId).value = value;
-    document.getElementById('ac_' + fieldId).style.display = 'none';
-    if (fieldId === 'f_type' || fieldId === 'f_brand') generateSKU();
-  }
-
-  function acHideAll() {
-    document.querySelectorAll('.ac-list').forEach(el => el.style.display = 'none');
-  }
-
-  document.addEventListener('click', acHideAll);
-
-  // ── SKU GENERATOR ─────────────────────────────────────
-  function cleanPart(str, len) {
-    if (!str) return "";
-    return str.replace(/ /g, "").replace(/-/g, "").substring(0, len).toUpperCase();
-  }
-
-  function generateSKU() {
-    const editId = document.getElementById("editId").value;
-    if (editId) return; // dont overwrite SKU when editing
-    const type  = document.getElementById("f_type").value.trim();
-    const brand = document.getElementById("f_brand").value.trim();
-    const parentRaw = document.getElementById("f_parent_id") ? document.getElementById("f_parent_id").value.trim() : "";
-    if (!type && !brand) { document.getElementById("f_sku").value = ""; return; }
-    // Get next product_id estimate from current list
-    const maxId = allProducts.length > 0 ? Math.max(...allProducts.map(p => p.product_id)) + 1 : 1;
-    const idPart  = String(maxId).padStart(4, "0");
-    const partJ   = cleanPart(parentRaw, 3);
-    const partE   = cleanPart(type, 3);
-    const partF   = cleanPart(brand, 4);
-    document.getElementById("f_sku").value = idPart + "-" + partJ + partE + partF;
-  }
-
-  function adjustStock(delta) {
-    const inp = document.getElementById('f_stock');
-    inp.value = Math.max(0, (parseInt(inp.value) || 0) + delta);
-  }
-
-  // ── SAVE ───────────────────────────────────────────────
-  async function saveProduct() {
-    const name = document.getElementById('f_name').value.trim();
-    const type = document.getElementById('f_type').value.trim();
-    if (!name) { showToast('Product name is required', 'error'); return; }
-
-    const payload = {
-      product_name: name,
-      type: type || null,
-      brand: document.getElementById('f_brand').value.trim() || null,
-      model: document.getElementById('f_model').value.trim() || null,
-      stock_keeping_unit: document.getElementById('f_sku').value.trim() || null,
-      unit_of_measure: document.getElementById('f_unit').value.trim() || 'Piece',
-      current_stock: parseInt(document.getElementById('f_stock').value) || 0,
-      reorder_level: parseInt(document.getElementById('f_reorder').value) || 0,
-      active_status: true
-    };
-
-    const editId = document.getElementById('editId').value;
-
-    try {
-      let res;
-      if (editId) {
-        res = await fetch(`${SUPABASE_URL}/rest/v1/products?product_id=eq.${editId}`, {
-          method: 'PATCH', headers, body: JSON.stringify(payload)
-        });
-      } else {
-        res = await fetch(`${SUPABASE_URL}/rest/v1/products`, {
-          method: 'POST', headers, body: JSON.stringify(payload)
-        });
-      }
-      if (!res.ok) throw new Error(await res.text());
-      closeModal();
+    // If staff added stock > 0 on a NEW product, create a pending request
+    if (currentUser.role === 'staff' && stockQty > 0 && !editId) {
+      const newProduct = await res.json();
+      const newId = Array.isArray(newProduct) ? newProduct[0].product_id : newProduct.product_id;
+      await fetch(`${SUPABASE_URL}/rest/v1/stock_requests`, {
+        method: 'POST', headers: H,
+        body: JSON.stringify({
+          product_id: newId,
+          request_type: 'ADJUSTMENT_IN',
+          quantity: stockQty,
+          to_location_id: 2,
+          requested_by: currentUser.db_id,
+          status: 'PENDING',
+          notes: 'Initial stock on product creation'
+        })
+      });
+      closeModal('productModal');
+      showToast('Product added. Stock pending admin approval ⏳', 'info');
+    } else {
+      closeModal('productModal');
       showToast(editId ? 'Product updated ✓' : 'Product added ✓', 'success');
-      await fetchProducts();
-    } catch (e) {
-      showToast('Error: ' + e.message, 'error');
     }
-  }
+    await fetchProducts();
+  } catch(e) { showToast('Error: ' + e.message, 'error'); }
+}
 
-  // ── DELETE ─────────────────────────────────────────────
-  function askDelete(id, name) {
-    deleteTarget = id;
-    document.getElementById('confirmText').textContent = `"${name}" will be removed.`;
-    document.getElementById('confirmOverlay').classList.add('active');
-  }
+function adjustStock(delta) {
+  const inp = document.getElementById('f_stock');
+  inp.value = Math.max(0, (parseInt(inp.value) || 0) + delta);
+}
 
-  function closeConfirm() {
-    deleteTarget = null;
-    document.getElementById('confirmOverlay').classList.remove('active');
-  }
+// ── STOCK ADJUST MODAL ─────────────────
+function openStockModal(productId) {
+  const p = allProducts.find(x => x.product_id === productId);
+  if (!p) return;
+  document.getElementById('adjProductId').value    = productId;
+  document.getElementById('adjProductName').value  = p.product_name;
+  document.getElementById('adjCurrentStock').value = `${p.current_stock ?? 0} ${p.unit_of_measure || 'Piece'}`;
+  document.getElementById('adjQty').value = 1;
+  document.getElementById('adjNote').value = '';
+  setAdjType('ADD');
 
-  async function confirmDelete() {
-    if (!deleteTarget) return;
+  // Admin: direct update. Staff: goes to pending
+  if (currentUser.role === 'admin') {
+    document.getElementById('adjInfoBox').style.display = 'none';
+    document.getElementById('adjSubmitBtn').textContent = 'Update Stock';
+    document.getElementById('adjSubmitBtn').className = 'btn btn-primary';
+  } else {
+    document.getElementById('adjInfoBox').style.display = 'block';
+    document.getElementById('adjSubmitBtn').textContent = 'Submit Request';
+    document.getElementById('adjSubmitBtn').className = 'btn btn-hold';
+  }
+  document.getElementById('stockModal').classList.add('active');
+}
+
+function setAdjType(type) {
+  adjType = type;
+  document.getElementById('btnAdd').className   = type === 'ADD'   ? 'active-add'   : '';
+  document.getElementById('btnMinus').className = type === 'MINUS' ? 'active-minus' : '';
+}
+
+function adjustAdjQty(delta) {
+  const inp = document.getElementById('adjQty');
+  inp.value = Math.max(1, (parseInt(inp.value) || 1) + delta);
+}
+
+async function submitStockRequest() {
+  const productId = parseInt(document.getElementById('adjProductId').value);
+  const qty       = parseInt(document.getElementById('adjQty').value) || 0;
+  const note      = document.getElementById('adjNote').value.trim();
+  if (qty < 1)  { showToast('Quantity must be at least 1', 'error'); return; }
+  if (!note)    { showToast('Please add a reason/note', 'error'); return; }
+
+  const isAdd = adjType === 'ADD';
+  const requestType = isAdd ? 'ADJUSTMENT_IN' : 'ADJUSTMENT_OUT';
+
+  if (currentUser.role === 'admin') {
+    // Admin: update stock directly
+    const product = allProducts.find(p => p.product_id === productId);
+    const newStock = isAdd ? product.current_stock + qty : Math.max(0, product.current_stock - qty);
     try {
-      const res = await fetch(`${SUPABASE_URL}/rest/v1/products?product_id=eq.${deleteTarget}`, {
-        method: 'PATCH',
-        headers,
-        body: JSON.stringify({ active_status: false })
+      const res = await fetch(`${SUPABASE_URL}/rest/v1/products?product_id=eq.${productId}`, {
+        method: 'PATCH', headers: H, body: JSON.stringify({ current_stock: newStock })
       });
       if (!res.ok) throw new Error(await res.text());
-      closeConfirm();
-      showToast('Product removed ✓', 'success');
+      // Also log it
+      await fetch(`${SUPABASE_URL}/rest/v1/stock_requests`, {
+        method: 'POST', headers: H,
+        body: JSON.stringify({ product_id: productId, request_type: requestType, quantity: qty, to_location_id: 2, requested_by: currentUser.db_id, status: 'APPROVED', approved_by: currentUser.db_id, approved_at: new Date().toISOString(), notes: note })
+      });
+      closeModal('stockModal');
+      showToast(`Stock ${isAdd ? 'added' : 'removed'} ✓`, 'success');
+      await fetchAll();
+    } catch(e) { showToast('Error: ' + e.message, 'error'); }
+  } else {
+    // Staff: create pending request
+    try {
+      const res = await fetch(`${SUPABASE_URL}/rest/v1/stock_requests`, {
+        method: 'POST', headers: H,
+        body: JSON.stringify({ product_id: productId, request_type: requestType, quantity: qty, to_location_id: 2, requested_by: currentUser.db_id, status: 'PENDING', notes: note })
+      });
+      if (!res.ok) throw new Error(await res.text());
+      closeModal('stockModal');
+      showToast('Request sent to Admin for approval', 'info');
       await fetchProducts();
-    } catch (e) {
-      showToast('Error: ' + e.message, 'error');
-    }
+    } catch(e) { showToast('Error: ' + e.message, 'error'); }
   }
+}
 
-  // ── TOAST ──────────────────────────────────────────────
-  function showToast(msg, type = 'success') {
-    const t = document.getElementById('toast');
-    t.textContent = msg;
-    t.className = `toast ${type} show`;
-    setTimeout(() => t.classList.remove('show'), 3000);
-  }
+// ── MODAL HELPERS ──────────────────────
+function closeModal(id) { document.getElementById(id).classList.remove('active'); acHideAll(); }
+function closeModalOnBg(e, id) { if (e.target === document.getElementById(id)) closeModal(id); }
+function closeConfirm() { document.getElementById('confirmOverlay').classList.remove('active'); confirmCb = null; }
+function confirmAction() { if (confirmCb) confirmCb(); closeConfirm(); }
 
-  // ── INIT ───────────────────────────────────────────────
-  function scrollTabs(amount) {
-    document.getElementById("filterTabs").scrollBy({ left: amount, behavior: "smooth" });
-  }
+// ── AUTOCOMPLETE ───────────────────────
+const acData = { names: [], types: [], brands: [], models: [], units: [] };
 
-  fetchProducts();
+function buildAcData() {
+  acData.names  = [...new Set(allProducts.map(p => p.product_name).filter(Boolean))].sort();
+  acData.types  = [...new Set(allProducts.map(p => p.type).filter(Boolean))].sort();
+  acData.brands = [...new Set(allProducts.map(p => p.brand).filter(Boolean))].sort();
+  acData.models = [...new Set(allProducts.map(p => p.model).filter(Boolean))].sort();
+  acData.units  = [...new Set(allProducts.map(p => p.unit_of_measure).filter(Boolean))].sort();
+}
+
+function acShow(fieldId, dataKey) {
+  const input = document.getElementById(fieldId);
+  const list  = document.getElementById('ac_' + fieldId);
+  const q = input.value.toLowerCase().trim();
+  if (!q) { list.style.display = 'none'; return; }
+  const matches = acData[dataKey].filter(v => v.toLowerCase().includes(q)).slice(0, 8);
+  if (!matches.length) { list.style.display = 'none'; return; }
+  list.innerHTML = matches.map(v => {
+    const hi = v.replace(new RegExp(`(${q})`, 'gi'), '<mark>$1</mark>');
+    return `<div class="ac-item" onmousedown="acPick('${fieldId}','${v.replace(/'/g,"\\'")}','${dataKey}')">${hi}</div>`;
+  }).join('');
+  list.style.display = 'block';
+}
+
+function acPick(fieldId, value, dataKey) {
+  document.getElementById(fieldId).value = value;
+  document.getElementById('ac_' + fieldId).style.display = 'none';
+  if (fieldId === 'f_type' || fieldId === 'f_brand') generateSKU();
+}
+
+function acHideAll() { document.querySelectorAll('.ac-list').forEach(el => el.style.display = 'none'); }
+document.addEventListener('click', acHideAll);
+
+// ── SKU GENERATOR ──────────────────────
+function cleanPart(str, len) {
+  if (!str) return '';
+  return str.replace(/ /g,'').replace(/-/g,'').substring(0,len).toUpperCase();
+}
+
+function generateSKU() {
+  if (document.getElementById('editId').value) return;
+  const type  = document.getElementById('f_type').value.trim();
+  const brand = document.getElementById('f_brand').value.trim();
+  if (!type && !brand) { document.getElementById('f_sku').value = ''; return; }
+  const maxId  = allProducts.length > 0 ? Math.max(...allProducts.map(p => p.product_id)) + 1 : 1;
+  document.getElementById('f_sku').value = String(maxId).padStart(4,'0') + '-' + cleanPart(type,3) + cleanPart(brand,4);
+}
+
+// ── TOAST ──────────────────────────────
+function showToast(msg, type='success') {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = `toast ${type} show`;
+  setTimeout(() => t.classList.remove('show'), 3000);
+}
+
+checkSession();
 </script>
 </body>
 </html>
