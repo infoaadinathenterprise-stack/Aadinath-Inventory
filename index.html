@@ -827,6 +827,7 @@ async function saveProduct() {
     active_status: true
   };
   const locChoice  = document.getElementById('f_location').value;
+  if (!locChoice) { showToast('Please select a location', 'error'); return; }
   const backQty    = parseInt(document.getElementById('f_stock_back').value) || 0;
   const mainQty    = parseInt(document.getElementById('f_stock_main').value) || 0;
   const totalStock = (locChoice === '2' ? backQty : 0) + (locChoice === '1' ? mainQty : 0) + (locChoice === 'both' ? backQty + mainQty : 0);
@@ -835,13 +836,22 @@ async function saveProduct() {
 
   const editId = document.getElementById('editId').value;
   try {
+    // Always request representation so we get product back
+    const saveHeaders = { ...H, 'Prefer': 'return=representation' };
     const res = editId
-      ? await fetch(`${SUPABASE_URL}/rest/v1/products?product_id=eq.${editId}`, { method: 'PATCH', headers: H, body: JSON.stringify(payload) })
-      : await fetch(`${SUPABASE_URL}/rest/v1/products`, { method: 'POST', headers: H, body: JSON.stringify(payload) });
+      ? await fetch(`${SUPABASE_URL}/rest/v1/products?product_id=eq.${editId}`, { method: 'PATCH', headers: saveHeaders, body: JSON.stringify(payload) })
+      : await fetch(`${SUPABASE_URL}/rest/v1/products`, { method: 'POST', headers: saveHeaders, body: JSON.stringify(payload) });
     if (!res.ok) throw new Error(await res.text());
 
     const savedProduct = await res.json();
-    const productId = editId ? parseInt(editId) : (Array.isArray(savedProduct) ? savedProduct[0].product_id : savedProduct.product_id);
+    // editId: use it directly. New product: get from response
+    const productId = editId
+      ? parseInt(editId)
+      : (Array.isArray(savedProduct) && savedProduct.length > 0
+          ? savedProduct[0].product_id
+          : savedProduct.product_id);
+
+    if (!productId) throw new Error('Could not get product ID after save');
 
     if (currentUser.role === 'admin') {
       // Upsert stock_by_location for each selected location
