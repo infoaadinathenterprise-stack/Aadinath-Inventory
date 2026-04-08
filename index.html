@@ -595,6 +595,26 @@ function togglePendingPanel() {
   document.getElementById('pendingPanel').classList.toggle('active');
 }
 
+// Helper: upsert a location stock row safely
+async function upsertLocationStock(productId, locationId, newQty) {
+  // Try PATCH first (update existing row)
+  const resPatch = await fetch(
+    `${SUPABASE_URL}/rest/v1/stock_by_location?product_id=eq.${productId}&location_id=eq.${locationId}`,
+    { method: 'PATCH', headers: H, body: JSON.stringify({ quantity: newQty, updated_at: new Date().toISOString() }) }
+  );
+  if (!resPatch.ok) throw new Error(await resPatch.text());
+  // Check if any row was updated (content-range header tells us)
+  const range = resPatch.headers.get('content-range');
+  if (range && range.startsWith('0')) {
+    // No existing row — INSERT new one
+    const resPost = await fetch(`${SUPABASE_URL}/rest/v1/stock_by_location`, {
+      method: 'POST', headers: H,
+      body: JSON.stringify({ product_id: productId, location_id: locationId, quantity: newQty, updated_at: new Date().toISOString() })
+    });
+    if (!resPost.ok) throw new Error(await resPost.text());
+  }
+}
+
 async function handlePending(requestId, decision, productId, requestType, quantity) {
   try {
     const r1 = await fetch(`${SUPABASE_URL}/rest/v1/stock_requests?request_id=eq.${requestId}`, {
@@ -604,25 +624,36 @@ async function handlePending(requestId, decision, productId, requestType, quanti
     if (!r1.ok) throw new Error(await r1.text());
 
     if (decision === 'APPROVED') {
-      const isAdd = requestType === 'ADJUSTMENT_IN' || requestType === 'PURCHASE_IN';
-      // Get the location from the request
       const req = pendingRequests.find(r => r.request_id === requestId);
-      const locId = req ? (req.to_location_id || 2) : 2;
+      const toLocId   = req ? req.to_location_id   : 2;
+      const fromLocId = req ? req.from_location_id : null;
       const locs = locationStock[productId] || {};
-      const currentLocQty = locs[locId] ?? 0;
-      const newLocQty = isAdd ? currentLocQty + quantity : Math.max(0, currentLocQty - quantity);
-      // Update stock_by_location
-      const r2 = await fetch(`${SUPABASE_URL}/rest/v1/stock_by_location`, {
-        method: 'POST',
-        headers: { ...H, 'Prefer': 'resolution=merge-duplicates,return=representation' },
-        body: JSON.stringify({ product_id: productId, location_id: locId, quantity: newLocQty, updated_at: new Date().toISOString() })
-      });
-      if (!r2.ok) throw new Error(await r2.text());
-      // Log to stock_movements
-      await fetch(`${SUPABASE_URL}/rest/v1/stock_movements`, {
-        method: 'POST', headers: H,
-        body: JSON.stringify({ product_id: productId, to_location_id: isAdd ? locId : null, from_location_id: isAdd ? null : locId, quantity: quantity, movement_type: requestType, reason: req ? req.notes : '', performed_by: req ? req.requested_by : null, approved_by: currentUser.db_id, status: 'APPROVED' })
-      });
+      const isTransfer = req && req.notes === 'Moved to Main Store';
+
+      if (isTransfer || (requestType === 'ADJUSTMENT_OUT' && toLocId === 1)) {
+        // TRANSFER: minus from Back Godown (2), add to Main Store (1)
+        const backCurrent = locs[2] ?? 0;
+        const mainCurrent = locs[1] ?? 0;
+        await upsertLocationStock(productId, 2, Math.max(0, backCurrent - quantity)); // minus back
+        await upsertLocationStock(productId, 1, mainCurrent + quantity);               // add main
+        // Log movement
+        await fetch(`${SUPABASE_URL}/rest/v1/stock_movements`, {
+          method: 'POST', headers: H,
+          body: JSON.stringify({ product_id: productId, from_location_id: 2, to_location_id: 1, quantity: quantity, movement_type: 'TRANSFER', reason: req ? req.notes : 'Transfer', performed_by: req ? req.requested_by : null, approved_by: currentUser.db_id, status: 'APPROVED' })
+        });
+      } else {
+        // NORMAL ADD or REMOVE at specific location
+        const isAdd = requestType === 'ADJUSTMENT_IN' || requestType === 'PURCHASE_IN';
+        const locId = toLocId || 2;
+        const currentQty = locs[locId] ?? 0;
+        const newQty = isAdd ? currentQty + quantity : Math.max(0, currentQty - quantity);
+        await upsertLocationStock(productId, locId, newQty);
+        // Log movement
+        await fetch(`${SUPABASE_URL}/rest/v1/stock_movements`, {
+          method: 'POST', headers: H,
+          body: JSON.stringify({ product_id: productId, to_location_id: isAdd ? locId : null, from_location_id: isAdd ? null : locId, quantity: quantity, movement_type: requestType, reason: req ? req.notes : '', performed_by: req ? req.requested_by : null, approved_by: currentUser.db_id, status: 'APPROVED' })
+        });
+      }
       showToast('Approved & stock updated ✓', 'success');
     } else {
       showToast('Request rejected', 'error');
@@ -799,15 +830,11 @@ async function saveProduct() {
       if ((locChoice === '2' || locChoice === 'both') && backQty >= 0) locUpdates.push({ product_id: productId, location_id: 2, quantity: backQty, updated_at: new Date().toISOString() });
       if ((locChoice === '1' || locChoice === 'both') && mainQty >= 0) locUpdates.push({ product_id: productId, location_id: 1, quantity: mainQty, updated_at: new Date().toISOString() });
       for (const upd of locUpdates) {
-        await fetch(`${SUPABASE_URL}/rest/v1/stock_by_location`, {
-          method: 'POST',
-          headers: { ...H, 'Prefer': 'resolution=merge-duplicates,return=representation' },
-          body: JSON.stringify(upd)
-        });
+        await upsertLocationStock(upd.product_id, upd.location_id, upd.quantity);
         // Log movement
         await fetch(`${SUPABASE_URL}/rest/v1/stock_movements`, {
           method: 'POST', headers: H,
-          body: JSON.stringify({ product_id: productId, to_location_id: upd.location_id, quantity: upd.quantity, movement_type: editId ? 'ADJUSTMENT_IN' : 'ADJUSTMENT_IN', reason: editId ? 'Stock updated' : 'Initial stock', performed_by: currentUser.db_id, approved_by: currentUser.db_id, status: 'APPROVED' })
+          body: JSON.stringify({ product_id: productId, to_location_id: upd.location_id, quantity: upd.quantity, movement_type: 'ADJUSTMENT_IN', reason: editId ? 'Stock updated' : 'Initial stock', performed_by: currentUser.db_id, approved_by: currentUser.db_id, status: 'APPROVED' })
         });
       }
       closeModal('productModal');
@@ -909,12 +936,7 @@ async function submitStockRequest() {
       const locs = locationStock[productId] || {};
       const currentLocQty = locs[locationId] ?? 0;
       const newLocQty = isAdd ? currentLocQty + qty : Math.max(0, currentLocQty - qty);
-      const r1 = await fetch(`${SUPABASE_URL}/rest/v1/stock_by_location`, {
-        method: 'POST',
-        headers: { ...H, 'Prefer': 'resolution=merge-duplicates,return=representation' },
-        body: JSON.stringify({ product_id: productId, location_id: locationId, quantity: newLocQty, updated_at: new Date().toISOString() })
-      });
-      if (!r1.ok) throw new Error(await r1.text());
+      await upsertLocationStock(productId, locationId, newLocQty);
       // Log movement
       await fetch(`${SUPABASE_URL}/rest/v1/stock_movements`, {
         method: 'POST', headers: H,
