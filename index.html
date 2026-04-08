@@ -849,14 +849,13 @@ function openStockModal(productId) {
   document.getElementById('adjProductName').value  = p.product_name;
   document.getElementById('adjCurrentStock').value = stockDisplay;
 
-  // Populate location dropdown based on where product exists
+  // Always show both locations — show current qty if exists, (0) if new location
   const adjLocSel = document.getElementById('adjLocation');
-  adjLocSel.innerHTML = '<option value="">— Select location —</option>';
-  if (locs[2] !== undefined) adjLocSel.innerHTML += `<option value="2">Back Godown (${backQ})</option>`;
-  if (locs[1] !== undefined) adjLocSel.innerHTML += `<option value="1">Main Store (${mainQ})</option>`;
-  if (locs[2] === undefined && locs[1] === undefined) {
-    adjLocSel.innerHTML += '<option value="2">Back Godown</option><option value="1">Main Store</option>';
-  }
+  adjLocSel.innerHTML = `
+    <option value="">— Select location —</option>
+    <option value="2">Back Godown (${backQ})</option>
+    <option value="1">Main Store (${mainQ})</option>
+  `;
   document.getElementById('adjQty').value = 1;
   document.getElementById('adjNote').value = '';
   setAdjType('ADD');
