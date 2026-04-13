@@ -11,7 +11,7 @@
   })();
 </script>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>Aadinath Enterprise</title>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
@@ -205,12 +205,12 @@ main { padding: 14px; max-width: 900px; margin: 0 auto; padding-bottom: 76px; }
 .search-wrap .icon { position: absolute; left: 11px; top: 50%; transform: translateY(-50%); color: var(–muted); font-size: 13px; }
 
 .filter-tabs-wrapper { position: relative; margin-bottom: 12px; }
-.filter-tabs { display: flex; gap: 5px; overflow-x: auto; padding-bottom: 2px; scroll-behavior: smooth; -webkit-overflow-scrolling: touch; scrollbar-width: none; padding-left: 28px; padding-right: 28px; }
+.filter-tabs { display: flex; gap: 5px; overflow-x: auto; padding-bottom: 2px; scroll-behavior: smooth; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
 .filter-tabs::-webkit-scrollbar { display: none; }
 .tab { padding: 5px 12px; border-radius: 5px; border: 1px solid var(–border); background: var(–surface); color: var(–muted); font-size: 12px; font-weight: 500; cursor: pointer; white-space: nowrap; transition: all 0.15s; flex-shrink: 0; }
 .tab.active { background: var(–accent); color: #000; border-color: var(–accent); font-weight: 700; }
 .tab:hover:not(.active) { border-color: var(–border2); color: var(–text2); }
-.tabs-scroll-btn { position: absolute; top: 50%; transform: translateY(-60%); width: 24px; height: 24px; border-radius: 4px; border: 1px solid var(–border); background: var(–surface); color: var(–muted); font-size: 12px; display: flex; align-items: center; justify-content: center; cursor: pointer; z-index: 10; }
+.tabs-scroll-btn { display: none; }
 .tabs-scroll-btn.left { left: 0; }
 .tabs-scroll-btn.right { right: 0; }
 
