@@ -4,196 +4,321 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Aadinath Enterprise — Inventory</title>
-<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<title>Aadinath Enterprise</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
-  :root {
-    --bg: #0f0f0f; --surface: #1a1a1a; --surface2: #242424;
-    --border: #2e2e2e; --accent: #f5a623; --text: #f0f0f0;
-    --muted: #888; --danger: #e84040; --success: #3ecf6a;
-    --hold: #7c6af5; --radius: 12px;
-  }
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: 'DM Sans', sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; font-size: 14px; }
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap');
 
-/* LOGIN */
+:root {
+–bg: #0d0f12;
+–surface: #13161b;
+–surface2: #1a1e25;
+–surface3: #21262f;
+–border: #252b35;
+–border2: #2e3540;
+–accent: #4ade80;
+–accent-dim: #16a34a;
+–accent-glow: rgba(74,222,128,0.15);
+–text: #e8edf2;
+–text2: #a8b3c0;
+–muted: #5a6678;
+–danger: #f87171;
+–danger-dim: rgba(248,113,113,0.12);
+–success: #4ade80;
+–success-dim: rgba(74,222,128,0.12);
+–warn: #fbbf24;
+–warn-dim: rgba(251,191,36,0.12);
+–blue: #60a5fa;
+–blue-dim: rgba(96,165,250,0.12);
+–purple: #a78bfa;
+–purple-dim: rgba(167,139,250,0.12);
+–back-tag: #fbbf24;
+–main-tag: #4ade80;
+–radius: 10px;
+–radius-lg: 16px;
+–shadow: 0 1px 3px rgba(0,0,0,0.4);
+}
+
+/* ─── LIGHT THEME ───────────────────────── */
+[data-theme=“light”] {
+–bg: #f5f6f8;
+–surface: #ffffff;
+–surface2: #f0f2f5;
+–surface3: #e8ebf0;
+–border: #e2e5eb;
+–border2: #cdd1da;
+–accent: #16a34a;
+–accent-dim: #15803d;
+–accent-glow: rgba(22,163,74,0.12);
+–text: #111827;
+–text2: #374151;
+–muted: #9ca3af;
+–danger: #dc2626;
+–danger-dim: rgba(220,38,38,0.08);
+–success: #16a34a;
+–success-dim: rgba(22,163,74,0.08);
+–warn: #d97706;
+–warn-dim: rgba(217,119,6,0.08);
+–blue: #2563eb;
+–blue-dim: rgba(37,99,235,0.08);
+–purple: #7c3aed;
+–purple-dim: rgba(124,58,237,0.08);
+–shadow: 0 1px 3px rgba(0,0,0,0.08), 0 2px 8px rgba(0,0,0,0.04);
+}
+
+- { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: ‘DM Sans’, sans-serif; background: var(–bg); color: var(–text); min-height: 100vh; font-size: 14px; -webkit-font-smoothing: antialiased; }
+
+/* ─── LOGIN ─────────────────────────────── */
 #loginScreen { display: none; position: fixed; inset: 0; background: var(–bg); z-index: 9999; align-items: center; justify-content: center; padding: 24px; }
 #loginScreen.active { display: flex; }
-.login-box { width: 100%; max-width: 340px; }
-.login-logo { font-family: ‘Bebas Neue’, sans-serif; font-size: 40px; letter-spacing: 3px; color: var(–accent); text-align: center; line-height: 1; margin-bottom: 4px; }
-.login-sub { text-align: center; font-size: 11px; letter-spacing: 3px; color: var(–muted); text-transform: uppercase; margin-bottom: 40px; }
-.login-field { margin-bottom: 14px; }
-.login-field label { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(–muted); margin-bottom: 6px; }
-.login-field input { width: 100%; background: var(–surface); border: 1px solid var(–border); border-radius: 10px; color: var(–text); padding: 13px 16px; font-family: ‘DM Sans’, sans-serif; font-size: 15px; outline: none; transition: border-color 0.2s; }
-.login-field input:focus { border-color: var(–accent); }
-.login-btn { width: 100%; padding: 14px; background: var(–accent); color: #000; border: none; border-radius: 10px; font-family: ‘DM Sans’, sans-serif; font-size: 15px; font-weight: 700; cursor: pointer; margin-top: 8px; transition: opacity 0.2s; }
-.login-btn:hover { opacity: 0.88; }
-.login-error { color: var(–danger); font-size: 13px; text-align: center; margin-top: 12px; min-height: 20px; }
+.login-box { width: 100%; max-width: 360px; }
+.login-logo {
+font-family: ‘DM Sans’, sans-serif;
+font-size: 13px; font-weight: 600;
+color: var(–muted);
+text-align: center;
+letter-spacing: 4px;
+text-transform: uppercase;
+margin-bottom: 40px;
+display: flex; align-items: center; justify-content: center; gap: 10px;
+}
+.login-logo::before, .login-logo::after {
+content: ‘’; height: 1px; width: 40px; background: var(–border2);
+}
+.login-title { font-size: 28px; font-weight: 700; color: var(–text); text-align: center; margin-bottom: 4px; letter-spacing: -0.5px; }
+.login-sub { text-align: center; font-size: 13px; color: var(–muted); margin-bottom: 32px; }
+.login-card { background: var(–surface); border: 1px solid var(–border2); border-radius: var(–radius-lg); padding: 24px; }
+.login-section-label { font-size: 11px; font-weight: 600; color: var(–muted); letter-spacing: 1px; text-transform: uppercase; margin-bottom: 10px; }
 
-/* APP */
+.account-cards { display: flex; flex-direction: column; gap: 8px; margin-bottom: 20px; }
+.account-card { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: var(–radius); border: 1px solid var(–border); background: var(–surface2); cursor: pointer; transition: all 0.15s; }
+.account-card:hover { border-color: var(–border2); background: var(–surface3); }
+.account-card.selected { border-color: var(–accent); background: var(–surface2); box-shadow: 0 0 0 1px var(–accent-dim); }
+.account-avatar { width: 38px; height: 38px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 16px; flex-shrink: 0; font-weight: 700; }
+.account-avatar.admin { background: var(–blue-dim); color: var(–blue); border: 1px solid rgba(96,165,250,0.2); }
+.account-avatar.staff { background: var(–success-dim); color: var(–accent); border: 1px solid rgba(74,222,128,0.2); }
+.account-name { font-weight: 600; font-size: 14px; color: var(–text); }
+.account-role { font-size: 11px; color: var(–muted); margin-top: 1px; }
+.account-check { margin-left: auto; color: var(–accent); font-size: 14px; opacity: 0; transition: opacity 0.15s; }
+.account-card.selected .account-check { opacity: 1; }
+.unlocked-badge { margin-left: auto; background: var(–success-dim); color: var(–accent); font-size: 10px; font-weight: 600; padding: 2px 7px; border-radius: 4px; letter-spacing: 0.3px; border: 1px solid rgba(74,222,128,0.2); }
+
+.login-divider { height: 1px; background: var(–border); margin: 16px 0; }
+.login-field { margin-bottom: 12px; }
+.login-field label { display: block; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 1px; color: var(–muted); margin-bottom: 6px; }
+.login-field input { width: 100%; background: var(–surface2); border: 1px solid var(–border2); border-radius: var(–radius); color: var(–text); padding: 11px 14px; font-family: ‘DM Sans’, sans-serif; font-size: 14px; outline: none; transition: border-color 0.15s; }
+.login-field input:focus { border-color: var(–accent); }
+.login-btn { width: 100%; padding: 12px; background: var(–accent); color: #000; border: none; border-radius: var(–radius); font-family: ‘DM Sans’, sans-serif; font-size: 14px; font-weight: 700; cursor: pointer; margin-top: 4px; transition: opacity 0.15s; letter-spacing: 0.2px; }
+.login-btn:hover { opacity: 0.88; }
+.login-btn.teal { background: var(–accent); }
+.login-error { color: var(–danger); font-size: 12px; text-align: center; margin-top: 8px; min-height: 16px; font-weight: 500; }
+
+/* Switch overlay */
+#switchAccountOverlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 9998; align-items: flex-end; justify-content: center; backdrop-filter: blur(4px); }
+#switchAccountOverlay.active { display: flex; }
+.switch-panel { background: var(–surface); border: 1px solid var(–border2); border-radius: 20px 20px 0 0; width: 100%; max-width: 480px; padding: 16px 20px 36px; }
+.switch-handle { width: 32px; height: 3px; background: var(–border2); border-radius: 2px; margin: 0 auto 18px; }
+.switch-title { font-size: 17px; font-weight: 700; color: var(–text); margin-bottom: 4px; }
+.switch-sub { font-size: 12px; color: var(–muted); margin-bottom: 14px; }
+.switch-account-card { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: var(–radius); border: 1px solid var(–border); background: var(–surface2); cursor: pointer; transition: all 0.15s; margin-bottom: 8px; }
+.switch-account-card:hover { border-color: var(–border2); background: var(–surface3); }
+.switch-account-card.active-user { border-color: var(–accent); }
+.switch-pass-wrap { margin-top: 12px; background: var(–surface2); border-radius: var(–radius); padding: 14px; border: 1px solid var(–border); }
+
+/* ─── APP ──────────────────────────────── */
 #appContent { display: none; }
 #appContent.active { display: block; }
 
-/* HEADER */
-header { background: var(–surface); border-bottom: 1px solid var(–border); padding: 12px 16px; display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; z-index: 100; gap: 8px; flex-wrap: wrap; }
-.logo { font-family: ‘Bebas Neue’, sans-serif; font-size: 20px; letter-spacing: 2px; color: var(–accent); line-height: 1; flex-shrink: 0; }
-.logo span { display: block; font-family: ‘DM Sans’, sans-serif; font-size: 9px; letter-spacing: 2px; color: var(–muted); text-transform: uppercase; font-weight: 400; }
-.header-right { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
-.user-pill { background: var(–surface2); border: 1px solid var(–border); border-radius: 20px; padding: 4px 10px; font-size: 11px; color: var(–muted); }
-.user-pill b { color: var(–accent); }
-#pendingBadgeBtn { display: none; background: var(–hold); color: #fff; border: none; border-radius: 8px; padding: 6px 12px; font-size: 12px; font-family: ‘DM Sans’, sans-serif; font-weight: 600; cursor: pointer; }
-.logout-btn { background: var(–surface2); border: 1px solid var(–border); border-radius: 8px; color: var(–muted); padding: 6px 10px; font-size: 12px; font-family: ‘DM Sans’, sans-serif; cursor: pointer; }
-.logout-btn:hover { color: var(–danger); border-color: var(–danger); }
+/* ─── HEADER ───────────────────────────── */
+header { background: var(–surface); border-bottom: 1px solid var(–border); padding: 10px 16px; display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; z-index: 100; gap: 8px; }
+.logo { font-size: 15px; font-weight: 700; color: var(–text); flex-shrink: 0; letter-spacing: -0.3px; }
+.logo span { display: block; font-size: 9px; letter-spacing: 2px; color: var(–muted); font-weight: 400; text-transform: uppercase; margin-top: 1px; }
+.header-right { display: flex; align-items: center; gap: 6px; }
+.user-pill { background: var(–surface2); border: 1px solid var(–border); border-radius: 6px; padding: 5px 10px; font-size: 12px; color: var(–text2); font-weight: 600; cursor: pointer; transition: all 0.15s; white-space: nowrap; }
+.user-pill:hover { border-color: var(–accent); color: var(–accent); }
+#pendingBadgeBtn { display: none; background: var(–warn-dim); color: var(–warn); border: 1px solid rgba(251,191,36,0.2); border-radius: 6px; padding: 5px 10px; font-size: 12px; font-family: ‘DM Sans’, sans-serif; font-weight: 600; cursor: pointer; }
+.header-add-btn { background: var(–accent); color: #000; border: none; border-radius: 6px; padding: 6px 12px; font-size: 13px; font-family: ‘DM Sans’, sans-serif; font-weight: 700; cursor: pointer; transition: opacity 0.15s; }
+.header-add-btn:hover { opacity: 0.85; }
+.logout-btn { background: transparent; border: 1px solid var(–border); border-radius: 6px; color: var(–muted); padding: 5px 10px; font-size: 12px; font-family: ‘DM Sans’, sans-serif; cursor: pointer; transition: all 0.15s; }
+.logout-btn:hover { border-color: var(–danger); color: var(–danger); }
+.theme-toggle-btn { background: var(–surface2); border: 1px solid var(–border); border-radius: 6px; color: var(–text2); padding: 5px 8px; font-size: 15px; cursor: pointer; transition: all 0.15s; line-height: 1; }
+.theme-toggle-btn:hover { border-color: var(–border2); }
 
-/* MAIN */
-main { padding: 16px; max-width: 900px; margin: 0 auto; }
+/* ─── BOTTOM NAV ────────────────────────── */
+.bottom-nav { position: fixed; bottom: 0; left: 0; right: 0; background: var(–surface); border-top: 1px solid var(–border); display: flex; z-index: 100; }
+.nav-item { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 9px 0 11px; font-size: 10px; font-weight: 600; color: var(–muted); cursor: pointer; gap: 3px; transition: color 0.15s; text-transform: uppercase; letter-spacing: 0.5px; }
+.nav-item span:first-child { font-size: 18px; }
+.nav-item.active { color: var(–accent); }
 
-/* STATS */
-.stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 16px; }
-.stat-card { background: var(–surface); border: 1px solid var(–border); border-radius: var(–radius); padding: 14px; text-align: center; }
-.stat-card .num { font-family: ‘Bebas Neue’, sans-serif; font-size: 28px; color: var(–accent); line-height: 1; }
-.stat-card .label { font-size: 11px; color: var(–muted); margin-top: 4px; text-transform: uppercase; letter-spacing: 1px; }
+/* ─── MAIN ──────────────────────────────── */
+main { padding: 14px; max-width: 900px; margin: 0 auto; padding-bottom: 76px; }
+.page { display: none; }
+.page.active { display: block; }
 
-/* PENDING PANEL */
-#pendingPanel { display: none; background: var(–surface); border: 1px solid var(–hold); border-radius: var(–radius); margin-bottom: 16px; overflow: hidden; }
+/* ─── STATS ─────────────────────────────── */
+.stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 14px; }
+.stat-card { background: var(–surface); border: 1px solid var(–border); border-radius: var(–radius); padding: 14px 10px; text-align: center; }
+.stat-card .num { font-size: 28px; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; }
+.stat-card:nth-child(1) .num { color: var(–blue); }
+.stat-card:nth-child(2) .num { color: var(–accent); }
+.stat-card:nth-child(3) .num { color: var(–danger); }
+.stat-card .label { font-size: 10px; font-weight: 600; color: var(–muted); margin-top: 4px; text-transform: uppercase; letter-spacing: 0.5px; }
+
+/* ─── PENDING PANEL ─────────────────────── */
+#pendingPanel { display: none; background: var(–surface); border: 1px solid rgba(251,191,36,0.25); border-radius: var(–radius); margin-bottom: 12px; overflow: hidden; }
 #pendingPanel.active { display: block; }
-.pending-header { background: rgba(124,106,245,0.15); padding: 12px 16px; display: flex; align-items: center; justify-content: space-between; }
-.pending-header h3 { font-size: 13px; font-weight: 600; color: var(–hold); text-transform: uppercase; letter-spacing: 1px; }
+.pending-header { background: var(–warn-dim); border-bottom: 1px solid rgba(251,191,36,0.15); padding: 10px 14px; display: flex; align-items: center; justify-content: space-between; }
+.pending-header h3 { font-size: 12px; font-weight: 700; color: var(–warn); text-transform: uppercase; letter-spacing: 1px; }
 .pending-list { padding: 8px; display: flex; flex-direction: column; gap: 6px; }
-.pending-item { background: var(–surface2); border-radius: 10px; padding: 14px; display: flex; flex-direction: column; gap: 0; border-left: 3px solid var(–hold); }
-.pending-info { flex: 1; min-width: 0; }
-.pending-name { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.pending-meta { font-size: 11px; color: var(–muted); margin-top: 3px; }
-.pending-qty { font-family: ‘Bebas Neue’, sans-serif; font-size: 22px; flex-shrink: 0; }
-.pending-qty.add { color: var(–success); }
+.pending-item { background: var(–surface2); border-radius: var(–radius); padding: 12px; border-left: 2px solid var(–warn); }
+.pending-name { font-size: 13px; font-weight: 700; margin-bottom: 6px; color: var(–text); }
+.pending-row-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.pending-qty { font-size: 26px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.pending-qty.add { color: var(–accent); }
 .pending-qty.minus { color: var(–danger); }
-.pending-actions { display: flex; gap: 6px; flex-shrink: 0; }
-.p-btn { padding: 8px 14px; border-radius: 8px; border: none; font-size: 12px; font-weight: 700; cursor: pointer; font-family: ‘DM Sans’, sans-serif; white-space: nowrap; }
-.p-approve { background: var(–success); color: #000; }
-.p-reject  { background: var(–danger);  color: #fff; }
+.pending-actions { display: flex; gap: 6px; }
+.pending-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 3px 10px; font-size: 11px; color: var(–muted); margin-bottom: 8px; }
+.pending-grid b { color: var(–text2); }
+.p-btn { padding: 7px 14px; border-radius: 6px; border: none; font-size: 12px; font-weight: 700; cursor: pointer; font-family: ‘DM Sans’, sans-serif; }
+.p-approve { background: var(–success-dim); color: var(–accent); border: 1px solid rgba(74,222,128,0.25); }
+.p-approve:hover { background: var(–accent); color: #000; }
+.p-reject  { background: var(–danger-dim);  color: var(–danger); border: 1px solid rgba(248,113,113,0.25); }
+.p-reject:hover { background: var(–danger); color: #fff; }
 
-/* CONTROLS */
-.controls { display: flex; gap: 10px; margin-bottom: 14px; }
+/* ─── SEARCH & TABS ─────────────────────── */
+.controls { display: flex; gap: 8px; margin-bottom: 10px; }
 .search-wrap { flex: 1; position: relative; }
-.search-wrap input { width: 100%; background: var(–surface); border: 1px solid var(–border); border-radius: var(–radius); color: var(–text); padding: 10px 14px 10px 36px; font-family: ‘DM Sans’, sans-serif; font-size: 14px; outline: none; transition: border-color 0.2s; }
-.search-wrap input:focus { border-color: var(–accent); }
-.search-wrap .icon { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: var(–muted); }
+.search-wrap input { width: 100%; background: var(–surface); border: 1px solid var(–border); border-radius: var(–radius); color: var(–text); padding: 9px 12px 9px 34px; font-family: ‘DM Sans’, sans-serif; font-size: 13px; outline: none; transition: border-color 0.15s; }
+.search-wrap input:focus { border-color: var(–border2); }
+.search-wrap input::placeholder { color: var(–muted); }
+.search-wrap .icon { position: absolute; left: 11px; top: 50%; transform: translateY(-50%); color: var(–muted); font-size: 13px; }
 
-/* TABS */
-.filter-tabs-wrapper { position: relative; margin-bottom: 14px; }
-.filter-tabs { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 4px; scroll-behavior: smooth; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+.filter-tabs-wrapper { position: relative; margin-bottom: 12px; }
+.filter-tabs { display: flex; gap: 5px; overflow-x: auto; padding-bottom: 2px; scroll-behavior: smooth; -webkit-overflow-scrolling: touch; scrollbar-width: none; padding-left: 28px; padding-right: 28px; }
 .filter-tabs::-webkit-scrollbar { display: none; }
-.tab { padding: 6px 14px; border-radius: 20px; border: 1px solid var(–border); background: var(–surface); color: var(–muted); font-size: 12px; cursor: pointer; white-space: nowrap; transition: all 0.2s; font-family: ‘DM Sans’, sans-serif; flex-shrink: 0; }
-.tab.active { background: var(–accent); color: #000; border-color: var(–accent); font-weight: 600; }
-.tabs-scroll-btn { position: absolute; top: 50%; transform: translateY(-60%); width: 28px; height: 28px; border-radius: 50%; border: 1px solid var(–border); background: var(–surface2); color: var(–text); font-size: 14px; display: flex; align-items: center; justify-content: center; cursor: pointer; z-index: 10; box-shadow: 0 2px 8px rgba(0,0,0,0.4); }
+.tab { padding: 5px 12px; border-radius: 5px; border: 1px solid var(–border); background: var(–surface); color: var(–muted); font-size: 12px; font-weight: 500; cursor: pointer; white-space: nowrap; transition: all 0.15s; flex-shrink: 0; }
+.tab.active { background: var(–accent); color: #000; border-color: var(–accent); font-weight: 700; }
+.tab:hover:not(.active) { border-color: var(–border2); color: var(–text2); }
+.tabs-scroll-btn { position: absolute; top: 50%; transform: translateY(-60%); width: 24px; height: 24px; border-radius: 4px; border: 1px solid var(–border); background: var(–surface); color: var(–muted); font-size: 12px; display: flex; align-items: center; justify-content: center; cursor: pointer; z-index: 10; }
 .tabs-scroll-btn.left { left: 0; }
 .tabs-scroll-btn.right { right: 0; }
 
-/* PRODUCT CARDS */
-.product-list { display: flex; flex-direction: column; gap: 8px; }
-.product-card { background: var(–surface); border: 1px solid var(–border); border-radius: var(–radius); padding: 14px; display: flex; align-items: center; gap: 12px; transition: border-color 0.2s; }
-.product-card:hover { border-color: #444; }
-.product-type-badge { background: var(–surface2); border-radius: 8px; padding: 6px 8px; font-size: 10px; color: var(–muted); text-transform: uppercase; letter-spacing: 0.5px; white-space: nowrap; min-width: 64px; text-align: center; line-height: 1.3; flex-shrink: 0; }
+/* ─── PRODUCT CARDS ─────────────────────── */
+.product-list { display: flex; flex-direction: column; gap: 6px; }
+.product-card { background: var(–surface); border: 1px solid var(–border); border-radius: var(–radius); padding: 12px 14px; display: flex; align-items: center; gap: 10px; transition: border-color 0.15s; }
+.product-card:hover { border-color: var(–border2); }
+.product-type-badge { background: var(–surface2); border: 1px solid var(–border); border-radius: 5px; padding: 4px 7px; font-size: 9px; font-weight: 700; color: var(–muted); text-transform: uppercase; letter-spacing: 0.5px; white-space: nowrap; min-width: 56px; text-align: center; line-height: 1.4; flex-shrink: 0; }
 .product-info { flex: 1; min-width: 0; }
-.product-name { font-weight: 600; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.product-meta { font-size: 11px; color: var(–muted); margin-top: 3px; }
-.product-sku { font-size: 11px; color: var(–accent); margin-top: 2px; font-weight: 500; }
-.stock-pill { display: flex; flex-direction: column; align-items: center; min-width: 56px; flex-shrink: 0; }
-.stock-num { font-family: ‘Bebas Neue’, sans-serif; font-size: 24px; line-height: 1; }
+.product-name { font-weight: 600; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(–text); }
+.product-meta { font-size: 11px; color: var(–muted); margin-top: 2px; }
+.product-sku { font-family: ‘DM Mono’, monospace; font-size: 10px; color: var(–accent-dim); margin-top: 2px; }
+.product-locs { display: flex; gap: 5px; margin-top: 5px; flex-wrap: wrap; }
+.loc-tag { font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 4px; font-family: ‘DM Mono’, monospace; }
+.loc-tag.back { background: var(–warn-dim); color: var(–warn); border: 1px solid rgba(251,191,36,0.2); }
+.loc-tag.main { background: var(–success-dim); color: var(–accent); border: 1px solid rgba(74,222,128,0.2); }
+.loc-tag.hold { background: var(–purple-dim); color: var(–purple); border: 1px solid rgba(167,139,250,0.2); }
+.stock-pill { display: flex; flex-direction: column; align-items: center; min-width: 46px; flex-shrink: 0; }
+.stock-num { font-size: 24px; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; }
 .stock-num.zero { color: var(–danger); }
-.stock-num.low  { color: var(–accent); }
-.stock-num.ok   { color: var(–success); }
-.stock-label { font-size: 9px; color: var(–muted); text-transform: uppercase; letter-spacing: 1px; }
-.hold-label { font-size: 10px; color: var(–hold); font-weight: 600; margin-top: 2px; }
-.card-actions { display: flex; flex-direction: column; gap: 6px; flex-shrink: 0; }
-.icon-btn { background: var(–surface2); border: 1px solid var(–border); border-radius: 8px; color: var(–text); width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 14px; transition: background 0.2s; }
-.icon-btn:hover { background: #333; }
-.icon-btn.stock-adj { background: rgba(124,106,245,0.15); border-color: var(–hold); }
+.stock-num.low  { color: var(–warn); }
+.stock-num.ok   { color: var(–accent); }
+.stock-label { font-size: 8px; font-weight: 700; color: var(–muted); text-transform: uppercase; letter-spacing: 0.5px; margin-top: 1px; }
+.card-actions { display: flex; flex-direction: column; gap: 5px; flex-shrink: 0; }
+.icon-btn { background: var(–surface2); border: 1px solid var(–border); border-radius: 6px; color: var(–muted); width: 30px; height: 30px; display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 13px; transition: all 0.15s; }
+.icon-btn:hover { border-color: var(–accent); color: var(–accent); background: var(–accent-glow); }
+.icon-btn.stock-adj:hover { border-color: var(–purple); color: var(–purple); background: var(–purple-dim); }
 
-/* BUTTONS */
-.btn { padding: 10px 18px; border-radius: var(–radius); border: none; font-family: ‘DM Sans’, sans-serif; font-size: 13px; font-weight: 600; cursor: pointer; transition: opacity 0.2s, transform 0.1s; white-space: nowrap; }
-.btn:active { transform: scale(0.97); }
+/* ─── BUTTONS ───────────────────────────── */
+.btn { padding: 9px 16px; border-radius: var(–radius); border: none; font-family: ‘DM Sans’, sans-serif; font-size: 13px; font-weight: 600; cursor: pointer; transition: opacity 0.15s; white-space: nowrap; }
+.btn:active { opacity: 0.8; }
 .btn-primary { background: var(–accent); color: #000; }
-.btn-primary:hover { opacity: 0.88; }
-.btn-ghost { background: var(–surface2); color: var(–text); border: 1px solid var(–border); }
-.btn-hold { background: var(–hold); color: #fff; }
-.btn-danger { background: var(–danger); color: #fff; }
+.btn-primary:hover { opacity: 0.85; }
+.btn-ghost { background: var(–surface2); color: var(–text2); border: 1px solid var(–border); }
+.btn-hold { background: var(–purple-dim); color: var(–purple); border: 1px solid rgba(167,139,250,0.25); }
+.btn-danger { background: var(–danger-dim); color: var(–danger); border: 1px solid rgba(248,113,113,0.25); }
 
-/* MODAL */
+/* ─── MODAL ─────────────────────────────── */
 .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 200; align-items: flex-end; justify-content: center; backdrop-filter: blur(4px); }
 .modal-overlay.active { display: flex; }
-.modal { background: var(–surface); border: 1px solid var(–border); border-radius: 20px 20px 0 0; width: 100%; max-width: 600px; max-height: 92vh; overflow-y: auto; padding: 20px 20px 36px; animation: slideUp 0.3s ease; }
+.modal { background: var(–surface); border: 1px solid var(–border); border-radius: 18px 18px 0 0; width: 100%; max-width: 600px; max-height: 92vh; overflow-y: auto; padding: 18px 18px 36px; animation: slideUp 0.25s ease; }
 @keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
-.modal-handle { width: 40px; height: 4px; background: var(–border); border-radius: 2px; margin: 0 auto 18px; }
-.modal h2 { font-family: ‘Bebas Neue’, sans-serif; font-size: 22px; letter-spacing: 1px; color: var(–accent); margin-bottom: 18px; }
-.form-group { margin-bottom: 13px; }
-.form-group label { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(–muted); margin-bottom: 5px; font-weight: 500; }
-.form-group input, .form-group select, .form-group textarea { width: 100%; background: var(–surface2); border: 1px solid var(–border); border-radius: 10px; color: var(–text); padding: 11px 14px; font-family: ‘DM Sans’, sans-serif; font-size: 14px; outline: none; transition: border-color 0.2s; }
-.form-group input:focus, .form-group select:focus, .form-group textarea:focus { border-color: var(–accent); }
-.form-group textarea { resize: vertical; min-height: 70px; }
-.form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-.modal-actions { display: flex; gap: 10px; margin-top: 18px; }
-.modal-actions .btn { flex: 1; padding: 13px; font-size: 14px; }
+.modal-handle { width: 32px; height: 3px; background: var(–border2); border-radius: 2px; margin: 0 auto 16px; }
+.modal h2 { font-size: 18px; font-weight: 700; color: var(–text); margin-bottom: 16px; letter-spacing: -0.3px; }
+.form-group { margin-bottom: 12px; }
+.form-group label { display: block; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: var(–muted); margin-bottom: 5px; }
+.form-group input, .form-group select, .form-group textarea { width: 100%; background: var(–surface2); border: 1px solid var(–border); border-radius: var(–radius); color: var(–text); padding: 10px 12px; font-family: ‘DM Sans’, sans-serif; font-size: 13px; outline: none; transition: border-color 0.15s; }
+.form-group input:focus, .form-group select:focus, .form-group textarea:focus { border-color: var(–border2); }
+.form-group select option { background: var(–surface2); }
+.form-group textarea { resize: vertical; min-height: 64px; }
+.form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.modal-actions { display: flex; gap: 8px; margin-top: 16px; }
+.modal-actions .btn { flex: 1; padding: 12px; font-size: 14px; }
 
-/* STOCK ADJUST */
-.stock-adjust { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
-.adj-btn { width: 38px; height: 38px; border-radius: 8px; border: 1px solid var(–border); background: var(–surface2); color: var(–text); font-size: 20px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-weight: 600; flex-shrink: 0; }
-.adj-btn:hover { background: #333; }
-.adj-input { flex: 1; text-align: center; background: var(–surface2); border: 1px solid var(–border); border-radius: 8px; color: var(–text); padding: 8px; font-size: 18px; font-family: ‘DM Sans’, sans-serif; outline: none; }
+/* ─── STOCK ADJUST ──────────────────────── */
+.stock-adjust { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+.adj-btn { width: 36px; height: 36px; border-radius: var(–radius); border: 1px solid var(–border); background: var(–surface2); color: var(–text); font-size: 18px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-weight: 600; flex-shrink: 0; transition: all 0.15s; }
+.adj-btn:hover { border-color: var(–accent); color: var(–accent); }
+.adj-input { flex: 1; text-align: center; background: var(–surface2); border: 1px solid var(–border); border-radius: var(–radius); color: var(–text); padding: 8px; font-size: 18px; font-family: ‘DM Sans’, sans-serif; font-weight: 700; outline: none; font-variant-numeric: tabular-nums; }
+.type-toggle { display: flex; gap: 6px; margin-bottom: 12px; }
+.type-toggle button { flex: 1; padding: 9px; border-radius: var(–radius); border: 1px solid var(–border); background: var(–surface2); color: var(–muted); font-family: ‘DM Sans’, sans-serif; font-size: 13px; font-weight: 600; cursor: pointer; transition: all 0.15s; }
+.type-toggle button.active-add { border-color: rgba(74,222,128,0.4); color: var(–accent); background: var(–success-dim); }
+.type-toggle button.active-minus { border-color: rgba(248,113,113,0.4); color: var(–danger); background: var(–danger-dim); }
 
-/* TYPE TOGGLE */
-.type-toggle { display: flex; gap: 8px; margin-bottom: 14px; }
-.type-toggle button { flex: 1; padding: 10px; border-radius: 10px; border: 2px solid var(–border); background: var(–surface2); color: var(–muted); font-family: ‘DM Sans’, sans-serif; font-size: 14px; font-weight: 600; cursor: pointer; transition: all 0.2s; }
-.type-toggle button.active-add { border-color: var(–success); color: var(–success); background: rgba(62,207,106,0.1); }
-.type-toggle button.active-minus { border-color: var(–danger); color: var(–danger); background: rgba(232,64,64,0.1); }
+/* ─── INFO BOX ──────────────────────────── */
+.info-box { background: var(–purple-dim); border: 1px solid rgba(167,139,250,0.2); border-radius: var(–radius); padding: 9px 12px; font-size: 12px; color: var(–purple); margin-bottom: 12px; font-weight: 500; }
 
-/* AUTOCOMPLETE */
+/* ─── AUTOCOMPLETE ──────────────────────── */
 .ac-wrap { position: relative; }
-.ac-list { position: absolute; top: calc(100% + 4px); left: 0; right: 0; background: #1e1e1e; border: 1px solid var(–accent); border-radius: 10px; z-index: 500; max-height: 180px; overflow-y: auto; box-shadow: 0 8px 24px rgba(0,0,0,0.5); }
-.ac-item { padding: 10px 14px; font-size: 13px; cursor: pointer; border-bottom: 1px solid var(–border); transition: background 0.15s; }
+.ac-list { position: absolute; top: calc(100% + 3px); left: 0; right: 0; background: var(–surface); border: 1px solid var(–border2); border-radius: var(–radius); z-index: 500; max-height: 180px; overflow-y: auto; box-shadow: 0 8px 24px rgba(0,0,0,0.4); }
+.ac-item { padding: 9px 12px; font-size: 13px; cursor: pointer; border-bottom: 1px solid var(–border); transition: background 0.1s; color: var(–text2); }
 .ac-item:last-child { border-bottom: none; }
-.ac-item:hover { background: var(–surface2); }
+.ac-item:hover { background: var(–surface2); color: var(–text); }
 .ac-item mark { background: transparent; color: var(–accent); font-weight: 700; }
 
-/* CONFIRM */
-.confirm-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.8); z-index: 300; align-items: center; justify-content: center; padding: 20px; }
+/* ─── HISTORY ───────────────────────────── */
+.history-filter { display: flex; gap: 5px; margin-bottom: 12px; overflow-x: auto; scrollbar-width: none; }
+.history-filter::-webkit-scrollbar { display: none; }
+.movement-list { display: flex; flex-direction: column; gap: 6px; }
+.movement-card { background: var(–surface); border: 1px solid var(–border); border-radius: var(–radius); padding: 12px; display: flex; align-items: center; gap: 10px; }
+.mv-icon { width: 36px; height: 36px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 16px; flex-shrink: 0; }
+.mv-info { flex: 1; min-width: 0; }
+.mv-name { font-weight: 600; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mv-meta { font-size: 11px; color: var(–muted); margin-top: 2px; }
+.mv-date { font-family: ‘DM Mono’, monospace; font-size: 10px; color: var(–muted); margin-top: 3px; }
+.mv-qty { font-size: 20px; font-weight: 700; flex-shrink: 0; font-variant-numeric: tabular-nums; }
+
+/* ─── ORDERS ────────────────────────────── */
+.orders-empty { text-align: center; padding: 60px 24px; }
+.orders-empty .big { font-size: 48px; margin-bottom: 14px; }
+.orders-empty h2 { font-size: 20px; font-weight: 700; color: var(–text); margin-bottom: 8px; }
+.orders-empty p { font-size: 13px; color: var(–muted); line-height: 1.7; }
+
+/* ─── CONFIRM ───────────────────────────── */
+.confirm-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 300; align-items: center; justify-content: center; padding: 20px; backdrop-filter: blur(4px); }
 .confirm-overlay.active { display: flex; }
-.confirm-box { background: var(–surface); border: 1px solid var(–border); border-radius: var(–radius); padding: 24px; max-width: 320px; width: 100%; text-align: center; }
-.confirm-box .icon { font-size: 36px; margin-bottom: 12px; }
-.confirm-box h3 { font-size: 16px; font-weight: 600; margin-bottom: 8px; }
-.confirm-box p { font-size: 13px; color: var(–muted); margin-bottom: 20px; }
-.confirm-actions { display: flex; gap: 10px; }
+.confirm-box { background: var(–surface); border: 1px solid var(–border2); border-radius: var(–radius-lg); padding: 24px; max-width: 300px; width: 100%; text-align: center; }
+.confirm-box .icon { font-size: 32px; margin-bottom: 10px; }
+.confirm-box h3 { font-size: 15px; font-weight: 700; margin-bottom: 6px; }
+.confirm-box p { font-size: 12px; color: var(–muted); margin-bottom: 18px; line-height: 1.5; }
+.confirm-actions { display: flex; gap: 8px; }
 .confirm-actions .btn { flex: 1; }
 
-/* TOAST */
-.toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%) translateY(80px); background: var(–surface2); border: 1px solid var(–border); border-radius: 30px; padding: 12px 24px; font-size: 13px; font-weight: 500; z-index: 999; transition: transform 0.3s ease; white-space: nowrap; }
+/* ─── TOAST ─────────────────────────────── */
+.toast { position: fixed; bottom: 76px; left: 50%; transform: translateX(-50%) translateY(80px); background: var(–surface3); border: 1px solid var(–border2); color: var(–text); border-radius: 8px; padding: 10px 20px; font-size: 13px; font-weight: 600; z-index: 999; transition: transform 0.25s ease; white-space: nowrap; box-shadow: 0 4px 20px rgba(0,0,0,0.4); }
 .toast.show { transform: translateX(-50%) translateY(0); }
-.toast.success { border-color: var(–success); color: var(–success); }
-.toast.error   { border-color: var(–danger);  color: var(–danger); }
-.toast.info    { border-color: var(–hold);    color: var(–hold); }
+.toast.success { background: var(–success-dim); border-color: rgba(74,222,128,0.3); color: var(–accent); }
+.toast.error   { background: var(–danger-dim);  border-color: rgba(248,113,113,0.3); color: var(–danger); }
+.toast.info    { background: var(–purple-dim);  border-color: rgba(167,139,250,0.3); color: var(–purple); }
 
-/* MISC */
+/* ─── MISC ──────────────────────────────── */
 .empty { text-align: center; padding: 60px 20px; color: var(–muted); }
-.empty .big { font-size: 40px; margin-bottom: 10px; }
-.loader { display: flex; align-items: center; justify-content: center; padding: 60px; color: var(–muted); gap: 10px; }
-.spinner { width: 20px; height: 20px; border: 2px solid var(–border); border-top-color: var(–accent); border-radius: 50%; animation: spin 0.7s linear infinite; }
+.empty .big { font-size: 36px; margin-bottom: 8px; }
+.empty p { font-size: 13px; }
+.loader { display: flex; align-items: center; justify-content: center; padding: 60px; color: var(–muted); gap: 8px; }
+.spinner { width: 18px; height: 18px; border: 2px solid var(–border); border-top-color: var(–accent); border-radius: 50%; animation: spin 0.7s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
-.info-box { background: rgba(124,106,245,0.1); border: 1px solid var(–hold); border-radius: 10px; padding: 10px 14px; font-size: 12px; color: var(–hold); margin-bottom: 14px; }
-
-/* BOTTOM NAV */
-.bottom-nav { position: fixed; bottom: 0; left: 0; right: 0; background: var(–surface); border-top: 1px solid var(–border); display: flex; z-index: 100; }
-.nav-item { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 10px 0 12px; font-size: 11px; color: var(–muted); cursor: pointer; gap: 3px; transition: color 0.2s; }
-.nav-item span:first-child { font-size: 20px; }
-.nav-item.active { color: var(–accent); }
-main { padding-bottom: 80px; }
-
-/* PAGES */
-.page { display: none; }
-.page.active { display: block; }
-.orders-empty { text-align: center; padding: 80px 24px; }
-.orders-empty .big { font-size: 60px; margin-bottom: 16px; }
-.orders-empty h2 { font-family: ‘Bebas Neue’, sans-serif; font-size: 28px; letter-spacing: 2px; color: var(–accent); margin-bottom: 8px; }
-.orders-empty p { font-size: 14px; color: var(–muted); line-height: 1.6; }
+.section-title { font-size: 14px; font-weight: 700; color: var(–text); margin-bottom: 12px; letter-spacing: -0.2px; }
 </style>
 
 </head>
@@ -203,18 +328,77 @@ main { padding-bottom: 80px; }
 
 <div id="loginScreen" class="active">
   <div class="login-box">
-    <div class="login-logo">Aadinath</div>
-    <div class="login-sub">Enterprise · Inventory</div>
-    <div class="login-field">
-      <label>Username</label>
-      <input type="text" id="loginUser" placeholder="admin / akshat" autocomplete="off">
+    <div class="login-title">Aadinath Enterprise</div>
+    <div class="login-sub">Inventory Management System</div>
+    <div class="login-card">
+      <div class="login-card-title">Select Account</div>
+      <div class="account-cards">
+        <div class="account-card selected" id="accAdmin" onclick="selectAccount('admin')">
+          <div class="account-avatar admin">👑</div>
+          <div style="flex:1">
+            <div class="account-name">Anjan</div>
+            <div class="account-role">Admin · Full Access</div>
+          </div>
+          <span class="unlocked-badge" id="adminUnlockBadge" style="display:none">✓ Saved</span>
+          <div class="account-check" id="adminCheck">✓</div>
+        </div>
+        <div class="account-card" id="accAkshat" onclick="selectAccount('akshat')">
+          <div class="account-avatar staff">👤</div>
+          <div style="flex:1">
+            <div class="account-name">Akshat</div>
+            <div class="account-role">Staff · Limited Access</div>
+          </div>
+          <span class="unlocked-badge" id="akshatUnlockBadge" style="display:none">✓ Saved</span>
+          <div class="account-check" id="akshatCheck" style="opacity:0">✓</div>
+        </div>
+      </div>
+      <div id="passwordWrap">
+        <div class="login-field">
+          <label>Password</label>
+          <input type="password" id="loginPass" placeholder="Enter password" onkeydown="if(event.key==='Enter')doLogin()">
+        </div>
+        <button class="login-btn" onclick="doLogin()">Login</button>
+      </div>
+      <button class="login-btn" id="quickLoginBtn" style="display:none;background:linear-gradient(135deg,#26a69a,#00897b);" onclick="quickLogin()">Continue as <span id="quickLoginName"></span> →</button>
+      <div class="login-error" id="loginError"></div>
     </div>
-    <div class="login-field">
-      <label>Password</label>
-      <input type="password" id="loginPass" placeholder="Enter password" onkeydown="if(event.key==='Enter')doLogin()">
+  </div>
+</div>
+
+<!-- SWITCH ACCOUNT OVERLAY -->
+
+<div id="switchAccountOverlay" onclick="closeSwitchOverlay(event)">
+  <div class="switch-panel">
+    <div class="switch-handle"></div>
+    <div class="switch-title">Switch Account</div>
+    <p style="font-size:12px;color:var(--muted);margin-bottom:14px;">Tap to switch — no password needed</p>
+    <div class="switch-account-card" id="swAdmin" onclick="instantSwitch('admin')">
+      <div class="account-avatar admin">👑</div>
+      <div style="flex:1">
+        <div class="account-name">Anjan</div>
+        <div class="account-role">Admin · Full Access</div>
+      </div>
+      <div id="swAdminCheck" style="color:var(--accent);font-size:18px;opacity:0;">✓ Active</div>
     </div>
-    <button class="login-btn" onclick="doLogin()">Login</button>
-    <div class="login-error" id="loginError"></div>
+    <div class="switch-account-card" id="swAkshat" onclick="instantSwitch('akshat')">
+      <div class="account-avatar staff">👤</div>
+      <div style="flex:1">
+        <div class="account-name">Akshat</div>
+        <div class="account-role">Staff · Limited Access</div>
+      </div>
+      <div id="swAkshatCheck" style="color:var(--accent);font-size:18px;opacity:0;">✓ Active</div>
+    </div>
+    <div id="switchNeedLoginWrap" style="display:none;margin-top:14px;">
+      <div style="background:var(--surface2);border-radius:14px;padding:14px;border:1px solid var(--border);">
+        <p style="font-size:12px;color:var(--muted);margin-bottom:10px;">First time — enter password for <b id="switchNeedLoginName" style="color:var(--text)"></b></p>
+        <input type="password" id="switchPass" placeholder="Enter password" onkeydown="if(event.key==='Enter')confirmSwitchLogin()" style="width:100%;background:var(--bg);border:2px solid var(--border);border-radius:10px;color:var(--text);padding:11px 14px;font-family:'Inter',sans-serif;font-size:14px;outline:none;margin-bottom:10px;">
+        <div style="display:flex;gap:8px;">
+          <button class="btn btn-ghost" onclick="cancelSwitchLogin()" style="flex:1;padding:10px;font-size:13px;">Cancel</button>
+          <button class="btn btn-primary" onclick="confirmSwitchLogin()" style="flex:1;padding:10px;font-size:13px;">Login & Switch</button>
+        </div>
+        <div class="login-error" id="switchError"></div>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -225,64 +409,88 @@ main { padding-bottom: 80px; }
 <header>
   <div class="logo">Aadinath<span>Enterprise · Inventory</span></div>
   <div class="header-right">
-    <div class="user-pill" id="userPill">—</div>
+    <div class="user-pill" id="userPill" onclick="openSwitchOverlay()" title="Switch account">—</div>
     <button id="pendingBadgeBtn" onclick="togglePendingPanel()">⏳ <span id="pendingCount">0</span> Pending</button>
-    <button class="btn btn-primary" onclick="openAddModal()">+ Add</button>
+    <button class="header-add-btn" onclick="openAddModal()">+ Add</button>
+    <button class="theme-toggle-btn" id="themeToggleBtn" onclick="toggleTheme()" title="Toggle light/dark mode">🌙</button>
     <button class="logout-btn" onclick="doLogout()">Logout</button>
   </div>
 </header>
-
-<!-- BOTTOM NAV -->
 
 <nav class="bottom-nav">
   <div class="nav-item active" id="navInventory" onclick="switchTab('inventory')">
     <span>📦</span><span>Inventory</span>
   </div>
+  <div class="nav-item" id="navHistory" onclick="switchTab('history')">
+    <span>📋</span><span>History</span>
+  </div>
   <div class="nav-item" id="navOrders" onclick="switchTab('orders')">
-    <span>🛒</span><span>Stock Orders</span>
+    <span>🛒</span><span>Orders</span>
   </div>
 </nav>
 
 <main>
+
   <!-- INVENTORY PAGE -->
+
   <div class="page active" id="pageInventory">
-  <div class="stats">
-    <div class="stat-card"><div class="num" id="statTotal">—</div><div class="label">Products</div></div>
-    <div class="stat-card"><div class="num" id="statInStock">—</div><div class="label">In Stock</div></div>
-    <div class="stat-card"><div class="num" id="statZero">—</div><div class="label">Out of Stock</div></div>
-  </div>
 
-  <!-- Pending Panel (admin only) -->
+```
+<div class="stats">
+  <div class="stat-card"><div class="num" id="statTotal">—</div><div class="label">Products</div></div>
+  <div class="stat-card"><div class="num" id="statInStock">—</div><div class="label">In Stock</div></div>
+  <div class="stat-card"><div class="num" id="statZero">—</div><div class="label">Out of Stock</div></div>
+</div>
 
-  <div id="pendingPanel">
-    <div class="pending-header">
-      <h3>⏳ Pending Stock Requests</h3>
-      <span style="font-size:12px;color:var(--muted)">Approve or reject</span>
-    </div>
-    <div class="pending-list" id="pendingList"></div>
+<!-- Pending Panel (admin only) -->
+<div id="pendingPanel">
+  <div class="pending-header">
+    <h3>⏳ Pending Requests</h3>
+    <span style="font-size:12px;color:rgba(255,255,255,0.7)">Approve or reject</span>
   </div>
+  <div class="pending-list" id="pendingList"></div>
+</div>
 
-  <div class="controls">
-    <div class="search-wrap">
-      <span class="icon">🔍</span>
-      <input type="text" id="searchInput" placeholder="Search products..." oninput="renderProducts()">
-    </div>
+<div class="controls">
+  <div class="search-wrap">
+    <span class="icon">🔍</span>
+    <input type="text" id="searchInput" placeholder="Search products..." oninput="renderProducts()">
   </div>
+</div>
 
-  <div class="filter-tabs-wrapper">
-    <div class="tabs-scroll-btn left" onclick="scrollTabs(-150)">&#8249;</div>
-    <div class="filter-tabs" id="filterTabs">
-      <div class="tab active" onclick="setTypeFilter('ALL',this)">All</div>
-    </div>
-    <div class="tabs-scroll-btn right" onclick="scrollTabs(150)">&#8250;</div>
+<div class="filter-tabs-wrapper">
+  <div class="tabs-scroll-btn left" onclick="scrollTabs(-150)">&#8249;</div>
+  <div class="filter-tabs" id="filterTabs">
+    <div class="tab active" onclick="setTypeFilter('ALL',this)">All</div>
   </div>
+  <div class="tabs-scroll-btn right" onclick="scrollTabs(150)">&#8250;</div>
+</div>
 
-  <div id="productList" class="product-list">
-    <div class="loader"><div class="spinner"></div> Loading inventory...</div>
-  </div>
+<div id="productList" class="product-list">
+  <div class="loader"><div class="spinner"></div> Loading inventory...</div>
+</div>
+```
+
   </div><!-- end pageInventory -->
 
-  <!-- STOCK ORDERS PAGE -->
+  <!-- HISTORY PAGE -->
+
+  <div class="page" id="pageHistory">
+    <div class="section-title">Stock Movement History</div>
+    <div class="history-filter" id="historyFilter">
+      <div class="tab active" onclick="filterMovements('ALL',this)">All</div>
+      <div class="tab" onclick="filterMovements('TRANSFER',this)">Transfers</div>
+      <div class="tab" onclick="filterMovements('ADJUSTMENT_IN',this)">Stock In</div>
+      <div class="tab" onclick="filterMovements('ADJUSTMENT_OUT',this)">Stock Out</div>
+      <div class="tab" onclick="filterMovements('PURCHASE_IN',this)">Purchases</div>
+      <div class="tab" onclick="filterMovements('DAMAGED',this)">Damaged</div>
+    </div>
+    <div class="movement-list" id="movementList">
+      <div class="loader"><div class="spinner"></div> Loading history...</div>
+    </div>
+  </div>
+
+  <!-- ORDERS PAGE -->
 
   <div class="page" id="pageOrders">
     <div class="orders-empty">
@@ -295,7 +503,7 @@ main { padding-bottom: 80px; }
 </main>
 </div>
 
-<!-- PRODUCT MODAL (Add / Edit) -->
+<!-- ADD / EDIT PRODUCT MODAL -->
 
 <div class="modal-overlay" id="productModal" onclick="closeModalOnBg(event,'productModal')">
   <div class="modal">
@@ -337,7 +545,7 @@ main { padding-bottom: 80px; }
     <div class="form-row">
       <div class="form-group">
         <label>SKU <span style="color:var(--accent);font-size:10px;">(auto-generated)</span></label>
-        <input type="text" id="f_sku" placeholder="Auto from type & brand" readonly style="opacity:0.6;cursor:not-allowed;">
+        <input type="text" id="f_sku" placeholder="Auto from type & brand" readonly style="opacity:0.5;cursor:not-allowed;">
       </div>
       <div class="form-group">
         <label>Unit of Measure</label>
@@ -348,7 +556,7 @@ main { padding-bottom: 80px; }
       </div>
     </div>
     <div class="form-group" id="stockFieldWrap">
-      <label>Location *</label>
+      <label>Location * <span id="stockHintLabel" style="color:var(--hold);font-size:10px;display:none;">⏳ stock needs approval</span></label>
       <select id="f_location" onchange="toggleLocationFields()">
         <option value="">— Select location —</option>
         <option value="2">Back Godown only</option>
@@ -357,7 +565,7 @@ main { padding-bottom: 80px; }
       </select>
     </div>
     <div id="stockBackWrap" style="display:none;" class="form-group">
-      <label>Back Godown Stock <span id="stockHintLabel" style="color:var(--hold);font-size:10px;display:none;">⏳ needs approval</span></label>
+      <label>Back Godown Stock</label>
       <div class="stock-adjust">
         <button class="adj-btn" onclick="adjustStockField('f_stock_back',-1)">−</button>
         <input type="number" id="f_stock_back" class="adj-input" value="0" min="0">
@@ -392,7 +600,7 @@ main { padding-bottom: 80px; }
     <input type="hidden" id="adjProductId">
     <div class="form-group">
       <label>Product</label>
-      <input type="text" id="adjProductName" readonly style="opacity:0.7;">
+      <input type="text" id="adjProductName" readonly style="opacity:0.7;font-weight:700;">
     </div>
     <div class="form-group">
       <label>Current Stock</label>
@@ -452,6 +660,7 @@ main { padding-bottom: 80px; }
 <div class="toast" id="toast"></div>
 
 <script>
+
 const SUPABASE_URL = 'https://mculftdutoavwueluyma.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1jdWxmdGR1dG9hdnd1ZWx1eW1hIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ0Mjk2NzAsImV4cCI6MjA5MDAwNTY3MH0.s-OLgLDXR5aN3uQlS5yAO2sk6Bot0TibtI4qFjrzZh4';
 const H = { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}`, 'Content-Type': 'application/json', 'Prefer': 'return=representation' };
@@ -465,23 +674,71 @@ let currentUser = null, allProducts = [], locationStock = {}, pendingRequests = 
 // locationStock: { productId: { 1: qty, 2: qty } }
 
 // ── AUTH ───────────────────────────────
+let selectedLoginAccount = 'admin';
+
+function selectAccount(u) {
+  selectedLoginAccount = u;
+  document.getElementById('accAdmin').classList.toggle('selected', u === 'admin');
+  document.getElementById('accAkshat').classList.toggle('selected', u === 'akshat');
+  document.getElementById('adminCheck').style.opacity = u === 'admin' ? '1' : '0';
+  document.getElementById('akshatCheck').style.opacity = u === 'akshat' ? '1' : '0';
+
+  // Check if already saved — show quick login button
+  const saved = localStorage.getItem('ae_pass_' + u);
+  if (saved) {
+    document.getElementById('passwordWrap').style.display = 'none';
+    document.getElementById('quickLoginBtn').style.display = 'block';
+    document.getElementById('quickLoginName').textContent = USERS[u].name;
+  } else {
+    document.getElementById('passwordWrap').style.display = 'block';
+    document.getElementById('quickLoginBtn').style.display = 'none';
+  }
+  document.getElementById('loginError').textContent = '';
+}
+
+function quickLogin() {
+  const u = selectedLoginAccount;
+  localStorage.setItem('ae_user', u);
+  currentUser = { username: u, ...USERS[u] };
+  showApp();
+}
+
 function checkSession() {
-  const u = sessionStorage.getItem('ae_user');
-  if (u && USERS[u]) { currentUser = { username: u, ...USERS[u] }; showApp(); }
-  else document.getElementById('loginScreen').classList.add('active');
+  // Mark saved accounts with badges
+  ['admin','akshat'].forEach(u => {
+    const saved = localStorage.getItem('ae_pass_' + u);
+    const badgeId = u === 'admin' ? 'adminUnlockBadge' : 'akshatUnlockBadge';
+    const badge = document.getElementById(badgeId);
+    if (badge) badge.style.display = saved ? 'inline-block' : 'none';
+  });
+
+  const u = localStorage.getItem('ae_user');
+  if (u && USERS[u]) {
+    currentUser = { username: u, ...USERS[u] };
+    showApp();
+  } else {
+    document.getElementById('loginScreen').classList.add('active');
+    // Auto-select first saved account
+    const saved = ['admin','akshat'].find(x => localStorage.getItem('ae_pass_' + x));
+    if (saved) selectAccount(saved);
+    else selectAccount('admin');
+  }
 }
 
 function doLogin() {
-  const u = document.getElementById('loginUser').value.trim().toLowerCase();
+  const u = selectedLoginAccount;
   const p = document.getElementById('loginPass').value;
   const err = document.getElementById('loginError');
   if (USERS[u] && USERS[u].password === p) {
-    sessionStorage.setItem('ae_user', u);
+    // Save password hash for future no-password switching
+    localStorage.setItem('ae_pass_' + u, btoa(p));
+    localStorage.setItem('ae_user', u);
     currentUser = { username: u, ...USERS[u] };
     err.textContent = '';
+    document.getElementById('loginPass').value = '';
     showApp();
   } else {
-    err.textContent = 'Invalid username or password.';
+    err.textContent = 'Wrong password. Try again.';
     document.getElementById('loginPass').value = '';
   }
 }
@@ -489,25 +746,114 @@ function doLogin() {
 function showApp() {
   document.getElementById('loginScreen').classList.remove('active');
   document.getElementById('appContent').classList.add('active');
-  document.getElementById('userPill').innerHTML = `<b>${currentUser.name}</b> · ${currentUser.role}`;
-  if (currentUser.role === 'admin') document.getElementById('pendingBadgeBtn').style.display = 'inline-flex';
+  const icon = currentUser.role === 'admin' ? '👑' : '👤';
+  document.getElementById('userPill').innerHTML = `${icon} ${currentUser.name} ⇄`;
+  document.getElementById('pendingBadgeBtn').style.display = currentUser.role === 'admin' ? 'inline-flex' : 'none';
   fetchAll();
 }
 
 function doLogout() {
-  sessionStorage.removeItem('ae_user');
+  // Clear all saved sessions
+  localStorage.removeItem('ae_user');
+  localStorage.removeItem('ae_pass_admin');
+  localStorage.removeItem('ae_pass_akshat');
   currentUser = null;
   document.getElementById('appContent').classList.remove('active');
   document.getElementById('loginScreen').classList.add('active');
-  ['loginUser','loginPass'].forEach(id => document.getElementById(id).value = '');
+  document.getElementById('loginPass').value = '';
   document.getElementById('loginError').textContent = '';
+  // Reset badges
+  document.getElementById('adminUnlockBadge').style.display = 'none';
+  document.getElementById('akshatUnlockBadge').style.display = 'none';
+  selectAccount('admin');
 }
+
+// ── SWITCH ACCOUNT ──────────────────────
+let switchNeedLoginTarget = null;
+
+
+let switchTarget = null;
+
+function openSwitchOverlay() {
+  const overlay = document.getElementById('switchAccountOverlay');
+  overlay.classList.add('active');
+  document.getElementById('swAdmin').classList.toggle('active-user', currentUser.username === 'admin');
+  document.getElementById('swAkshat').classList.toggle('active-user', currentUser.username === 'akshat');
+  document.getElementById('swAdminCheck').style.opacity = currentUser.username === 'admin' ? '1' : '0';
+  document.getElementById('swAkshatCheck').style.opacity = currentUser.username === 'akshat' ? '1' : '0';
+  document.getElementById('switchNeedLoginWrap').style.display = 'none';
+  switchNeedLoginTarget = null;
+}
+
+function closeSwitchOverlay(e) {
+  if (e.target === document.getElementById('switchAccountOverlay')) {
+    document.getElementById('switchAccountOverlay').classList.remove('active');
+  }
+}
+
+function instantSwitch(u) {
+  if (u === currentUser.username) {
+    document.getElementById('switchAccountOverlay').classList.remove('active');
+    return;
+  }
+  const saved = localStorage.getItem('ae_pass_' + u);
+  if (saved) {
+    // Already logged in before — switch instantly, no password
+    localStorage.setItem('ae_user', u);
+    currentUser = { username: u, ...USERS[u] };
+    document.getElementById('switchAccountOverlay').classList.remove('active');
+    const icon = currentUser.role === 'admin' ? '👑' : '👤';
+    document.getElementById('userPill').innerHTML = `${icon} ${currentUser.name} ⇄`;
+    document.getElementById('pendingBadgeBtn').style.display = currentUser.role === 'admin' ? 'inline-flex' : 'none';
+    showToast(`Switched to ${currentUser.name} ✓`, 'success');
+    fetchAll();
+  } else {
+    // First time — need password
+    switchNeedLoginTarget = u;
+    document.getElementById('switchNeedLoginName').textContent = USERS[u].name;
+    document.getElementById('switchNeedLoginWrap').style.display = 'block';
+    document.getElementById('switchPass').value = '';
+    document.getElementById('switchError').textContent = '';
+    document.getElementById('switchPass').focus();
+  }
+}
+
+function cancelSwitchLogin() {
+  switchNeedLoginTarget = null;
+  document.getElementById('switchNeedLoginWrap').style.display = 'none';
+}
+
+function confirmSwitchLogin() {
+  if (!switchNeedLoginTarget) return;
+  const p = document.getElementById('switchPass').value;
+  const err = document.getElementById('switchError');
+  if (USERS[switchNeedLoginTarget] && USERS[switchNeedLoginTarget].password === p) {
+    // Save for future
+    localStorage.setItem('ae_pass_' + switchNeedLoginTarget, btoa(p));
+    localStorage.setItem('ae_user', switchNeedLoginTarget);
+    currentUser = { username: switchNeedLoginTarget, ...USERS[switchNeedLoginTarget] };
+    document.getElementById('switchAccountOverlay').classList.remove('active');
+    const icon = currentUser.role === 'admin' ? '👑' : '👤';
+    document.getElementById('userPill').innerHTML = `${icon} ${currentUser.name} ⇄`;
+    document.getElementById('pendingBadgeBtn').style.display = currentUser.role === 'admin' ? 'inline-flex' : 'none';
+    showToast(`Switched to ${currentUser.name} ✓`, 'success');
+    fetchAll();
+  } else {
+    err.textContent = 'Wrong password.';
+    document.getElementById('switchPass').value = '';
+  }
+}
+
+// Legacy stubs (kept for compatibility)
+function quickSwitch(u) { instantSwitch(u); }
+function cancelSwitch() { cancelSwitchLogin(); }
+function confirmSwitch() { confirmSwitchLogin(); }
 
 // ── FETCH ──────────────────────────────
 async function fetchAll() {
   await fetchProducts();
   await fetchLocationStock();
-  if (currentUser.role === 'admin') await fetchPending();
+  if (currentUser.role === 'admin') { await fetchPending(); await fetchMovements(); }
 }
 
 async function fetchLocationStock() {
@@ -730,15 +1076,11 @@ function renderProducts() {
     const hold    = holdMap[p.product_id] || 0;
     const cls     = total === 0 ? 'zero' : total <= (p.reorder_level || 2) ? 'low' : 'ok';
 
-    let locHtml = '';
-    if (backQty !== null && mainQty !== null) {
-      locHtml = `<div style="font-size:10px;color:var(--muted);margin-top:2px;">Back: <b style="color:var(--text)">${backQty}</b> · Main: <b style="color:var(--text)">${mainQty}</b></div>`;
-    } else if (backQty !== null) {
-      locHtml = `<div style="font-size:10px;color:var(--muted);margin-top:2px;">Back: <b style="color:var(--text)">${backQty}</b></div>`;
-    } else if (mainQty !== null) {
-      locHtml = `<div style="font-size:10px;color:var(--muted);margin-top:2px;">Main: <b style="color:var(--text)">${mainQty}</b></div>`;
-    }
-    const holdHtml = hold !== 0 ? `<div class="hold-label">${hold > 0 ? '+' : ''}${hold} hold</div>` : '';
+
+    let locTagsHtml = '';
+    if (backQty !== null) locTagsHtml += `<span class="loc-tag back">Back: ${backQty}</span>`;
+    if (mainQty !== null) locTagsHtml += `<span class="loc-tag main">Main: ${mainQty}</span>`;
+    if (hold !== 0) locTagsHtml += `<span class="loc-tag hold">${hold > 0 ? '+' : ''}${hold} hold</span>`;
 
     return `
       <div class="product-card">
@@ -747,12 +1089,11 @@ function renderProducts() {
           <div class="product-name">${p.product_name}</div>
           <div class="product-meta">${[p.brand, p.model].filter(Boolean).join(' · ') || '—'} · ${p.unit_of_measure || 'Piece'}</div>
           <div class="product-sku">${p.stock_keeping_unit || ''}</div>
-          ${locHtml}
+          <div class="product-locs">${locTagsHtml}</div>
         </div>
         <div class="stock-pill">
           <div class="stock-num ${cls}">${total}</div>
           <div class="stock-label">Total</div>
-          ${holdHtml}
         </div>
         <div class="card-actions">
           ${isAdmin ? `<div class="icon-btn" onclick="openEditModal(${p.product_id})" title="Edit">✏️</div>` : ''}
@@ -958,11 +1299,30 @@ async function submitStockRequest() {
 
   const isAdd = adjType === 'ADD';
   const requestType = isAdd ? 'ADJUSTMENT_IN' : 'ADJUSTMENT_OUT';
+  const locs = locationStock[productId] || {};
+
+  // ── STOCK VALIDATION ──────────────────
+  if (note === 'Moved to Main Store') {
+    const available = locs[2] ?? 0;
+    if (qty > available) {
+      showToast(`Only ${available} available in Back Godown`, 'error'); return;
+    }
+  } else if (note === 'Moved from Main Store') {
+    const available = locs[1] ?? 0;
+    if (qty > available) {
+      showToast(`Only ${available} available in Main Store`, 'error'); return;
+    }
+  } else if (!isAdd) {
+    // Normal removal — check selected location
+    const available = locs[locationId] ?? 0;
+    const locName = locationId === 2 ? 'Back Godown' : 'Main Store';
+    if (qty > available) {
+      showToast(`Only ${available} available in ${locName}`, 'error'); return;
+    }
+  }
 
   if (currentUser.role === 'admin') {
     try {
-      const locs = locationStock[productId] || {};
-
       // Handle transfer: "Moved to Main Store" or "Moved from Main Store"
       if (note === 'Moved to Main Store') {
         // Back (2) → Main (1)
@@ -1085,10 +1445,124 @@ function switchTab(tab) {
   } else if (tab === 'orders') {
     document.getElementById('pageOrders').classList.add('active');
     document.getElementById('navOrders').classList.add('active');
+  } else if (tab === 'history') {
+    document.getElementById('pageHistory').classList.add('active');
+    document.getElementById('navHistory').classList.add('active');
+    fetchMovements();
   }
 }
 
+// ── THEME ──────────────────────────────
+function initTheme() {
+  const saved = localStorage.getItem('ae_theme') || 'dark';
+  applyTheme(saved);
+}
+
+function applyTheme(theme) {
+  document.documentElement.setAttribute('data-theme', theme);
+  localStorage.setItem('ae_theme', theme);
+  const btn = document.getElementById('themeToggleBtn');
+  if (btn) btn.textContent = theme === 'dark' ? '🌙' : '☀️';
+}
+
+function toggleTheme() {
+  const current = localStorage.getItem('ae_theme') || 'dark';
+  applyTheme(current === 'dark' ? 'light' : 'dark');
+}
+
+initTheme();
 checkSession();
+
+// fetchMovements and renderMovements defined below
+
+// ── FILTER MOVEMENTS ───────────────────
+let activeMovementFilter = 'ALL';
+let allMovements = [];
+
+function filterMovements(type, el) {
+  activeMovementFilter = type;
+  document.querySelectorAll('#historyFilter .tab').forEach(t => t.classList.remove('active'));
+  el.classList.add('active');
+  renderMovements();
+}
+
+async function fetchMovements() {
+  try {
+    const res = await fetch(
+      SUPABASE_URL + '/rest/v1/stock_movements?select=*&order=movement_at.desc&limit=200',
+      { headers: H }
+    );
+    if (!res.ok) throw new Error(await res.text());
+    allMovements = await res.json();
+    renderMovements();
+  } catch(e) { console.error('Movements error:', e); }
+}
+
+function renderMovements() {
+  const el = document.getElementById('movementList');
+  if (!el) return;
+
+  let data = allMovements;
+  if (activeMovementFilter !== 'ALL') {
+    data = data.filter(m => m.movement_type === activeMovementFilter);
+  }
+
+  if (!data.length) {
+    el.innerHTML = `<div class="empty"><div class="big">📋</div><p>No movements found.</p></div>`;
+    return;
+  }
+
+  const typeColors = {
+    'TRANSFER': '#5b4fcf',
+    'ADJUSTMENT_IN': '#1a7a3c',
+    'ADJUSTMENT_OUT': '#d93025',
+    'PURCHASE_IN': '#1a7a3c',
+    'SALE': '#c8410a',
+    'DAMAGED': '#d93025',
+    'RETURN_IN': '#1a7a3c'
+  };
+
+  const typeIcons = {
+    'TRANSFER': '🔄',
+    'ADJUSTMENT_IN': '➕',
+    'ADJUSTMENT_OUT': '➖',
+    'PURCHASE_IN': '📥',
+    'SALE': '💰',
+    'DAMAGED': '💔',
+    'RETURN_IN': '↩️'
+  };
+
+  const locName = id => id === 2 ? 'Back Godown' : id === 1 ? 'Main Store' : '—';
+
+  el.innerHTML = data.map(m => {
+    const product = allProducts.find(p => p.product_id === m.product_id);
+    const pName  = product ? product.product_name : `Product #${m.product_id}`;
+    const pBrand = product ? (product.brand || '') : '';
+    const color  = typeColors[m.movement_type] || '#888';
+    const icon   = typeIcons[m.movement_type] || '📦';
+    const date   = new Date(m.movement_at).toLocaleString('en-KE', { dateStyle: 'medium', timeStyle: 'short' });
+    const isIn   = ['ADJUSTMENT_IN','PURCHASE_IN','RETURN_IN'].includes(m.movement_type);
+    const isTrans = m.movement_type === 'TRANSFER';
+    const sign   = (isIn || isTrans) ? '+' : '-';
+
+    let direction = '';
+    if (isTrans) direction = `${locName(m.from_location_id)} → ${locName(m.to_location_id)}`;
+    else if (isIn) direction = `→ ${locName(m.to_location_id)}`;
+    else direction = `${locName(m.from_location_id)} →`;
+
+    return `
+      <div class="movement-card">
+        <div class="mv-icon" style="background:${color}18;color:${color}">${icon}</div>
+        <div class="mv-info">
+          <div class="mv-name">${pName}</div>
+          <div class="mv-meta">${pBrand ? pBrand + ' · ' : ''}${direction}${m.reason ? ' · ' + m.reason : ''}</div>
+          <div class="mv-date">${date}</div>
+        </div>
+        <div class="mv-qty" style="color:${color}">${sign}${m.quantity}</div>
+      </div>`;
+  }).join('');
+}
+
 </script>
 
 </body>
