@@ -740,7 +740,7 @@ main { padding: 14px; max-width: 900px; margin: 0 auto; padding-bottom: 76px; }
   </div>
   <div class="modal-actions">
     <button class="btn btn-ghost" onclick="backToStep1()">← Back</button>
-    <button class="btn btn-primary" onclick="confirmPurchase()">✓ Confirm Purchase</button>
+    <button class="btn btn-primary" onclick="showConfirmSummary()">→ Review & Confirm</button>
   </div>
 </div>
 ```
@@ -774,6 +774,21 @@ main { padding: 14px; max-width: 900px; margin: 0 auto; padding-bottom: 76px; }
     <div class="modal-actions">
       <button class="btn btn-ghost" onclick="closeModal('supplierModal')">Cancel</button>
       <button class="btn btn-primary" onclick="saveSupplier()">Save Supplier</button>
+    </div>
+  </div>
+</div>
+
+<!-- PURCHASE SUMMARY CONFIRMATION MODAL -->
+
+<div class="modal-overlay" id="purchaseSummaryModal" onclick="closeModalOnBg(event,'purchaseSummaryModal')">
+  <div class="modal">
+    <div class="modal-handle"></div>
+    <h2>Confirm Purchase</h2>
+    <p style="font-size:12px;color:var(--muted);margin-bottom:14px;">Review what will be saved and added to Back Godown stock.</p>
+    <div id="purchaseSummaryContent"></div>
+    <div class="modal-actions" style="margin-top:14px;">
+      <button class="btn btn-ghost" onclick="closeModal('purchaseSummaryModal')">← Edit</button>
+      <button class="btn btn-primary" onclick="confirmPurchase()">✓ Save Purchase</button>
     </div>
   </div>
 </div>
@@ -1675,6 +1690,7 @@ let allPurchases = [];
 let scannedItems = [];
 let billFileBase64 = null;
 let billFileName = null;
+let supplierMappings = []; // cached mappings for selected supplier
 
 async function fetchPurchases() {
   try {
@@ -1884,6 +1900,13 @@ Return ONLY valid JSON, no markdown, no explanation:
     if (result.bill_total) document.getElementById('p_total').value = result.bill_total;
 
     scannedItems = result.items || [];
+
+    // Apply saved mappings for this supplier
+    const supplierId = document.getElementById('p_supplier').value;
+    if (supplierId) {
+      await loadAndApplyMappings(parseInt(supplierId));
+    }
+
     showScanResults();
 
   } catch(e) {
@@ -1892,6 +1915,54 @@ Return ONLY valid JSON, no markdown, no explanation:
     document.getElementById('skipScanBtn').style.display = 'block';
   } finally {
     document.getElementById('aiThinking').style.display = 'none';
+  }
+}
+
+// ── MAPPINGS ─────────────────────────────
+async function loadAndApplyMappings(supplierId) {
+  try {
+    const res = await fetch(
+      `${SUPABASE_URL}/rest/v1/supplier_product_mappings?supplier_id=eq.${supplierId}&select=*`,
+      { headers: H }
+    );
+    supplierMappings = await res.json();
+
+    // Apply mappings to scanned items
+    scannedItems = scannedItems.map(item => {
+      const key = item.product_name.trim().toLowerCase();
+      const mapping = supplierMappings.find(m => m.supplier_item_name.toLowerCase() === key);
+      if (mapping) {
+        const prod = allProducts.find(p => p.product_id === mapping.product_id);
+        return {
+          ...item,
+          matched_product_id: mapping.product_id,
+          matched_product_name: prod ? prod.product_name : item.product_name,
+          is_new: false,
+          auto_mapped: true  // flag: matched via saved mapping
+        };
+      }
+      return item;
+    });
+  } catch(e) { console.error('Mapping load error:', e); }
+}
+
+async function saveNewMappings(supplierId) {
+  if (!supplierId) return;
+  for (const item of scannedItems) {
+    // Only save mappings for items user manually matched (not auto-mapped, not new products)
+    if (item.matched_product_id && !item.auto_mapped && !item.is_new && item.product_name) {
+      try {
+        await fetch(`${SUPABASE_URL}/rest/v1/supplier_product_mappings`, {
+          method: 'POST',
+          headers: { ...H, 'Prefer': 'resolution=ignore-duplicates' },
+          body: JSON.stringify({
+            supplier_id: supplierId,
+            supplier_item_name: item.product_name.trim(),
+            product_id: item.matched_product_id
+          })
+        });
+      } catch(e) { console.error('Mapping save error:', e); }
+    }
   }
 }
 
@@ -1919,21 +1990,57 @@ function renderScanItems() {
     el.innerHTML = `<div style="color:var(--muted);font-size:13px;text-align:center;padding:20px 0;">No items found. Use + Add Item to add manually.</div>`;
     return;
   }
+
+  const productOptions = allProducts
+    .map(p => `<option value="${p.product_id}">${p.product_name}</option>`)
+    .join('');
+
   el.innerHTML = scannedItems.map((item, i) => {
-    const isNew = item.is_new || !item.matched_product_id;
-    const badge = isNew
-      ? `<span class="new-badge">🆕 New Product</span>`
-      : `<span class="matched-badge">✓ Matched</span>`;
-    const matchedName = !isNew ? (allProducts.find(p => p.product_id === item.matched_product_id)?.product_name || item.product_name) : item.product_name;
+    const isNew = item.is_new && !item.matched_product_id;
+    const isMapped = item.auto_mapped;
+    const isManualMatched = item.matched_product_id && !item.auto_mapped && !item.is_new;
+    const needsMapping = !item.matched_product_id && !item.is_new;
+
+    let badge = '';
+    if (isMapped) badge = `<span class="mapped-badge">🔗 Auto-mapped</span>`;
+    else if (isManualMatched) badge = `<span class="matched-badge">✓ Matched</span>`;
+    else if (isNew) badge = `<span class="new-badge">🆕 New Product</span>`;
+    else badge = `<span class="unmapped-badge">❓ Needs Mapping</span>`;
+
+    const displayName = item.matched_product_id
+      ? (allProducts.find(p => p.product_id === item.matched_product_id)?.product_name || item.product_name)
+      : item.product_name;
+
+    // Show product dropdown for unmapped or new items (so user can match them)
+    const mappingRow = (!isMapped) ? `
+      <div style="margin-bottom:8px;">
+        <div style="font-size:10px;color:var(--muted);margin-bottom:4px;font-weight:600;text-transform:uppercase;">
+          ${isNew ? 'Or match to existing product' : 'Match to your product'}
+        </div>
+        <select class="scan-mini-input" style="width:100%;" onchange="matchScanItem(${i}, this.value)">
+          <option value="">— ${isNew ? 'Keep as new product' : 'Select your product'} —</option>
+          ${productOptions}
+        </select>
+      </div>` : `
+      <div style="margin-bottom:8px;">
+        <div style="font-size:10px;color:var(--muted);margin-bottom:4px;font-weight:600;text-transform:uppercase;">Matched to</div>
+        <div style="font-size:12px;color:var(--accent);font-weight:600;">${displayName}</div>
+        <button onclick="unmapItem(${i})" style="background:none;border:none;color:var(--muted);font-size:11px;cursor:pointer;padding:2px 0;">Change match ↓</button>
+      </div>`;
+
     return `
-      <div class="scan-result-item ${isNew ? 'new-product' : ''}" id="scanItem_${i}">
-        <div class="scan-item-header">
-          <div class="scan-item-name">${matchedName}</div>
-          <div style="display:flex;gap:6px;align-items:center;">
+      <div class="scan-result-item ${isNew && !item.matched_product_id ? 'new-product' : ''}" id="scanItem_${i}">
+        <div class="scan-item-header" style="margin-bottom:8px;">
+          <div>
+            <div style="font-size:10px;color:var(--muted);font-weight:600;text-transform:uppercase;margin-bottom:2px;">On Bill</div>
+            <div class="scan-item-name">${item.product_name || 'Unnamed item'}</div>
+          </div>
+          <div style="display:flex;gap:6px;align-items:flex-start;">
             ${badge}
             <button class="scan-remove-btn" onclick="removeScanItem(${i})">✕</button>
           </div>
         </div>
+        ${mappingRow}
         <div class="scan-item-inputs">
           <div>
             <div style="font-size:10px;color:var(--muted);margin-bottom:4px;font-weight:600;text-transform:uppercase;">Qty</div>
@@ -1946,6 +2053,27 @@ function renderScanItems() {
         </div>
       </div>`;
   }).join('');
+}
+
+function matchScanItem(index, productId) {
+  if (!productId) {
+    // User chose "keep as new"
+    scannedItems[index].matched_product_id = null;
+    scannedItems[index].is_new = true;
+    scannedItems[index].auto_mapped = false;
+  } else {
+    scannedItems[index].matched_product_id = parseInt(productId);
+    scannedItems[index].is_new = false;
+    scannedItems[index].auto_mapped = false; // manually matched
+  }
+  renderScanItems();
+}
+
+function unmapItem(index) {
+  scannedItems[index].matched_product_id = null;
+  scannedItems[index].auto_mapped = false;
+  scannedItems[index].is_new = false;
+  renderScanItems();
 }
 
 function updateScanItem(index, field, value) {
@@ -1970,7 +2098,45 @@ function addManualItem() {
   }, 100);
 }
 
+function showConfirmSummary() {
+  // Show summary modal before final save
+  const supplierId = document.getElementById('p_supplier').value || null;
+  const date = document.getElementById('p_date').value;
+  if (!date) { showToast('Please select a date', 'error'); return; }
+  if (!scannedItems.length) { showToast('Add at least one item', 'error'); return; }
+
+  const supplier = supplierId ? allSuppliers.find(s => s.supplier_id == supplierId) : null;
+  const sName = supplier ? supplier.supplier_name : 'No supplier selected';
+  const total = document.getElementById('p_total').value;
+
+  let summaryHtml = `
+    <div style="background:var(--surface2);border-radius:var(--radius);padding:12px;margin-bottom:14px;font-size:13px;">
+      <div style="font-weight:700;margin-bottom:4px;">${sName}</div>
+      <div style="color:var(--muted);">📅 ${date}${total ? ' · KES ' + Number(total).toLocaleString() : ''}</div>
+    </div>
+    <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">Items to add to Back Godown</div>`;
+
+  scannedItems.forEach(item => {
+    const prod = item.matched_product_id ? allProducts.find(p => p.product_id === item.matched_product_id) : null;
+    const name = prod ? prod.product_name : (item.product_name || 'Unnamed');
+    const isNew = !item.matched_product_id;
+    summaryHtml += `
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border);font-size:13px;">
+        <div>
+          <div style="font-weight:600;">${name}</div>
+          ${isNew ? '<div style="font-size:10px;color:var(--warn);">🆕 Will be created as new product</div>' : ''}
+          ${item.unit_price ? `<div style="font-size:11px;color:var(--muted);">KES ${item.unit_price}/unit</div>` : ''}
+        </div>
+        <div style="font-weight:700;color:var(--accent);font-size:16px;">+${item.quantity}</div>
+      </div>`;
+  });
+
+  document.getElementById('purchaseSummaryContent').innerHTML = summaryHtml;
+  document.getElementById('purchaseSummaryModal').classList.add('active');
+}
+
 async function confirmPurchase() {
+  document.getElementById('purchaseSummaryModal').classList.remove('active');
   const supplierId = document.getElementById('p_supplier').value || null;
   const date = document.getElementById('p_date').value;
   const total = parseFloat(document.getElementById('p_total').value) || null;
@@ -2070,6 +2236,8 @@ async function confirmPurchase() {
       }
     }
 
+    // Save new mappings for next time
+    if (supplierId) await saveNewMappings(parseInt(supplierId));
     closeModal('purchaseModal');
     showToast('Purchase saved ✓ Stock updated', 'success');
     await fetchAll();
