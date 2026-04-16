@@ -1610,6 +1610,8 @@ function switchTab(tab) {
   } else if (tab === 'purchases') {
     document.getElementById('pagePurchases').classList.add('active');
     document.getElementById('navPurchases').classList.add('active');
+    // Fetch suppliers first so names show correctly in purchases list
+    if (!allSuppliers.length) await fetchSuppliers();
     fetchPurchases();
   }
 }
@@ -1815,25 +1817,77 @@ function handleFileDrop(e) {
 }
 
 function processFile(file) {
-  if (file.size > 5 * 1024 * 1024) {
-    showToast('File too large. Max 5MB', 'error');
+  if (file.size > 10 * 1024 * 1024) {
+    showToast('File too large. Max 10MB', 'error');
     return;
   }
-  billFileName = `bill_${Date.now()}_${file.name.replace(/\s/g,'_')}`;
-  const reader = new FileReader();
-  reader.onload = (e) => {
-    const result = e.target.result;
-    billFileBase64 = result.split(',')[1];
-    // Show preview for images
-    if (file.type.startsWith('image/')) {
-      document.getElementById('billPreview').src = result;
-      document.getElementById('billPreview').style.display = 'block';
-    }
-    document.getElementById('uploadArea').style.display = 'none';
-    document.getElementById('scanBillBtn').style.display = 'block';
-    document.getElementById('skipScanBtn').style.display = 'block';
-  };
-  reader.readAsDataURL(file);
+  billFileName = `bill_${Date.now()}.jpg`;
+
+  if (file.type.startsWith('image/')) {
+    // Compress image using canvas before storing
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        // Max dimension 1200px to keep it readable for OCR
+        const MAX = 1200;
+        let w = img.width, h = img.height;
+        if (w > MAX || h > MAX) {
+          if (w > h) { h = Math.round(h * MAX / w); w = MAX; }
+          else { w = Math.round(w * MAX / h); h = MAX; }
+        }
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, w, h);
+
+        // Compress: try quality 0.8 first, reduce if still > 3MB
+        let quality = 0.8;
+        let dataUrl = canvas.toDataURL('image/jpeg', quality);
+        let base64 = dataUrl.split(',')[1];
+
+        // If still > 3MB, reduce quality further
+        if (base64.length * 0.75 > 3 * 1024 * 1024) {
+          quality = 0.6;
+          dataUrl = canvas.toDataURL('image/jpeg', quality);
+          base64 = dataUrl.split(',')[1];
+        }
+        if (base64.length * 0.75 > 3 * 1024 * 1024) {
+          quality = 0.4;
+          dataUrl = canvas.toDataURL('image/jpeg', quality);
+          base64 = dataUrl.split(',')[1];
+        }
+
+        billFileBase64 = base64;
+        const sizeMB = (base64.length * 0.75 / 1024 / 1024).toFixed(1);
+
+        // Show compact thumbnail
+        const wrap = document.getElementById('billPreviewWrap');
+        document.getElementById('billPreview').src = dataUrl;
+        document.getElementById('billFileName').textContent = `${file.name} · ${sizeMB}MB`;
+        wrap.style.display = 'flex';
+        document.getElementById('uploadArea').style.display = 'none';
+        document.getElementById('scanBillBtn').style.display = 'block';
+        document.getElementById('skipScanBtn').style.display = 'block';
+      };
+      img.src = e.target.result;
+    };
+    reader.readAsDataURL(file);
+  } else {
+    // PDF — no compression, just read as-is
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      billFileBase64 = e.target.result.split(',')[1];
+      const wrap = document.getElementById('billPreviewWrap');
+      document.getElementById('billFileName').textContent = file.name;
+      wrap.style.display = 'flex';
+      document.getElementById('uploadArea').style.display = 'none';
+      document.getElementById('scanBillBtn').style.display = 'block';
+      document.getElementById('skipScanBtn').style.display = 'block';
+    };
+    reader.readAsDataURL(file);
+  }
 }
 
 // ── BILL TEXT PARSER ─────────────────────
