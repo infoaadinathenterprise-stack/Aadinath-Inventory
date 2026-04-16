@@ -434,8 +434,11 @@ main { padding: 14px; max-width: 900px; margin: 0 auto; padding-bottom: 76px; }
   <div class="nav-item" id="navHistory" onclick="switchTab('history')">
     <span>📋</span><span>History</span>
   </div>
+  <div class="nav-item" id="navPurchases" onclick="switchTab('purchases')">
+    <span>🧾</span><span>Purchases</span>
+  </div>
   <div class="nav-item" id="navOrders" onclick="switchTab('orders')">
-    <span>🛒</span><span>Orders</span>
+    <span>🛒</span><span>Suppliers</span>
   </div>
 </nav>
 
@@ -500,13 +503,27 @@ main { padding: 14px; max-width: 900px; margin: 0 auto; padding-bottom: 76px; }
     </div>
   </div>
 
-  <!-- ORDERS PAGE -->
+  <!-- PURCHASES PAGE -->
+
+  <div class="page" id="pagePurchases">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
+      <div class="section-title" style="margin:0">Purchases</div>
+      <button class="btn btn-primary" style="font-size:12px;padding:7px 12px;" onclick="openNewPurchase()">+ New Purchase</button>
+    </div>
+    <div id="purchaseList" class="purchase-list">
+      <div class="loader"><div class="spinner"></div> Loading purchases...</div>
+    </div>
+  </div>
+
+  <!-- SUPPLIERS PAGE -->
 
   <div class="page" id="pageOrders">
-    <div class="orders-empty">
-      <div class="big">🛒</div>
-      <h2>Stock Orders</h2>
-      <p>Supplier database coming soon.<br>You'll be able to raise purchase orders,<br>track deliveries and manage suppliers here.</p>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
+      <div class="section-title" style="margin:0">Suppliers</div>
+      <button class="btn btn-primary" style="font-size:12px;padding:7px 12px;" onclick="openAddSupplier()">+ Add Supplier</button>
+    </div>
+    <div id="supplierList" class="supplier-list">
+      <div class="loader"><div class="spinner"></div> Loading suppliers...</div>
     </div>
   </div>
 
@@ -663,6 +680,113 @@ main { padding: 14px; max-width: 900px; margin: 0 auto; padding-bottom: 76px; }
     <div class="confirm-actions">
       <button class="btn btn-ghost" onclick="closeConfirm()">Cancel</button>
       <button class="btn btn-primary" id="confirmOkBtn" onclick="confirmAction()">Confirm</button>
+    </div>
+  </div>
+</div>
+
+<!-- NEW PURCHASE MODAL -->
+
+<div class="modal-overlay" id="purchaseModal" onclick="closeModalOnBg(event,'purchaseModal')">
+  <div class="modal" style="max-height:95vh;">
+    <div class="modal-handle"></div>
+    <h2 id="purchaseModalTitle">New Purchase</h2>
+
+```
+<!-- Step 1: Bill Upload -->
+<div id="purchaseStep1">
+  <div class="form-group">
+    <label>Supplier</label>
+    <select id="p_supplier">
+      <option value="">— Select supplier (optional) —</option>
+    </select>
+  </div>
+  <div class="form-group">
+    <label>Purchase Date</label>
+    <input type="date" id="p_date">
+  </div>
+  <div class="form-group">
+    <label>Upload Bill Photo</label>
+    <div class="scan-upload-area" id="uploadArea" onclick="document.getElementById('billFileInput').click()" ondragover="event.preventDefault();this.classList.add('drag-over')" ondragleave="this.classList.remove('drag-over')" ondrop="handleFileDrop(event)">
+      <div class="upload-icon">📷</div>
+      <p>Tap to take photo or upload bill<br><b>Max 5MB · JPG, PNG, PDF</b></p>
+    </div>
+    <input type="file" id="billFileInput" accept="image/*,application/pdf" style="display:none" onchange="handleFileSelect(event)">
+    <img id="billPreview" class="bill-preview" style="display:none">
+  </div>
+  <div id="aiThinking" class="ai-thinking" style="display:none">
+    <div class="spinner"></div> AI is reading your bill...
+  </div>
+  <div class="modal-actions">
+    <button class="btn btn-ghost" onclick="closeModal('purchaseModal')">Cancel</button>
+    <button class="btn btn-primary" id="scanBillBtn" onclick="scanBill()" style="display:none">🔍 Scan Bill</button>
+    <button class="btn btn-ghost" onclick="skipScan()" style="display:none" id="skipScanBtn">Skip Scan →</button>
+  </div>
+</div>
+
+<!-- Step 2: Review Scanned Items -->
+<div id="purchaseStep2" style="display:none">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+    <div style="font-size:13px;font-weight:600;color:var(--text)">Review Items</div>
+    <button class="btn btn-ghost" style="padding:5px 10px;font-size:12px;" onclick="addManualItem()">+ Add Item</button>
+  </div>
+  <div id="scanResultsList"></div>
+  <div class="form-group" style="margin-top:12px;">
+    <label>Total Amount (KES)</label>
+    <input type="number" id="p_total" placeholder="0.00" min="0" step="0.01">
+  </div>
+  <div class="form-group">
+    <label>Notes</label>
+    <input type="text" id="p_notes" placeholder="Optional notes">
+  </div>
+  <div class="modal-actions">
+    <button class="btn btn-ghost" onclick="backToStep1()">← Back</button>
+    <button class="btn btn-primary" onclick="confirmPurchase()">✓ Confirm Purchase</button>
+  </div>
+</div>
+```
+
+  </div>
+</div>
+
+<!-- ADD SUPPLIER MODAL -->
+
+<div class="modal-overlay" id="supplierModal" onclick="closeModalOnBg(event,'supplierModal')">
+  <div class="modal">
+    <div class="modal-handle"></div>
+    <h2 id="supplierModalTitle">Add Supplier</h2>
+    <input type="hidden" id="s_id">
+    <div class="form-group">
+      <label>Supplier Name *</label>
+      <input type="text" id="s_name" placeholder="e.g. Nairobi Tools Ltd">
+    </div>
+    <div class="form-group">
+      <label>Phone</label>
+      <input type="tel" id="s_phone" placeholder="+254...">
+    </div>
+    <div class="form-group">
+      <label>Address</label>
+      <input type="text" id="s_address" placeholder="e.g. Nairobi, Kenya">
+    </div>
+    <div class="form-group">
+      <label>Notes</label>
+      <input type="text" id="s_notes" placeholder="Optional">
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal('supplierModal')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveSupplier()">Save Supplier</button>
+    </div>
+  </div>
+</div>
+
+<!-- PURCHASE DETAIL MODAL -->
+
+<div class="modal-overlay" id="purchaseDetailModal" onclick="closeModalOnBg(event,'purchaseDetailModal')">
+  <div class="modal" style="max-height:95vh;">
+    <div class="modal-handle"></div>
+    <h2>Purchase Details</h2>
+    <div id="purchaseDetailContent"></div>
+    <div class="modal-actions" style="margin-top:14px;">
+      <button class="btn btn-ghost" onclick="closeModal('purchaseDetailModal')">Close</button>
     </div>
   </div>
 </div>
@@ -1455,11 +1579,503 @@ function switchTab(tab) {
   } else if (tab === 'orders') {
     document.getElementById('pageOrders').classList.add('active');
     document.getElementById('navOrders').classList.add('active');
+    fetchSuppliers();
   } else if (tab === 'history') {
     document.getElementById('pageHistory').classList.add('active');
     document.getElementById('navHistory').classList.add('active');
     fetchMovements();
+  } else if (tab === 'purchases') {
+    document.getElementById('pagePurchases').classList.add('active');
+    document.getElementById('navPurchases').classList.add('active');
+    fetchPurchases();
   }
+}
+
+
+// ── SUPPLIERS ──────────────────────────
+let allSuppliers = [];
+
+async function fetchSuppliers() {
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/suppliers?active_status=eq.true&order=supplier_name.asc`, { headers: H });
+    if (!res.ok) throw new Error(await res.text());
+    allSuppliers = await res.json();
+    renderSuppliers();
+  } catch(e) { console.error(e); }
+}
+
+function renderSuppliers() {
+  const el = document.getElementById('supplierList');
+  if (!el) return;
+  if (!allSuppliers.length) {
+    el.innerHTML = `<div class="empty"><div class="big">🏢</div><p>No suppliers yet.<br>Add your first supplier.</p></div>`;
+    return;
+  }
+  el.innerHTML = allSuppliers.map(s => `
+    <div class="supplier-card">
+      <div class="supplier-avatar">🏢</div>
+      <div class="supplier-info">
+        <div class="supplier-name">${s.supplier_name}</div>
+        <div class="supplier-meta">${[s.phone, s.address].filter(Boolean).join(' · ') || 'No contact info'}</div>
+      </div>
+      <div class="icon-btn" onclick="openEditSupplier(${s.supplier_id})" style="flex-shrink:0;">✏️</div>
+    </div>`).join('');
+
+  // Also populate supplier dropdown in purchase modal
+  const sel = document.getElementById('p_supplier');
+  if (sel) {
+    sel.innerHTML = '<option value="">— Select supplier (optional) —</option>' +
+      allSuppliers.map(s => `<option value="${s.supplier_id}">${s.supplier_name}</option>`).join('');
+  }
+}
+
+function openAddSupplier() {
+  document.getElementById('supplierModalTitle').textContent = 'Add Supplier';
+  document.getElementById('s_id').value = '';
+  ['s_name','s_phone','s_address','s_notes'].forEach(id => document.getElementById(id).value = '');
+  document.getElementById('supplierModal').classList.add('active');
+}
+
+function openEditSupplier(id) {
+  const s = allSuppliers.find(x => x.supplier_id === id);
+  if (!s) return;
+  document.getElementById('supplierModalTitle').textContent = 'Edit Supplier';
+  document.getElementById('s_id').value = id;
+  document.getElementById('s_name').value = s.supplier_name || '';
+  document.getElementById('s_phone').value = s.phone || '';
+  document.getElementById('s_address').value = s.address || '';
+  document.getElementById('s_notes').value = s.notes || '';
+  document.getElementById('supplierModal').classList.add('active');
+}
+
+async function saveSupplier() {
+  const name = document.getElementById('s_name').value.trim();
+  if (!name) { showToast('Supplier name is required', 'error'); return; }
+  const payload = {
+    supplier_name: name,
+    phone: document.getElementById('s_phone').value.trim() || null,
+    address: document.getElementById('s_address').value.trim() || null,
+    notes: document.getElementById('s_notes').value.trim() || null,
+    active_status: true
+  };
+  const sid = document.getElementById('s_id').value;
+  try {
+    const res = sid
+      ? await fetch(`${SUPABASE_URL}/rest/v1/suppliers?supplier_id=eq.${sid}`, { method: 'PATCH', headers: H, body: JSON.stringify(payload) })
+      : await fetch(`${SUPABASE_URL}/rest/v1/suppliers`, { method: 'POST', headers: H, body: JSON.stringify(payload) });
+    if (!res.ok) throw new Error(await res.text());
+    closeModal('supplierModal');
+    showToast(sid ? 'Supplier updated ✓' : 'Supplier added ✓', 'success');
+    await fetchSuppliers();
+  } catch(e) { showToast('Error: ' + e.message, 'error'); }
+}
+
+// ── PURCHASES ──────────────────────────
+let allPurchases = [];
+let scannedItems = [];
+let billFileBase64 = null;
+let billFileName = null;
+
+async function fetchPurchases() {
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/purchases?order=created_at.desc&select=*`, { headers: H });
+    if (!res.ok) throw new Error(await res.text());
+    allPurchases = await res.json();
+    renderPurchases();
+  } catch(e) { console.error(e); }
+}
+
+function renderPurchases() {
+  const el = document.getElementById('purchaseList');
+  if (!el) return;
+  if (!allPurchases.length) {
+    el.innerHTML = `<div class="empty"><div class="big">🧾</div><p>No purchases yet.<br>Tap + New Purchase to add one.</p></div>`;
+    return;
+  }
+  el.innerHTML = allPurchases.map(p => {
+    const supplier = allSuppliers.find(s => s.supplier_id === p.supplier_id);
+    const sName = supplier ? supplier.supplier_name : (p.supplier_name_raw || 'Unknown Supplier');
+    const date = p.purchase_date ? new Date(p.purchase_date).toLocaleDateString('en-KE', { day:'numeric', month:'short', year:'numeric' }) : '—';
+    const amount = p.total_amount ? `KES ${Number(p.total_amount).toLocaleString()}` : '—';
+    return `
+      <div class="purchase-card" onclick="openPurchaseDetail(${p.purchase_id})">
+        <div class="purchase-card-top">
+          <div class="purchase-card-title">${sName}</div>
+          <div class="purchase-card-amount">${amount}</div>
+        </div>
+        <div style="display:flex;align-items:center;justify-content:space-between;">
+          <div class="purchase-card-meta">📅 ${date}${p.notes ? ' · ' + p.notes : ''}</div>
+          <span class="purchase-status ${p.status.toLowerCase()}">${p.status}</span>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+async function openPurchaseDetail(id) {
+  try {
+    const [pRes, itemsRes] = await Promise.all([
+      fetch(`${SUPABASE_URL}/rest/v1/purchases?purchase_id=eq.${id}&select=*`, { headers: H }),
+      fetch(`${SUPABASE_URL}/rest/v1/purchase_items?purchase_id=eq.${id}&select=*`, { headers: H })
+    ]);
+    const purchases = await pRes.json();
+    const items = await itemsRes.json();
+    const p = purchases[0];
+    if (!p) return;
+
+    const supplier = allSuppliers.find(s => s.supplier_id === p.supplier_id);
+    const sName = supplier ? supplier.supplier_name : (p.supplier_name_raw || 'Unknown');
+    const date = p.purchase_date ? new Date(p.purchase_date).toLocaleDateString('en-KE', { dateStyle: 'long' }) : '—';
+
+    let itemsHtml = items.map(item => {
+      const prod = allProducts.find(x => x.product_id === item.product_id);
+      const pName = prod ? prod.product_name : (item.product_name_raw || `Product #${item.product_id}`);
+      return `
+        <div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border);font-size:13px;">
+          <div>
+            <div style="font-weight:600;">${pName}</div>
+            <div style="color:var(--muted);font-size:11px;">Qty: ${item.quantity} · KES ${item.unit_price || '—'}/unit</div>
+          </div>
+          <div style="font-weight:700;color:var(--accent);">KES ${item.total_price ? Number(item.total_price).toLocaleString() : '—'}</div>
+        </div>`;
+    }).join('');
+
+    document.getElementById('purchaseDetailContent').innerHTML = `
+      <div style="background:var(--surface2);border-radius:var(--radius);padding:14px;margin-bottom:14px;">
+        <div style="font-weight:700;font-size:15px;margin-bottom:4px;">${sName}</div>
+        <div style="font-size:12px;color:var(--muted);">📅 ${date}</div>
+        ${p.notes ? `<div style="font-size:12px;color:var(--muted);margin-top:4px;">📝 ${p.notes}</div>` : ''}
+        <div style="margin-top:8px;"><span class="purchase-status ${p.status.toLowerCase()}">${p.status}</span></div>
+      </div>
+      <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">Items (${items.length})</div>
+      ${itemsHtml || '<div style="color:var(--muted);font-size:13px;">No items recorded</div>'}
+      ${p.total_amount ? `<div style="display:flex;justify-content:space-between;padding:12px 0 0;font-weight:700;font-size:15px;"><span>Total</span><span style="color:var(--accent);">KES ${Number(p.total_amount).toLocaleString()}</span></div>` : ''}
+      ${p.bill_image_url ? `<div style="margin-top:12px;"><div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">Bill Image</div><img src="${p.bill_image_url}" style="width:100%;border-radius:var(--radius);border:1px solid var(--border);"></div>` : ''}
+    `;
+    document.getElementById('purchaseDetailModal').classList.add('active');
+  } catch(e) { showToast('Error loading purchase', 'error'); }
+}
+
+// ── BILL SCANNER ────────────────────────
+function openNewPurchase() {
+  scannedItems = [];
+  billFileBase64 = null;
+  billFileName = null;
+  document.getElementById('purchaseStep1').style.display = 'block';
+  document.getElementById('purchaseStep2').style.display = 'none';
+  document.getElementById('billPreview').style.display = 'none';
+  document.getElementById('billPreview').src = '';
+  document.getElementById('uploadArea').style.display = 'block';
+  document.getElementById('scanBillBtn').style.display = 'none';
+  document.getElementById('skipScanBtn').style.display = 'none';
+  document.getElementById('aiThinking').style.display = 'none';
+  document.getElementById('billFileInput').value = '';
+  document.getElementById('p_supplier').value = '';
+  document.getElementById('p_date').value = new Date().toISOString().split('T')[0];
+  document.getElementById('p_total').value = '';
+  document.getElementById('p_notes').value = '';
+  // Populate supplier dropdown
+  renderSuppliers();
+  document.getElementById('purchaseModal').classList.add('active');
+}
+
+function handleFileSelect(e) {
+  const file = e.target.files[0];
+  if (file) processFile(file);
+}
+
+function handleFileDrop(e) {
+  e.preventDefault();
+  document.getElementById('uploadArea').classList.remove('drag-over');
+  const file = e.dataTransfer.files[0];
+  if (file) processFile(file);
+}
+
+function processFile(file) {
+  if (file.size > 5 * 1024 * 1024) {
+    showToast('File too large. Max 5MB', 'error');
+    return;
+  }
+  billFileName = `bill_${Date.now()}_${file.name.replace(/\s/g,'_')}`;
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    const result = e.target.result;
+    billFileBase64 = result.split(',')[1];
+    // Show preview for images
+    if (file.type.startsWith('image/')) {
+      document.getElementById('billPreview').src = result;
+      document.getElementById('billPreview').style.display = 'block';
+    }
+    document.getElementById('uploadArea').style.display = 'none';
+    document.getElementById('scanBillBtn').style.display = 'block';
+    document.getElementById('skipScanBtn').style.display = 'block';
+  };
+  reader.readAsDataURL(file);
+}
+
+async function scanBill() {
+  if (!billFileBase64) { showToast('Please upload a bill first', 'error'); return; }
+  document.getElementById('scanBillBtn').style.display = 'none';
+  document.getElementById('skipScanBtn').style.display = 'none';
+  document.getElementById('aiThinking').style.display = 'flex';
+
+  try {
+    const productNames = allProducts.map(p => `${p.product_id}:${p.product_name}`).join(', ');
+    const prompt = `You are analyzing a purchase bill/invoice image for a hardware/equipment shop in Kenya called Aadinath Enterprise.
+
+Extract ALL line items from this bill. For each item return:
+- product_name: exact name as written on bill
+- quantity: number (integer)
+- unit_price: price per unit (number, no currency symbol)
+- total_price: total for this line (number, no currency symbol)
+- matched_product_id: if the product matches one from this list, return its ID, otherwise null
+- is_new: true if not matched to existing product
+
+Also extract:
+- supplier_name: supplier/vendor name from bill header
+- bill_total: total amount on bill (number only)
+- bill_date: date on bill in YYYY-MM-DD format if visible
+
+Existing products in database: ${productNames.substring(0, 3000)}
+
+Return ONLY valid JSON, no markdown, no explanation:
+{
+  "supplier_name": "...",
+  "bill_total": 0,
+  "bill_date": "YYYY-MM-DD",
+  "items": [
+    {
+      "product_name": "...",
+      "quantity": 1,
+      "unit_price": 0,
+      "total_price": 0,
+      "matched_product_id": null,
+      "is_new": true
+    }
+  ]
+}`;
+
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 2000,
+        messages: [{
+          role: 'user',
+          content: [
+            { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: billFileBase64 } },
+            { type: 'text', text: prompt }
+          ]
+        }]
+      })
+    });
+
+    const data = await response.json();
+    const text = data.content[0].text;
+    const clean = text.replace(/```json|```/g, '').trim();
+    const result = JSON.parse(clean);
+
+    // Auto-fill supplier and date if found
+    if (result.supplier_name) {
+      const match = allSuppliers.find(s => s.supplier_name.toLowerCase().includes(result.supplier_name.toLowerCase()));
+      if (match) document.getElementById('p_supplier').value = match.supplier_id;
+    }
+    if (result.bill_date) document.getElementById('p_date').value = result.bill_date;
+    if (result.bill_total) document.getElementById('p_total').value = result.bill_total;
+
+    scannedItems = result.items || [];
+    showScanResults();
+
+  } catch(e) {
+    showToast('Scan failed: ' + e.message, 'error');
+    document.getElementById('scanBillBtn').style.display = 'block';
+    document.getElementById('skipScanBtn').style.display = 'block';
+  } finally {
+    document.getElementById('aiThinking').style.display = 'none';
+  }
+}
+
+function skipScan() {
+  scannedItems = [];
+  showScanResults();
+}
+
+function showScanResults() {
+  document.getElementById('purchaseStep1').style.display = 'none';
+  document.getElementById('purchaseStep2').style.display = 'block';
+  renderScanItems();
+}
+
+function backToStep1() {
+  document.getElementById('purchaseStep1').style.display = 'block';
+  document.getElementById('purchaseStep2').style.display = 'none';
+  document.getElementById('scanBillBtn').style.display = billFileBase64 ? 'block' : 'none';
+  document.getElementById('skipScanBtn').style.display = billFileBase64 ? 'block' : 'none';
+}
+
+function renderScanItems() {
+  const el = document.getElementById('scanResultsList');
+  if (!scannedItems.length) {
+    el.innerHTML = `<div style="color:var(--muted);font-size:13px;text-align:center;padding:20px 0;">No items found. Use + Add Item to add manually.</div>`;
+    return;
+  }
+  el.innerHTML = scannedItems.map((item, i) => {
+    const isNew = item.is_new || !item.matched_product_id;
+    const badge = isNew
+      ? `<span class="new-badge">🆕 New Product</span>`
+      : `<span class="matched-badge">✓ Matched</span>`;
+    const matchedName = !isNew ? (allProducts.find(p => p.product_id === item.matched_product_id)?.product_name || item.product_name) : item.product_name;
+    return `
+      <div class="scan-result-item ${isNew ? 'new-product' : ''}" id="scanItem_${i}">
+        <div class="scan-item-header">
+          <div class="scan-item-name">${matchedName}</div>
+          <div style="display:flex;gap:6px;align-items:center;">
+            ${badge}
+            <button class="scan-remove-btn" onclick="removeScanItem(${i})">✕</button>
+          </div>
+        </div>
+        <div class="scan-item-inputs">
+          <div>
+            <div style="font-size:10px;color:var(--muted);margin-bottom:4px;font-weight:600;text-transform:uppercase;">Qty</div>
+            <input class="scan-mini-input" type="number" value="${item.quantity || 1}" min="1" onchange="updateScanItem(${i},'quantity',this.value)">
+          </div>
+          <div>
+            <div style="font-size:10px;color:var(--muted);margin-bottom:4px;font-weight:600;text-transform:uppercase;">Unit Price (KES)</div>
+            <input class="scan-mini-input" type="number" value="${item.unit_price || ''}" min="0" placeholder="0.00" onchange="updateScanItem(${i},'unit_price',this.value)">
+          </div>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+function updateScanItem(index, field, value) {
+  scannedItems[index][field] = parseFloat(value) || 0;
+  if (field === 'quantity' || field === 'unit_price') {
+    scannedItems[index].total_price = (scannedItems[index].quantity || 0) * (scannedItems[index].unit_price || 0);
+  }
+}
+
+function removeScanItem(index) {
+  scannedItems.splice(index, 1);
+  renderScanItems();
+}
+
+function addManualItem() {
+  scannedItems.push({ product_name: '', quantity: 1, unit_price: 0, total_price: 0, matched_product_id: null, is_new: true });
+  renderScanItems();
+  // Focus last item name
+  setTimeout(() => {
+    const items = document.querySelectorAll('.scan-item-name');
+    if (items.length) items[items.length-1].closest('.scan-result-item').scrollIntoView({ behavior: 'smooth' });
+  }, 100);
+}
+
+async function confirmPurchase() {
+  const supplierId = document.getElementById('p_supplier').value || null;
+  const date = document.getElementById('p_date').value;
+  const total = parseFloat(document.getElementById('p_total').value) || null;
+  const notes = document.getElementById('p_notes').value.trim() || null;
+
+  if (!date) { showToast('Please select a date', 'error'); return; }
+  if (!scannedItems.length) { showToast('Add at least one item', 'error'); return; }
+
+  try {
+    // 1. Upload bill image if exists
+    let billUrl = null;
+    if (billFileBase64 && billFileName) {
+      const uploadRes = await fetch(
+        `${SUPABASE_URL}/storage/v1/object/purchase-bills/${billFileName}`,
+        {
+          method: 'POST',
+          headers: {
+            'apikey': SUPABASE_KEY,
+            'Authorization': `Bearer ${SUPABASE_KEY}`,
+            'Content-Type': 'image/jpeg',
+            'x-upsert': 'true'
+          },
+          body: Uint8Array.from(atob(billFileBase64), c => c.charCodeAt(0))
+        }
+      );
+      if (uploadRes.ok) {
+        billUrl = `${SUPABASE_URL}/storage/v1/object/public/purchase-bills/${billFileName}`;
+      }
+    }
+
+    // 2. Create purchase record
+    const purchaseRes = await fetch(`${SUPABASE_URL}/rest/v1/purchases`, {
+      method: 'POST', headers: H,
+      body: JSON.stringify({
+        supplier_id: supplierId ? parseInt(supplierId) : null,
+        purchase_date: date,
+        total_amount: total,
+        bill_image_url: billUrl,
+        notes: notes,
+        status: 'CONFIRMED',
+        created_by: currentUser.db_id
+      })
+    });
+    if (!purchaseRes.ok) throw new Error(await purchaseRes.text());
+    const purchase = await purchaseRes.json();
+    const purchaseId = Array.isArray(purchase) ? purchase[0].purchase_id : purchase.purchase_id;
+
+    // 3. Save purchase items + update stock
+    for (const item of scannedItems) {
+      if (!item.product_name && !item.matched_product_id) continue;
+      let productId = item.matched_product_id || null;
+
+      // If new product, create it first
+      if (item.is_new && item.product_name) {
+        const newProd = await fetch(`${SUPABASE_URL}/rest/v1/products`, {
+          method: 'POST',
+          headers: { ...H, 'Prefer': 'return=representation' },
+          body: JSON.stringify({ product_name: item.product_name, current_stock: 0, active_status: true, reorder_level: 0 })
+        });
+        if (newProd.ok) {
+          const np = await newProd.json();
+          productId = Array.isArray(np) ? np[0].product_id : np.product_id;
+        }
+      }
+
+      // Save purchase item
+      await fetch(`${SUPABASE_URL}/rest/v1/purchase_items`, {
+        method: 'POST', headers: H,
+        body: JSON.stringify({
+          purchase_id: purchaseId,
+          product_id: productId,
+          product_name_raw: item.product_name,
+          quantity: parseInt(item.quantity) || 1,
+          unit_price: item.unit_price || null,
+          total_price: item.total_price || null,
+          is_new_product: item.is_new || false
+        })
+      });
+
+      // Update stock in Back Godown
+      if (productId) {
+        const qty = parseInt(item.quantity) || 1;
+        await upsertLocationStock(productId, 2, (locationStock[productId]?.[2] ?? 0) + qty);
+        await fetch(`${SUPABASE_URL}/rest/v1/stock_movements`, {
+          method: 'POST', headers: H,
+          body: JSON.stringify({
+            product_id: productId,
+            to_location_id: 2,
+            quantity: qty,
+            movement_type: 'PURCHASE_IN',
+            reason: `Purchase #${purchaseId}`,
+            performed_by: currentUser.db_id,
+            approved_by: currentUser.db_id,
+            status: 'APPROVED'
+          })
+        });
+      }
+    }
+
+    closeModal('purchaseModal');
+    showToast('Purchase saved ✓ Stock updated', 'success');
+    await fetchAll();
+    await fetchPurchases();
+
+  } catch(e) { showToast('Error: ' + e.message, 'error'); }
 }
 
 // ── THEME ──────────────────────────────
