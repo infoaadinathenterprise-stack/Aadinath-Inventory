@@ -490,17 +490,50 @@ main { padding: 14px; max-width: 900px; margin: 0 auto; padding-bottom: 76px; }
 
   <div class="page" id="pageHistory">
     <div class="section-title">Stock Movement History</div>
-    <div class="history-filter" id="historyFilter">
-      <div class="tab active" onclick="filterMovements('ALL',this)">All</div>
-      <div class="tab" onclick="filterMovements('TRANSFER',this)">Transfers</div>
-      <div class="tab" onclick="filterMovements('ADJUSTMENT_IN',this)">Stock In</div>
-      <div class="tab" onclick="filterMovements('ADJUSTMENT_OUT',this)">Stock Out</div>
-      <div class="tab" onclick="filterMovements('PURCHASE_IN',this)">Purchases</div>
-      <div class="tab" onclick="filterMovements('DAMAGED',this)">Damaged</div>
-    </div>
-    <div class="movement-list" id="movementList">
-      <div class="loader"><div class="spinner"></div> Loading history...</div>
-    </div>
+
+```
+<!-- Product search -->
+<div style="position:relative;margin-bottom:10px;">
+  <span style="position:absolute;left:11px;top:50%;transform:translateY(-50%);color:var(--muted);font-size:13px;">🔍</span>
+  <input
+    type="text"
+    id="historyProductSearch"
+    placeholder="Search by product name..."
+    oninput="renderMovements()"
+    style="width:100%;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);padding:9px 12px 9px 34px;font-family:'DM Sans',sans-serif;font-size:13px;outline:none;"
+  >
+  <button
+    id="historyClearSearch"
+    onclick="clearHistorySearch()"
+    style="display:none;position:absolute;right:10px;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--muted);font-size:16px;cursor:pointer;">✕</button>
+</div>
+
+<!-- Product quick-select dropdown (shows matching products) -->
+<div id="historyProductSuggestions" style="display:none;background:var(--surface);border:1px solid var(--border2);border-radius:var(--radius);margin-bottom:10px;max-height:160px;overflow-y:auto;box-shadow:0 4px 16px rgba(0,0,0,0.3);"></div>
+
+<!-- Active product filter pill -->
+<div id="historyActiveFilter" style="display:none;margin-bottom:10px;">
+  <div style="display:inline-flex;align-items:center;gap:6px;background:var(--accent-glow);border:1px solid rgba(74,222,128,0.3);border-radius:20px;padding:4px 10px 4px 12px;">
+    <span style="font-size:12px;font-weight:600;color:var(--accent)" id="historyActiveFilterName"></span>
+    <button onclick="clearProductFilter()" style="background:none;border:none;color:var(--accent);font-size:14px;cursor:pointer;line-height:1;">✕</button>
+  </div>
+</div>
+
+<!-- Type filter tabs -->
+<div class="history-filter" id="historyFilter">
+  <div class="tab active" onclick="filterMovements('ALL',this)">All</div>
+  <div class="tab" onclick="filterMovements('TRANSFER',this)">Transfers</div>
+  <div class="tab" onclick="filterMovements('ADJUSTMENT_IN',this)">Stock In</div>
+  <div class="tab" onclick="filterMovements('ADJUSTMENT_OUT',this)">Stock Out</div>
+  <div class="tab" onclick="filterMovements('PURCHASE_IN',this)">Purchases</div>
+  <div class="tab" onclick="filterMovements('DAMAGED',this)">Damaged</div>
+</div>
+
+<div class="movement-list" id="movementList">
+  <div class="loader"><div class="spinner"></div> Loading history...</div>
+</div>
+```
+
   </div>
 
   <!-- PURCHASES PAGE -->
@@ -2486,12 +2519,40 @@ checkSession();
 
 // ── FILTER MOVEMENTS ───────────────────
 let activeMovementFilter = 'ALL';
+let activeProductFilter = null; // { product_id, product_name }
 let allMovements = [];
 
 function filterMovements(type, el) {
   activeMovementFilter = type;
   document.querySelectorAll('#historyFilter .tab').forEach(t => t.classList.remove('active'));
   el.classList.add('active');
+  renderMovements();
+}
+
+function clearProductFilter() {
+  activeProductFilter = null;
+  document.getElementById('historyActiveFilter').style.display = 'none';
+  document.getElementById('historyProductSearch').value = '';
+  document.getElementById('historyClearSearch').style.display = 'none';
+  document.getElementById('historyProductSuggestions').style.display = 'none';
+  renderMovements();
+}
+
+function clearHistorySearch() {
+  document.getElementById('historyProductSearch').value = '';
+  document.getElementById('historyClearSearch').style.display = 'none';
+  document.getElementById('historyProductSuggestions').style.display = 'none';
+  if (!activeProductFilter) renderMovements();
+}
+
+function selectProductFilter(productId, productName) {
+  activeProductFilter = { product_id: productId, product_name: productName };
+  document.getElementById('historyProductSearch').value = '';
+  document.getElementById('historyClearSearch').style.display = 'none';
+  document.getElementById('historyProductSuggestions').style.display = 'none';
+  // Show active filter pill
+  document.getElementById('historyActiveFilter').style.display = 'block';
+  document.getElementById('historyActiveFilterName').textContent = productName;
   renderMovements();
 }
 
@@ -2511,13 +2572,52 @@ function renderMovements() {
   const el = document.getElementById('movementList');
   if (!el) return;
 
+  // Handle product search suggestions
+  const searchInput = document.getElementById('historyProductSearch');
+  const suggestionsEl = document.getElementById('historyProductSuggestions');
+  const clearBtn = document.getElementById('historyClearSearch');
+  const q = searchInput ? searchInput.value.toLowerCase().trim() : '';
+
+  if (q.length > 0) {
+    clearBtn.style.display = 'block';
+    // Show product suggestions
+    const matches = allProducts
+      .filter(p => p.product_name.toLowerCase().includes(q) || (p.brand||'').toLowerCase().includes(q))
+      .slice(0, 8);
+    if (matches.length) {
+      suggestionsEl.innerHTML = matches.map(p => `
+        <div onclick="selectProductFilter(${p.product_id},'${p.product_name.replace(/'/g,"\'")}');document.getElementById('historyProductSearch').blur();"
+          style="padding:10px 14px;font-size:13px;cursor:pointer;border-bottom:1px solid var(--border);color:var(--text);"
+          onmouseover="this.style.background='var(--surface2)'" onmouseout="this.style.background=''">
+          <div style="font-weight:600;">${p.product_name}</div>
+          <div style="font-size:11px;color:var(--muted);">${p.brand || ''} ${p.type ? '· ' + p.type : ''}</div>
+        </div>`).join('');
+      suggestionsEl.style.display = 'block';
+    } else {
+      suggestionsEl.style.display = 'none';
+    }
+  } else {
+    if (clearBtn) clearBtn.style.display = 'none';
+    if (suggestionsEl) suggestionsEl.style.display = 'none';
+  }
+
   let data = allMovements;
+
+  // Apply product filter
+  if (activeProductFilter) {
+    data = data.filter(m => m.product_id === activeProductFilter.product_id);
+  }
+
+  // Apply type filter
   if (activeMovementFilter !== 'ALL') {
     data = data.filter(m => m.movement_type === activeMovementFilter);
   }
 
   if (!data.length) {
-    el.innerHTML = `<div class="empty"><div class="big">📋</div><p>No movements found.</p></div>`;
+    const msg = activeProductFilter
+      ? `No movements found for <b>${activeProductFilter.product_name}</b>`
+      : 'No movements found.';
+    el.innerHTML = `<div class="empty"><div class="big">📋</div><p>${msg}</p></div>`;
     return;
   }
 
