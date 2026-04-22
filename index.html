@@ -342,6 +342,27 @@ main { padding: 14px; max-width: 900px; margin: 0 auto; padding-bottom: 76px; }
 .spinner { width: 18px; height: 18px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.7s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 .section-title { font-size: 14px; font-weight: 700; color: var(--text); margin-bottom: 12px; letter-spacing: -0.2px; }
+
+/* ─── MOBILE RESPONSIVE ─────────────────── */
+@media (max-width: 600px) {
+  header { padding: 7px 10px; gap: 5px; }
+  .logo { font-size: 13px; letter-spacing: -0.3px; }
+  .logo span { display: none; }
+  .header-right { gap: 4px; overflow-x: auto; overflow-y: hidden; -webkit-overflow-scrolling: touch; scrollbar-width: none; flex-shrink: 1; min-width: 0; }
+  .header-right::-webkit-scrollbar { display: none; }
+  .user-pill, #pendingBadgeBtn { padding: 4px 8px; font-size: 11px; flex-shrink: 0; white-space: nowrap; }
+  .header-add-btn { padding: 5px 8px; font-size: 11px; border-radius: 6px; box-shadow: none; flex-shrink: 0; white-space: nowrap; }
+  .logout-btn { padding: 4px 7px; font-size: 11px; border-radius: 6px; flex-shrink: 0; }
+  .theme-toggle-btn { padding: 4px 6px; font-size: 12px; border-radius: 6px; flex-shrink: 0; }
+}
+@media (max-width: 390px) {
+  header { padding: 6px 8px; }
+  .logo { font-size: 12px; }
+  .header-right { gap: 3px; }
+  .header-add-btn .lbl, .logout-btn .lbl { display: none; }
+  .header-add-btn { padding: 5px 7px; }
+  .logout-btn { padding: 5px 7px; }
+}
 </style>
 
 </head>
@@ -434,11 +455,11 @@ main { padding: 14px; max-width: 900px; margin: 0 auto; padding-bottom: 76px; }
   <div class="header-right">
     <div class="user-pill" id="userPill" onclick="openSwitchOverlay()" title="Switch account">—</div>
     <button id="pendingBadgeBtn" onclick="togglePendingPanel()">⏳ <span id="pendingCount">0</span> Pending</button>
-    <button class="header-add-btn" onclick="openAddModal()">+ Add</button>
-    <a href="pricing.html" class="header-add-btn" id="pricesBtn" style="display:none;text-decoration:none;background:var(--purple);color:#fff;">💰 Prices</a>
-    <a href="labels.html"  class="header-add-btn" id="labelsBtn" style="display:none;text-decoration:none;background:var(--blue);color:#fff;">🏷️ Labels</a>
+    <button class="header-add-btn" onclick="openAddModal()">+<span class="lbl"> Add</span></button>
+    <a href="pricing.html" class="header-add-btn" id="pricesBtn" style="display:none;text-decoration:none;background:var(--purple);color:#fff;">💰<span class="lbl"> Prices</span></a>
+    <a href="labels.html"  class="header-add-btn" id="labelsBtn" style="display:none;text-decoration:none;background:var(--blue);color:#fff;">🏷️<span class="lbl"> Labels</span></a>
     <button class="theme-toggle-btn" id="themeToggleBtn" onclick="toggleTheme()" title="Toggle light/dark mode">🌙</button>
-    <button class="logout-btn" onclick="doLogout()">Logout</button>
+    <button class="logout-btn" onclick="doLogout()">↩<span class="lbl"> Out</span></button>
   </div>
 </header>
 

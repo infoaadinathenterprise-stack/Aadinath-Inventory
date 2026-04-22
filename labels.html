@@ -102,8 +102,37 @@ header { background: var(--surface); border-bottom: 1px solid var(--border); pad
 /* TOAST */
 .toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%) translateY(60px); background: var(--surface3); border: 1px solid var(--border2); color: var(--text); border-radius: 8px; padding: 10px 20px; font-size: 13px; font-weight: 600; z-index: 999; transition: transform 0.25s ease; white-space: nowrap; box-shadow: 0 4px 20px rgba(0,0,0,0.4); pointer-events: none; }
 .toast.show { transform: translateX(-50%) translateY(0); }
-.toast.success { background: var(--success-dim); border-color: rgba(74,222,128,0.3); color: var(--accent); }
-.toast.error   { background: var(--danger-dim); border-color: rgba(248,113,113,0.3); color: var(--danger); }
+.toast.success { background: var(--success-dim); border-color: rgba(52,211,153,0.3); color: var(--accent); }
+.toast.error   { background: var(--danger-dim); border-color: rgba(251,113,133,0.3); color: var(--danger); }
+
+/* STOCK MODAL */
+.smodal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 500; align-items: flex-end; justify-content: center; backdrop-filter: blur(4px); }
+.smodal-overlay.active { display: flex; }
+.smodal { background: var(--surface); border: 1px solid var(--border2); border-radius: 20px 20px 0 0; width: 100%; max-width: 520px; padding: 16px 20px 36px; max-height: 88vh; display: flex; flex-direction: column; }
+.smodal-handle { width: 32px; height: 3px; background: var(--border2); border-radius: 2px; margin: 0 auto 14px; flex-shrink: 0; }
+.smodal-icon { font-size: 32px; text-align: center; margin-bottom: 8px; }
+.smodal-title { font-size: 17px; font-weight: 700; color: var(--text); text-align: center; margin-bottom: 4px; }
+.smodal-sub { font-size: 12px; color: var(--muted); text-align: center; margin-bottom: 16px; line-height: 1.5; }
+.smodal-list { overflow-y: auto; flex: 1; display: flex; flex-direction: column; gap: 10px; margin-bottom: 16px; }
+.over-item { background: var(--surface2); border: 1px solid var(--border); border-radius: 12px; padding: 14px; }
+.over-name { font-size: 14px; font-weight: 700; color: var(--text); margin-bottom: 4px; }
+.over-info { font-size: 12px; color: var(--muted); margin-bottom: 10px; }
+.over-info b { color: var(--danger); }
+.over-input-row { display: flex; align-items: center; gap: 10px; }
+.over-input-row label { font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; flex: 1; }
+.extra-inp { width: 72px; text-align: center; background: var(--surface3); border: 1.5px solid var(--border2); border-radius: 8px; color: var(--text); padding: 8px 6px; font-size: 16px; font-weight: 700; font-family: 'DM Sans', sans-serif; outline: none; flex-shrink: 0; }
+.extra-inp:focus { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-glow); }
+.smodal-note { font-size: 11px; color: var(--muted); text-align: center; margin-bottom: 14px; line-height: 1.5; }
+.smodal-actions { display: flex; gap: 8px; flex-shrink: 0; }
+.smodal-cancel { flex: 1; padding: 12px; background: var(--surface2); border: 1px solid var(--border); border-radius: 10px; color: var(--text2); font-family: 'DM Sans', sans-serif; font-size: 14px; font-weight: 600; cursor: pointer; }
+.smodal-confirm { flex: 2; padding: 12px; background: linear-gradient(135deg, var(--accent), var(--accent-dim)); border: none; border-radius: 10px; color: #fff; font-family: 'DM Sans', sans-serif; font-size: 14px; font-weight: 700; cursor: pointer; box-shadow: 0 4px 14px var(--accent-glow); transition: opacity 0.15s; }
+.smodal-confirm:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* STOCK COUNT in sidebar */
+.stock-badge { font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 5px; background: var(--surface3); color: var(--muted); border: 1px solid var(--border); flex-shrink: 0; font-family: 'DM Mono', monospace; white-space: nowrap; }
+.copies-wrap { display: flex; flex-direction: column; align-items: center; gap: 2px; flex-shrink: 0; }
+.copies-inp.over { border-color: var(--danger); color: var(--danger); }
+.stock-hint { font-size: 9px; font-weight: 600; color: var(--muted); font-family: 'DM Mono', monospace; white-space: nowrap; }
 
 /* ─── PRINT STYLES ─────────────────────── */
 @media print {
@@ -159,18 +188,46 @@ header { background: var(--surface); border-bottom: 1px solid var(--border); pad
 
 <div class="toast" id="toast"></div>
 
+<!-- STOCK PROMPT MODAL -->
+<div class="smodal-overlay" id="stockModal">
+  <div class="smodal">
+    <div class="smodal-handle"></div>
+    <div class="smodal-icon">📦</div>
+    <div class="smodal-title">Extra Stock Needed</div>
+    <div class="smodal-sub">You want to print more labels than units currently in stock.<br>Enter how many extra pieces you're adding to inventory.</div>
+    <div class="smodal-list" id="overLimitList"></div>
+    <div class="smodal-note">These units will be added to Main Store and recorded in Stock History.</div>
+    <div class="smodal-actions">
+      <button class="smodal-cancel" onclick="closeStockModal()">Cancel</button>
+      <button class="smodal-confirm" id="confirmStockBtn" onclick="confirmStockAndPrint()">Add Stock & Print 🖨️</button>
+    </div>
+  </div>
+</div>
+
 <script>
 const SUPABASE_URL = 'https://mculftdutoavwueluyma.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1jdWxmdGR1dG9hdnd1ZWx1eW1hIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ0Mjk2NzAsImV4cCI6MjA5MDAwNTY3MH0.s-OLgLDXR5aN3uQlS5yAO2sk6Bot0TibtI4qFjrzZh4';
-const H = { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` };
+const H = { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}`, 'Content-Type': 'application/json' };
 
-let allProducts = [], selected = {}; // { productId: copies }
+// Resolve current user from session (same mapping as index.html USERS)
+const _u = localStorage.getItem('ae_user');
+const currentUserId = ({ admin: 1, akshat: 2 })[_u] || 1;
+
+let allProducts = [], stockMap = {}, selected = {}; // stockMap: { productId: totalQty }
 
 async function init() {
   try {
-    const res = await fetch(`${SUPABASE_URL}/rest/v1/products?select=*&active_status=eq.true&order=product_name.asc`, { headers: H });
-    if (!res.ok) throw new Error(await res.text());
-    allProducts = await res.json();
+    document.getElementById('prodList').innerHTML = '<div class="loader"><div class="spinner"></div></div>';
+    const [prodsRes, stockRes] = await Promise.all([
+      fetch(`${SUPABASE_URL}/rest/v1/products?select=*&active_status=eq.true&order=product_name.asc`, { headers: H }),
+      fetch(`${SUPABASE_URL}/rest/v1/stock_by_location?select=product_id,quantity`, { headers: H })
+    ]);
+    if (!prodsRes.ok) throw new Error(await prodsRes.text());
+    if (!stockRes.ok) throw new Error(await stockRes.text());
+    allProducts = await prodsRes.json();
+    const stockRows = await stockRes.json();
+    stockMap = {};
+    stockRows.forEach(r => { stockMap[r.product_id] = (stockMap[r.product_id] || 0) + (r.quantity || 0); });
     renderList();
   } catch(e) {
     document.getElementById('prodList').innerHTML = `<div style="padding:16px;color:var(--danger);font-size:12px;">${e.message}</div>`;
@@ -184,34 +241,45 @@ function renderList() {
   );
   const el = document.getElementById('prodList');
   if (!filtered.length) { el.innerHTML = `<div style="padding:16px;text-align:center;color:var(--muted);font-size:12px;">No products found</div>`; return; }
-  el.innerHTML = filtered.map(p => `
-    <div class="prod-item ${selected[p.product_id] ? 'selected' : ''}" onclick="toggleProduct(${p.product_id})" id="pi_${p.product_id}">
-      <div class="prod-check">${selected[p.product_id] ? '✓' : ''}</div>
+  el.innerHTML = filtered.map(p => {
+    const stock = stockMap[p.product_id] || 0;
+    const copies = selected[p.product_id];
+    const isOver = copies && copies > stock;
+    return `
+    <div class="prod-item ${copies ? 'selected' : ''}" onclick="toggleProduct(${p.product_id})" id="pi_${p.product_id}">
+      <div class="prod-check">${copies ? '✓' : ''}</div>
       <div class="prod-info">
         <div class="prod-name">${p.product_name}</div>
         <div class="prod-sku">${p.stock_keeping_unit || 'No SKU'}</div>
       </div>
-      ${selected[p.product_id] ? `
-        <input class="copies-inp" type="number" value="${selected[p.product_id]}" min="1" max="99"
-          onclick="event.stopPropagation()" onchange="setCopies(${p.product_id}, this.value)" title="Copies">
-      ` : ''}
-    </div>`).join('');
+      ${copies ? `
+        <div class="copies-wrap">
+          <input class="copies-inp${isOver ? ' over' : ''}" type="number" value="${copies}" min="1" max="999"
+            onclick="event.stopPropagation()" onchange="setCopies(${p.product_id}, this.value)" title="Copies">
+          <span class="stock-hint" style="color:${isOver ? 'var(--danger)' : 'var(--muted)'}">${isOver ? '⚠ only ' : ''}${stock} in stock</span>
+        </div>
+      ` : `<span class="stock-badge">${stock}</span>`}
+    </div>`;
+  }).join('');
 }
 
 function toggleProduct(id) {
   if (selected[id]) delete selected[id];
-  else selected[id] = 1;
+  else {
+    const stock = stockMap[id] || 0;
+    selected[id] = Math.max(1, stock); // default to stock qty (at least 1)
+  }
   renderList();
   renderPreview();
 }
 
 function setCopies(id, val) {
-  const n = Math.max(1, Math.min(99, parseInt(val) || 1));
-  if (selected[id] !== undefined) { selected[id] = n; renderPreview(); }
+  const n = Math.max(1, parseInt(val) || 1);
+  if (selected[id] !== undefined) { selected[id] = n; renderList(); renderPreview(); }
 }
 
 function selectAll() {
-  allProducts.forEach(p => { if (!selected[p.product_id]) selected[p.product_id] = 1; });
+  allProducts.forEach(p => { if (!selected[p.product_id]) selected[p.product_id] = Math.max(1, stockMap[p.product_id] || 1); });
   renderList(); renderPreview();
 }
 
@@ -227,7 +295,6 @@ function renderPreview() {
   const printBtn = document.getElementById('printBtn');
   const countEl  = document.getElementById('labelCount');
 
-  // Build flat list of labels
   const labels = [];
   allProducts.forEach(p => {
     const copies = selected[p.product_id];
@@ -243,11 +310,8 @@ function renderPreview() {
     return;
   }
 
-  // Split into pages of 24
   const pages = [];
-  for (let i = 0; i < labels.length; i += LABELS_PER_PAGE) {
-    pages.push(labels.slice(i, i + LABELS_PER_PAGE));
-  }
+  for (let i = 0; i < labels.length; i += LABELS_PER_PAGE) pages.push(labels.slice(i, i + LABELS_PER_PAGE));
 
   preview.innerHTML = pages.map((page, pi) => `
     <div class="label-page" id="page_${pi}">
@@ -261,34 +325,120 @@ function renderPreview() {
         </div>`).join('')}
     </div>`).join('');
 
-  // Render barcodes
   pages.forEach((page, pi) => {
     page.forEach((p, li) => {
       if (!p.stock_keeping_unit) return;
       const svgEl = document.getElementById(`bc_${pi}_${li}`);
       if (!svgEl) return;
       try {
-        JsBarcode(svgEl, p.stock_keeping_unit, {
-          format: 'CODE128',
-          width: 1.2,
-          height: 32,
-          displayValue: true,
-          fontSize: 7,
-          margin: 2,
-          background: '#ffffff',
-          lineColor: '#000000',
-          textMargin: 2,
-          fontOptions: ''
-        });
-      } catch(e) {
-        svgEl.parentElement.innerHTML = `<div class="label-nosku">BAD SKU</div>`;
-      }
+        JsBarcode(svgEl, p.stock_keeping_unit, { format:'CODE128', width:1.2, height:32, displayValue:true, fontSize:7, margin:2, background:'#ffffff', lineColor:'#000000', textMargin:2, fontOptions:'' });
+      } catch(e) { svgEl.parentElement.innerHTML = `<div class="label-nosku">BAD SKU</div>`; }
     });
   });
 }
 
+// ── PRINT FLOW WITH STOCK VALIDATION ──────
 function doPrint() {
-  window.print();
+  const overLimit = [];
+  allProducts.forEach(p => {
+    const copies = selected[p.product_id];
+    if (!copies) return;
+    const stock = stockMap[p.product_id] || 0;
+    if (copies > stock) {
+      overLimit.push({ p, copies, stock, need: copies - stock });
+    }
+  });
+
+  if (overLimit.length > 0) {
+    showStockModal(overLimit);
+  } else {
+    window.print();
+  }
+}
+
+function showStockModal(overLimit) {
+  document.getElementById('overLimitList').innerHTML = overLimit.map(({ p, copies, stock, need }) => `
+    <div class="over-item">
+      <div class="over-name">${p.product_name}</div>
+      <div class="over-info">Printing <b style="color:var(--text)">${copies}</b> labels · <b>${stock}</b> in stock · need <b>${need} more</b></div>
+      <div class="over-input-row">
+        <label>Extra pieces to add:</label>
+        <input class="extra-inp" type="number" data-id="${p.product_id}" data-name="${p.product_name}" value="${need}" min="0" max="9999">
+      </div>
+    </div>
+  `).join('');
+  document.getElementById('stockModal').classList.add('active');
+}
+
+function closeStockModal() {
+  document.getElementById('stockModal').classList.remove('active');
+}
+
+async function confirmStockAndPrint() {
+  const btn = document.getElementById('confirmStockBtn');
+  btn.disabled = true;
+  btn.textContent = 'Adding stock…';
+
+  try {
+    const inputs = document.querySelectorAll('.extra-inp');
+    for (const inp of inputs) {
+      const productId = parseInt(inp.dataset.id);
+      const productName = inp.dataset.name;
+      const extra = parseInt(inp.value) || 0;
+      if (extra <= 0) continue;
+      await addToMainStock(productId, extra);
+      stockMap[productId] = (stockMap[productId] || 0) + extra;
+    }
+    closeStockModal();
+    renderList(); // refresh sidebar stock hints
+    showToast('Stock updated ✓', 'success');
+    setTimeout(() => window.print(), 350);
+  } catch(e) {
+    showToast('Error: ' + e.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Add Stock & Print 🖨️';
+  }
+}
+
+async function addToMainStock(productId, qty) {
+  // Upsert stock_by_location (location 1 = Main Store)
+  const checkRes = await fetch(
+    `${SUPABASE_URL}/rest/v1/stock_by_location?product_id=eq.${productId}&location_id=eq.1&select=id,quantity`,
+    { headers: H }
+  );
+  const rows = await checkRes.json();
+
+  if (rows && rows.length > 0) {
+    const newQty = (rows[0].quantity || 0) + qty;
+    const r = await fetch(
+      `${SUPABASE_URL}/rest/v1/stock_by_location?product_id=eq.${productId}&location_id=eq.1`,
+      { method: 'PATCH', headers: H, body: JSON.stringify({ quantity: newQty, updated_at: new Date().toISOString() }) }
+    );
+    if (!r.ok) throw new Error('Stock update failed: ' + await r.text());
+  } else {
+    const r = await fetch(
+      `${SUPABASE_URL}/rest/v1/stock_by_location`,
+      { method: 'POST', headers: H, body: JSON.stringify({ product_id: productId, location_id: 1, quantity: qty, updated_at: new Date().toISOString() }) }
+    );
+    if (!r.ok) throw new Error('Stock insert failed: ' + await r.text());
+  }
+
+  // Record in stock_movements for history
+  await fetch(`${SUPABASE_URL}/rest/v1/stock_movements`, {
+    method: 'POST',
+    headers: H,
+    body: JSON.stringify({
+      product_id: productId,
+      to_location_id: 1,
+      quantity: qty,
+      movement_type: 'ADJUSTMENT_IN',
+      reason: 'Added via label printer',
+      performed_by: currentUserId,
+      approved_by: currentUserId,
+      status: 'APPROVED'
+    })
+  });
 }
 
 let toastTimer;
