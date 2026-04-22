@@ -458,6 +458,7 @@ main { padding: 14px; max-width: 900px; margin: 0 auto; padding-bottom: 76px; }
     <button class="header-add-btn" onclick="openAddModal()">+<span class="lbl"> Add</span></button>
     <a href="pricing.html" class="header-add-btn" id="pricesBtn" style="display:none;text-decoration:none;background:var(--purple);color:#fff;">💰<span class="lbl"> Prices</span></a>
     <a href="labels.html"  class="header-add-btn" id="labelsBtn" style="display:none;text-decoration:none;background:var(--blue);color:#fff;">🏷️<span class="lbl"> Labels</span></a>
+    <a href="pos.html"    class="header-add-btn" id="posBtn"    style="display:none;text-decoration:none;background:linear-gradient(135deg,#f59e0b,#d97706);color:#000;">🛒<span class="lbl"> POS</span></a>
     <button class="theme-toggle-btn" id="themeToggleBtn" onclick="toggleTheme()" title="Toggle light/dark mode">🌙</button>
     <button class="logout-btn" onclick="doLogout()">↩<span class="lbl"> Out</span></button>
   </div>
@@ -563,6 +564,7 @@ main { padding: 14px; max-width: 900px; margin: 0 auto; padding-bottom: 76px; }
   <div class="tab" onclick="filterMovements('ADJUSTMENT_OUT',this)">Stock Out</div>
   <div class="tab" onclick="filterMovements('PURCHASE_IN',this)">Purchases</div>
   <div class="tab" onclick="filterMovements('DAMAGED',this)">Damaged</div>
+  <div class="tab" onclick="filterMovements('SALE',this)">Sales</div>
 </div>
 
 <div class="movement-list" id="movementList">
@@ -977,6 +979,7 @@ function showApp() {
   document.getElementById('pendingBadgeBtn').style.display = currentUser.role === 'admin' ? 'inline-flex' : 'none';
   document.getElementById('pricesBtn').style.display = currentUser.role === 'admin' ? 'inline-flex' : 'none';
   document.getElementById('labelsBtn').style.display = currentUser.role === 'admin' ? 'inline-flex' : 'none';
+  document.getElementById('posBtn').style.display = 'inline-flex';
   fetchAll();
 }
 
@@ -1035,6 +1038,7 @@ function instantSwitch(u) {
     document.getElementById('pendingBadgeBtn').style.display = currentUser.role === 'admin' ? 'inline-flex' : 'none';
     document.getElementById('pricesBtn').style.display = currentUser.role === 'admin' ? 'inline-flex' : 'none';
     document.getElementById('labelsBtn').style.display = currentUser.role === 'admin' ? 'inline-flex' : 'none';
+    document.getElementById('posBtn').style.display = 'inline-flex';
     showToast(`Switched to ${currentUser.name} ✓`, 'success');
     fetchAll();
   } else {
@@ -1068,6 +1072,7 @@ function confirmSwitchLogin() {
     document.getElementById('pendingBadgeBtn').style.display = currentUser.role === 'admin' ? 'inline-flex' : 'none';
     document.getElementById('pricesBtn').style.display = currentUser.role === 'admin' ? 'inline-flex' : 'none';
     document.getElementById('labelsBtn').style.display = currentUser.role === 'admin' ? 'inline-flex' : 'none';
+    document.getElementById('posBtn').style.display = 'inline-flex';
     showToast(`Switched to ${currentUser.name} ✓`, 'success');
     fetchAll();
   } else {
