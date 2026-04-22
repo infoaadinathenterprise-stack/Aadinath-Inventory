@@ -363,6 +363,62 @@ main { padding: 14px; max-width: 900px; margin: 0 auto; padding-bottom: 76px; }
   .header-add-btn { padding: 5px 7px; }
   .logout-btn { padding: 5px 7px; }
 }
+
+/* ─── SCAN ITEM IMPROVEMENTS ────────────── */
+.scan-upload-area { border: 2px dashed var(--border2); border-radius: var(--radius); padding: 24px 16px; text-align: center; cursor: pointer; transition: all 0.2s; }
+.scan-upload-area:hover, .scan-upload-area.drag-over { border-color: var(--accent); background: var(--accent-glow); }
+.scan-upload-area .upload-icon { font-size: 32px; margin-bottom: 8px; }
+.scan-upload-area p { font-size: 13px; color: var(--muted); line-height: 1.5; }
+.ai-thinking { display: flex; align-items: center; gap: 8px; color: var(--accent); font-size: 13px; font-weight: 600; padding: 12px 0; }
+
+.scan-result-item { background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px; margin-bottom: 8px; }
+.scan-result-item.new-product { border-color: rgba(252,211,77,0.3); background: var(--warn-dim); }
+.scan-item-header { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 8px; }
+.scan-item-name { font-size: 13px; font-weight: 600; color: var(--text); }
+.scan-remove-btn { background: none; border: none; color: var(--muted); font-size: 16px; cursor: pointer; padding: 2px 4px; flex-shrink: 0; line-height: 1; }
+.scan-remove-btn:hover { color: var(--danger); }
+.scan-item-inputs { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; }
+.scan-mini-input { width: 100%; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; color: var(--text); padding: 8px 10px; font-family: 'DM Sans', sans-serif; font-size: 13px; outline: none; }
+.scan-mini-input:focus { border-color: var(--accent); }
+
+.new-badge { background: var(--warn-dim); color: var(--warn); border: 1px solid rgba(252,211,77,0.3); font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 4px; white-space: nowrap; }
+.mapped-badge { background: var(--blue-dim); color: var(--blue); border: 1px solid rgba(96,196,250,0.2); font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 4px; white-space: nowrap; }
+.matched-badge { background: var(--success-dim); color: var(--accent); border: 1px solid rgba(74,222,128,0.2); font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 4px; white-space: nowrap; }
+.unmapped-badge { background: var(--danger-dim); color: var(--danger); border: 1px solid rgba(251,113,133,0.2); font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 4px; white-space: nowrap; }
+
+/* Searchable product picker inside scan items */
+.scan-product-wrap { position: relative; }
+.scan-product-input { width: 100%; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; color: var(--text); padding: 8px 10px; font-family: 'DM Sans', sans-serif; font-size: 13px; outline: none; }
+.scan-product-input:focus { border-color: var(--accent); }
+.scan-product-input::placeholder { color: var(--muted); }
+.scan-product-list { position: absolute; top: calc(100% + 3px); left: 0; right: 0; background: var(--surface); border: 1px solid var(--border2); border-radius: var(--radius); z-index: 400; max-height: 160px; overflow-y: auto; box-shadow: 0 8px 24px rgba(0,0,0,0.4); display: none; }
+.scan-product-list.open { display: block; }
+.scan-product-opt { padding: 9px 12px; font-size: 13px; cursor: pointer; border-bottom: 1px solid var(--border); color: var(--text2); }
+.scan-product-opt:last-child { border-bottom: none; }
+.scan-product-opt:hover { background: var(--surface2); color: var(--text); }
+.scan-product-opt mark { background: transparent; color: var(--accent); font-weight: 700; }
+.scan-product-opt.keep-new { color: var(--warn); font-style: italic; }
+
+/* Store selector */
+.store-selector { display: flex; gap: 5px; margin-top: 8px; }
+.store-btn { flex: 1; padding: 6px 4px; border-radius: 7px; border: 1px solid var(--border); background: var(--surface); color: var(--muted); font-family: 'DM Sans', sans-serif; font-size: 11px; font-weight: 600; cursor: pointer; text-align: center; transition: all 0.15s; }
+.store-btn.active-back { border-color: rgba(252,211,77,0.4); color: var(--warn); background: var(--warn-dim); }
+.store-btn.active-main { border-color: rgba(74,222,128,0.4); color: var(--accent); background: var(--success-dim); }
+.store-btn.active-split { border-color: rgba(96,196,250,0.4); color: var(--blue); background: var(--blue-dim); }
+.split-qty-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 6px; }
+.split-qty-label { font-size: 10px; font-weight: 700; color: var(--muted); text-transform: uppercase; margin-bottom: 3px; }
+
+/* Raw OCR text box */
+.ocr-raw-toggle { font-size: 11px; color: var(--muted); cursor: pointer; text-decoration: underline; display: inline-block; margin-bottom: 8px; }
+.ocr-raw-box { background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 10px; font-family: 'DM Mono', monospace; font-size: 11px; color: var(--muted); white-space: pre-wrap; max-height: 140px; overflow-y: auto; margin-bottom: 10px; display: none; }
+.ocr-raw-box.open { display: block; }
+
+/* purchase-list */
+.purchase-list { display: flex; flex-direction: column; gap: 8px; }
+.purchase-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 14px; cursor: pointer; transition: all 0.2s; }
+.purchase-card:hover { border-color: var(--border2); }
+.supplier-list { display: flex; flex-direction: column; gap: 8px; }
+.supplier-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 14px; }
 </style>
 
 </head>
@@ -803,6 +859,10 @@ main { padding: 14px; max-width: 900px; margin: 0 auto; padding-bottom: 76px; }
 
 <!-- Step 2: Review Scanned Items -->
 <div id="purchaseStep2" style="display:none">
+  <div id="ocrRawSection" style="display:none;margin-bottom:12px;">
+    <span class="ocr-raw-toggle" onclick="toggleOcrRaw()">🔍 View what scanner read</span>
+    <div class="ocr-raw-box" id="ocrRawBox"></div>
+  </div>
   <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
     <div style="font-size:13px;font-weight:600;color:var(--text)">Review Items</div>
     <button class="btn btn-ghost" style="padding:5px 10px;font-size:12px;" onclick="addManualItem()">+ Add Item</button>
@@ -862,7 +922,7 @@ main { padding: 14px; max-width: 900px; margin: 0 auto; padding-bottom: 76px; }
   <div class="modal">
     <div class="modal-handle"></div>
     <h2>Confirm Purchase</h2>
-    <p style="font-size:12px;color:var(--muted);margin-bottom:14px;">Review what will be saved and added to Back Godown stock.</p>
+    <p style="font-size:12px;color:var(--muted);margin-bottom:14px;">Review the stock distribution before saving.</p>
     <div id="purchaseSummaryContent"></div>
     <div class="modal-actions" style="margin-top:14px;">
       <button class="btn btn-ghost" onclick="closeModal('purchaseSummaryModal')">← Edit</button>
@@ -1780,7 +1840,8 @@ let allPurchases = [];
 let scannedItems = [];
 let billFileBase64 = null;
 let billFileName = null;
-let supplierMappings = []; // cached mappings for selected supplier
+let supplierMappings = [];
+let lastOcrRawText = '';
 
 async function fetchPurchases() {
   try {
@@ -1866,6 +1927,7 @@ function openNewPurchase() {
   scannedItems = [];
   billFileBase64 = null;
   billFileName = null;
+  lastOcrRawText = '';
   document.getElementById('purchaseStep1').style.display = 'block';
   document.getElementById('purchaseStep2').style.display = 'none';
   document.getElementById('billPreviewWrap').style.display = 'none';
@@ -1974,22 +2036,22 @@ function processFile(file) {
 function parseBillText(text) {
   const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 1);
 
-  // Extract supplier name (usually in first 5 lines, all caps or large text)
+  // Extract supplier name from first 8 lines
   let supplierName = '';
-  for (let i = 0; i < Math.min(6, lines.length); i++) {
+  for (let i = 0; i < Math.min(8, lines.length); i++) {
     const line = lines[i];
-    // Look for company indicators
-    if (/(LTD|LIMITED|CO\.|COMPANY|INDUSTRIES|ENTERPRISES|TRADERS|SUPPLIERS)/i.test(line)) {
-      supplierName = line.replace(/[^a-zA-Z0-9\s\.]/g, '').trim();
+    if (/(LTD|LIMITED|CO\.|COMPANY|INDUSTRIES|ENTERPRISES|TRADERS|SUPPLIERS|AGENCY|STORE|HARDWARE|WHOLESALE)/i.test(line)) {
+      supplierName = line.replace(/[^a-zA-Z0-9\s\.&\-]/g, '').trim();
       break;
     }
   }
 
-  // Extract date
+  // Extract date — supports DD/MM/YYYY, YYYY-MM-DD, "12 Jan 2024", "Jan 12, 2024"
   let billDate = '';
   const datePatterns = [
     /(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{2,4})/,
     /(\d{4})[\/\-\.](\d{1,2})[\/\-\.](\d{1,2})/,
+    /(\d{1,2})\s+(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+(\d{4})/i,
     /(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*[\s,]+(\d{1,2})[\s,]+(\d{4})/i
   ];
   for (const line of lines) {
@@ -1997,7 +2059,7 @@ function parseBillText(text) {
       const m = line.match(pat);
       if (m) {
         try {
-          const d = new Date(line.match(pat)[0]);
+          const d = new Date(m[0]);
           if (!isNaN(d)) { billDate = d.toISOString().split('T')[0]; break; }
         } catch(e) {}
       }
@@ -2005,83 +2067,119 @@ function parseBillText(text) {
     if (billDate) break;
   }
 
-  // Extract total amount
+  // Extract total — look for the LAST occurrence of "total" pattern (grand total is usually last)
   let billTotal = null;
   const totalPatterns = [
-    /(?:total|grand total|amount due|net total|invoice total)[^\d]*([\d,]+\.?\d*)/i,
-    /(?:ksh|kes|ksh\.|kes\.)\s*([\d,]+\.?\d*)/i
+    /(?:grand\s*total|net\s*total|invoice\s*total|amount\s*due|bill\s*amount)[^\d]*([\d,]+\.?\d*)/i,
+    /total\s*[:\-]?\s*([\d,]+\.?\d*)/i,
+    /(?:rs\.?|inr|ksh\.?|kes\.?|₹)\s*([\d,]+\.?\d*)/i
   ];
-  for (const line of lines) {
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i];
     for (const pat of totalPatterns) {
       const m = line.match(pat);
-      if (m) { billTotal = parseFloat(m[1].replace(/,/g, '')); break; }
+      if (m) {
+        const val = parseFloat(m[1].replace(/,/g, ''));
+        if (val > 0) { billTotal = val; break; }
+      }
     }
     if (billTotal) break;
   }
 
-  // Extract line items
-  // Look for lines that have: description + quantity + price pattern
+  // ── Extract line items ──
+  // Strategy: find lines that look like: NAME  QTY  RATE  AMOUNT
+  // or: NAME  QTY@RATE  or  NAME  AMOUNT
   const items = [];
-  const itemPatterns = [
-    // Pattern: text ... number ... number (qty and price)
-    /^(.+?)\s+(\d+(?:\.\d+)?)\s+([\d,]+\.?\d*)\s+([\d,]+\.?\d*)$/,
-    // Pattern: text ... number x price
-    /^(.+?)\s+(\d+)\s*[xX@]\s*([\d,]+\.?\d*)$/,
-    // Pattern: text ... price only
-    /^(.+?)\s{2,}([\d,]+\.\d{2})$/
-  ];
 
-  // Skip header lines
-  const skipWords = /date|invoice|bill|no\.|page|phone|address|p\.o\.|po box|total|sub|vat|tax|tel|fax|email|www|company|account|payment|terms|thank/i;
+  // Skip lines matching these header/footer patterns
+  const skipWords = /^(date|invoice|bill\s*no|page|phone|address|p\.o\.|po\s*box|sub\s*total|vat|cgst|sgst|igst|tax|tel|fax|email|www\.|company|account|payment|terms|thank|narration|hsn|description|particulars|sr\s*no|s\.?no|qty|rate|amount|unit|uom|total|signature|authorized|debit|credit|balance|bank|cheque|neft|rtgs|gst\s*no|pan|cin|mob)/i;
+
+  const itemPatterns = [
+    // 4-column: name  qty  unit_price  total  (most common invoice format)
+    /^(.{3,50}?)\s{1,}(\d+(?:\.\d+)?)\s{1,}([\d,]+\.?\d+)\s{1,}([\d,]+\.?\d+)\s*$/,
+    // qty x rate: name  qty x rate
+    /^(.{3,50}?)\s+(\d+(?:\.\d+)?)\s*[xX@]\s*([\d,]+\.?\d*)\s*$/,
+    // 3-column: name  qty  total (qty then total, no unit price)
+    /^(.{3,50}?)\s{2,}(\d{1,4}(?:\.\d+)?)\s{2,}([\d,]+\.\d{2})\s*$/,
+    // 2-column: name  price (two or more spaces before price)
+    /^(.{3,50}?)\s{3,}([\d,]+\.\d{2})\s*$/
+  ];
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
-    if (skipWords.test(line)) continue;
     if (line.length < 4) continue;
+    if (skipWords.test(line)) continue;
+    // Skip lines that are mostly numbers (totals rows, serial numbers)
+    if (/^\d+\.?\s/.test(line) && line.replace(/\d|\s|\.|,/g,'').length < 3) continue;
 
-    for (const pat of itemPatterns) {
+    for (let pi = 0; pi < itemPatterns.length; pi++) {
+      const pat = itemPatterns[pi];
       const m = line.match(pat);
-      if (m) {
-        const name = m[1].trim();
-        if (name.length < 2) continue;
-        // Skip if name looks like an address or header
-        if (/^\d+$/.test(name)) continue;
+      if (!m) continue;
 
-        let qty = 1, unitPrice = 0, totalPrice = 0;
+      let name = m[1].trim();
+      // Clean up leading serial number (e.g. "1. " or "01 ")
+      name = name.replace(/^\d{1,3}[\.\)]\s*/, '').trim();
+      if (name.length < 2) continue;
+      if (/^\d+$/.test(name)) continue; // pure number name = not an item
+      if (skipWords.test(name)) continue;
 
-        if (m.length === 5) {
-          // Has qty, unit price, total
-          qty = parseFloat(m[2]) || 1;
-          unitPrice = parseFloat(m[3].replace(/,/g,'')) || 0;
-          totalPrice = parseFloat(m[4].replace(/,/g,'')) || 0;
-        } else if (m.length === 4) {
-          // Has qty x price
-          qty = parseFloat(m[2]) || 1;
-          unitPrice = parseFloat(m[3].replace(/,/g,'')) || 0;
-          totalPrice = qty * unitPrice;
-        } else {
-          // Price only
-          totalPrice = parseFloat(m[2].replace(/,/g,'')) || 0;
-          unitPrice = totalPrice;
+      let qty = 1, unitPrice = 0, totalPrice = 0;
+
+      if (pi === 0) {
+        // 4-column
+        qty = parseFloat(m[2]) || 1;
+        unitPrice = parseFloat(m[3].replace(/,/g,'')) || 0;
+        totalPrice = parseFloat(m[4].replace(/,/g,'')) || 0;
+        // sanity: total should roughly equal qty*unitPrice (within 5%)
+        const expected = qty * unitPrice;
+        if (totalPrice > 0 && expected > 0 && Math.abs(totalPrice - expected) / expected > 0.1) {
+          // try swapping unit/total
+          const swapExpected = qty * parseFloat(m[4].replace(/,/g,''));
+          if (Math.abs(parseFloat(m[3].replace(/,/g,'')) - swapExpected) / swapExpected < 0.1) {
+            unitPrice = parseFloat(m[4].replace(/,/g,''));
+            totalPrice = parseFloat(m[3].replace(/,/g,''));
+          }
         }
-
-        // Try to match to existing product
-        const nameLower = name.toLowerCase();
-        const matched = allProducts.find(p =>
-          p.product_name.toLowerCase().includes(nameLower.substring(0,6)) ||
-          nameLower.includes(p.product_name.toLowerCase().substring(0,6))
-        );
-
-        items.push({
-          product_name: name,
-          quantity: qty,
-          unit_price: unitPrice,
-          total_price: totalPrice,
-          matched_product_id: matched ? matched.product_id : null,
-          is_new: !matched
-        });
-        break;
+      } else if (pi === 1) {
+        // qty x rate
+        qty = parseFloat(m[2]) || 1;
+        unitPrice = parseFloat(m[3].replace(/,/g,'')) || 0;
+        totalPrice = qty * unitPrice;
+      } else if (pi === 2) {
+        // 3-column: name qty total
+        qty = parseFloat(m[2]) || 1;
+        totalPrice = parseFloat(m[3].replace(/,/g,'')) || 0;
+        unitPrice = qty > 0 ? totalPrice / qty : totalPrice;
+      } else {
+        // 2-column: name price
+        totalPrice = parseFloat(m[2].replace(/,/g,'')) || 0;
+        unitPrice = totalPrice;
       }
+
+      // Skip if all prices are 0 and qty is 1 (likely a header mis-match)
+      if (unitPrice === 0 && totalPrice === 0) continue;
+
+      // Try to match to existing product
+      const nameLower = name.toLowerCase();
+      const matched = allProducts.find(p => {
+        const pn = p.product_name.toLowerCase();
+        return pn.includes(nameLower.substring(0, Math.min(6, nameLower.length))) ||
+               nameLower.includes(pn.substring(0, Math.min(6, pn.length)));
+      });
+
+      items.push({
+        product_name: name,
+        quantity: qty,
+        unit_price: unitPrice,
+        total_price: totalPrice,
+        matched_product_id: matched ? matched.product_id : null,
+        is_new: !matched,
+        location: 'back',
+        main_qty: 0,
+        back_qty: qty
+      });
+      break;
     }
   }
 
@@ -2089,8 +2187,8 @@ function parseBillText(text) {
     supplier_name: supplierName,
     bill_total: billTotal,
     bill_date: billDate,
-    items: items,
-    raw_text: text  // keep for debugging
+    items,
+    raw_text: text
   };
 }
 
@@ -2161,12 +2259,14 @@ Return ONLY valid JSON, no markdown, no explanation:
     const rawText = ocrData.ParsedResults?.[0]?.ParsedText || '';
     if (!rawText.trim()) throw new Error('Could not read text from image. Try a clearer photo.');
 
+    lastOcrRawText = rawText;
+
     // ── Step 2: Parse the OCR text into structured data ──
     const result = parseBillText(rawText);
 
     // Auto-fill supplier and date if found
     if (result.supplier_name) {
-      const match = allSuppliers.find(s => s.supplier_name.toLowerCase().includes(result.supplier_name.toLowerCase()));
+      const match = allSuppliers.find(s => s.supplier_name.toLowerCase().includes(result.supplier_name.toLowerCase().substring(0,5)));
       if (match) document.getElementById('p_supplier').value = match.supplier_id;
     }
     if (result.bill_date) document.getElementById('p_date').value = result.bill_date;
@@ -2174,14 +2274,10 @@ Return ONLY valid JSON, no markdown, no explanation:
 
     scannedItems = result.items || [];
 
-    // Show raw text in console for debugging
-    if (result.raw_text) console.log('OCR Raw Text:', result.raw_text);
-
-    // If no items found, show the raw text so user can see what was read
     if (!scannedItems.length) {
-      const rawPreview = result.raw_text ? result.raw_text.substring(0, 300) : '';
-      showToast('No items auto-detected. Please add manually.', 'info');
-      console.log('Full OCR text:', result.raw_text);
+      showToast('Could not auto-read items — see raw text below and add manually.', 'info');
+    } else {
+      showToast(`Found ${scannedItems.length} item${scannedItems.length > 1 ? 's' : ''} from bill`, 'success');
     }
 
     // Apply saved mappings for this supplier
@@ -2265,9 +2361,23 @@ function skipScan() {
   showScanResults();
 }
 
+function toggleOcrRaw() {
+  const box = document.getElementById('ocrRawBox');
+  box.classList.toggle('open');
+}
+
 function showScanResults() {
   document.getElementById('purchaseStep1').style.display = 'none';
   document.getElementById('purchaseStep2').style.display = 'block';
+  // Show raw OCR text section if scan was used
+  const rawSection = document.getElementById('ocrRawSection');
+  const rawBox = document.getElementById('ocrRawBox');
+  if (lastOcrRawText) {
+    rawBox.textContent = lastOcrRawText;
+    rawSection.style.display = 'block';
+  } else {
+    rawSection.style.display = 'none';
+  }
   renderScanItems();
 }
 
@@ -2281,99 +2391,216 @@ function backToStep1() {
 function renderScanItems() {
   const el = document.getElementById('scanResultsList');
   if (!scannedItems.length) {
-    el.innerHTML = `<div style="color:var(--muted);font-size:13px;text-align:center;padding:20px 0;">No items found. Use + Add Item to add manually.</div>`;
+    el.innerHTML = `<div style="color:var(--muted);font-size:13px;text-align:center;padding:20px 0;">No items yet. Tap <b>+ Add Item</b> to add manually.</div>`;
     return;
   }
-
-  const productOptions = allProducts
-    .map(p => `<option value="${p.product_id}">${p.product_name}</option>`)
-    .join('');
 
   el.innerHTML = scannedItems.map((item, i) => {
     const isNew = item.is_new && !item.matched_product_id;
     const isMapped = item.auto_mapped;
-    const isManualMatched = item.matched_product_id && !item.auto_mapped && !item.is_new;
-    const needsMapping = !item.matched_product_id && !item.is_new;
+    const isManualMatched = item.matched_product_id && !item.auto_mapped;
 
     let badge = '';
     if (isMapped) badge = `<span class="mapped-badge">🔗 Auto-mapped</span>`;
     else if (isManualMatched) badge = `<span class="matched-badge">✓ Matched</span>`;
     else if (isNew) badge = `<span class="new-badge">🆕 New Product</span>`;
-    else badge = `<span class="unmapped-badge">❓ Needs Mapping</span>`;
+    else badge = `<span class="unmapped-badge">? Needs match</span>`;
 
     const displayName = item.matched_product_id
       ? (allProducts.find(p => p.product_id === item.matched_product_id)?.product_name || item.product_name)
       : item.product_name;
 
-    // Show product dropdown for unmapped or new items (so user can match them)
-    const mappingRow = (!isMapped) ? `
-      <div style="margin-bottom:8px;">
-        <div style="font-size:10px;color:var(--muted);margin-bottom:4px;font-weight:600;text-transform:uppercase;">
-          ${isNew ? 'Or match to existing product' : 'Match to your product'}
+    // ── Product picker row ──
+    let matchRow = '';
+    if (isMapped) {
+      matchRow = `
+        <div style="margin-bottom:8px;">
+          <div style="font-size:10px;color:var(--muted);margin-bottom:3px;font-weight:700;text-transform:uppercase;">Matched to</div>
+          <div style="font-size:12px;color:var(--accent);font-weight:600;">${displayName}</div>
+          <button onclick="unmapScanItem(${i})" style="background:none;border:none;color:var(--muted);font-size:11px;cursor:pointer;padding:2px 0;">Change ↓</button>
+        </div>`;
+    } else {
+      const placeholder = isNew ? 'Search to match existing, or leave as new...' : 'Search product...';
+      matchRow = `
+        <div style="margin-bottom:8px;">
+          <div style="font-size:10px;color:var(--muted);margin-bottom:3px;font-weight:700;text-transform:uppercase;">${isNew ? 'Match to existing product (optional)' : 'Match to your product'}</div>
+          <div class="scan-product-wrap" id="spw_${i}">
+            <input class="scan-product-input" id="spi_${i}" type="text"
+              placeholder="${placeholder}"
+              autocomplete="off"
+              oninput="filterScanProduct(${i}, this.value)"
+              onfocus="filterScanProduct(${i}, this.value)"
+              value="${item.matched_product_id ? displayName : (item.product_name || '')}">
+            <div class="scan-product-list" id="spl_${i}"></div>
+          </div>
+          ${item.matched_product_id ? `<button onclick="unmapScanItem(${i})" style="background:none;border:none;color:var(--muted);font-size:11px;cursor:pointer;padding:2px 0;margin-top:3px;">✕ Clear match</button>` : (isNew ? `<div style="font-size:10px;color:var(--warn);margin-top:3px;">Will be saved as new product</div>` : '')}
+        </div>`;
+    }
+
+    // ── Store selector ──
+    const loc = item.location || 'back';
+    const qty = parseInt(item.quantity) || 1;
+    const mainQty = item.main_qty !== undefined ? item.main_qty : 0;
+    const backQty = item.back_qty !== undefined ? item.back_qty : qty;
+
+    const storeRow = `
+      <div style="margin-top:8px;">
+        <div style="font-size:10px;color:var(--muted);margin-bottom:4px;font-weight:700;text-transform:uppercase;">Add to Store</div>
+        <div class="store-selector">
+          <button class="store-btn ${loc==='back'?'active-back':''}" onclick="setScanItemLocation(${i},'back')">Back Godown</button>
+          <button class="store-btn ${loc==='main'?'active-main':''}" onclick="setScanItemLocation(${i},'main')">Main Store</button>
+          <button class="store-btn ${loc==='split'?'active-split':''}" onclick="setScanItemLocation(${i},'split')">Split</button>
         </div>
-        <select class="scan-mini-input" style="width:100%;" onchange="matchScanItem(${i}, this.value)">
-          <option value="">— ${isNew ? 'Keep as new product' : 'Select your product'} —</option>
-          ${productOptions}
-        </select>
-      </div>` : `
-      <div style="margin-bottom:8px;">
-        <div style="font-size:10px;color:var(--muted);margin-bottom:4px;font-weight:600;text-transform:uppercase;">Matched to</div>
-        <div style="font-size:12px;color:var(--accent);font-weight:600;">${displayName}</div>
-        <button onclick="unmapItem(${i})" style="background:none;border:none;color:var(--muted);font-size:11px;cursor:pointer;padding:2px 0;">Change match ↓</button>
+        ${loc === 'split' ? `
+        <div class="split-qty-row">
+          <div>
+            <div class="split-qty-label">Back Godown</div>
+            <input class="scan-mini-input" type="number" value="${backQty}" min="0" max="${qty}"
+              onchange="updateScanItemSplit(${i},'back',this.value)" placeholder="0">
+          </div>
+          <div>
+            <div class="split-qty-label">Main Store</div>
+            <input class="scan-mini-input" type="number" value="${mainQty}" min="0" max="${qty}"
+              onchange="updateScanItemSplit(${i},'main',this.value)" placeholder="0">
+          </div>
+        </div>
+        <div style="font-size:10px;color:var(--muted);margin-top:4px;">Total received: <b>${qty}</b> · Back + Main must equal total</div>` : ''}
       </div>`;
 
     return `
       <div class="scan-result-item ${isNew && !item.matched_product_id ? 'new-product' : ''}" id="scanItem_${i}">
-        <div class="scan-item-header" style="margin-bottom:8px;">
+        <div class="scan-item-header">
           <div>
-            <div style="font-size:10px;color:var(--muted);font-weight:600;text-transform:uppercase;margin-bottom:2px;">On Bill</div>
-            <div class="scan-item-name">${item.product_name || 'Unnamed item'}</div>
+            <div style="font-size:10px;color:var(--muted);font-weight:700;text-transform:uppercase;margin-bottom:2px;">On Bill</div>
+            <div class="scan-item-name">${item.product_name || 'New Item'}</div>
           </div>
           <div style="display:flex;gap:6px;align-items:flex-start;">
             ${badge}
             <button class="scan-remove-btn" onclick="removeScanItem(${i})">✕</button>
           </div>
         </div>
-        ${mappingRow}
+        ${matchRow}
         <div class="scan-item-inputs">
           <div>
-            <div style="font-size:10px;color:var(--muted);margin-bottom:4px;font-weight:600;text-transform:uppercase;">Qty</div>
-            <input class="scan-mini-input" type="number" value="${item.quantity || 1}" min="1" onchange="updateScanItem(${i},'quantity',this.value)">
+            <div style="font-size:10px;color:var(--muted);margin-bottom:4px;font-weight:700;text-transform:uppercase;">Total Qty Received</div>
+            <input class="scan-mini-input" type="number" value="${qty}" min="1"
+              onchange="updateScanItem(${i},'quantity',this.value)">
           </div>
           <div>
-            <div style="font-size:10px;color:var(--muted);margin-bottom:4px;font-weight:600;text-transform:uppercase;">Unit Price (KES)</div>
-            <input class="scan-mini-input" type="number" value="${item.unit_price || ''}" min="0" placeholder="0.00" onchange="updateScanItem(${i},'unit_price',this.value)">
+            <div style="font-size:10px;color:var(--muted);margin-bottom:4px;font-weight:700;text-transform:uppercase;">Unit Price (KES)</div>
+            <input class="scan-mini-input" type="number" value="${item.unit_price || ''}" min="0" placeholder="0.00"
+              onchange="updateScanItem(${i},'unit_price',this.value)">
           </div>
         </div>
+        ${storeRow}
       </div>`;
   }).join('');
+
+  // Close dropdowns when clicking outside
+  document.querySelectorAll('.scan-product-list').forEach(list => {
+    list.style.display = 'none';
+  });
 }
 
-function matchScanItem(index, productId) {
-  if (!productId) {
-    // User chose "keep as new"
+// ── Product search for scan items ──
+function filterScanProduct(index, query) {
+  const list = document.getElementById('spl_' + index);
+  if (!list) return;
+  const q = query.toLowerCase().trim();
+  const item = scannedItems[index];
+  const isNew = item.is_new && !item.matched_product_id;
+
+  let matches = allProducts.filter(p => !q || p.product_name.toLowerCase().includes(q)).slice(0, 10);
+
+  let html = '';
+  if (isNew && !item.matched_product_id) {
+    html += `<div class="scan-product-opt keep-new" onclick="selectScanProduct(${index}, null, null)">Keep as new product: "${item.product_name || query}"</div>`;
+  }
+  html += matches.map(p => {
+    const hl = q ? p.product_name.replace(new RegExp(`(${q.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')})`, 'gi'), '<mark>$1</mark>') : p.product_name;
+    return `<div class="scan-product-opt" onclick="selectScanProduct(${index},${p.product_id},'${p.product_name.replace(/'/g,"\\'")}')">${hl}</div>`;
+  }).join('');
+
+  if (!html) html = `<div class="scan-product-opt" style="color:var(--muted);pointer-events:none;">No matches found</div>`;
+  list.innerHTML = html;
+  list.classList.add('open');
+
+  // Close on outside click
+  setTimeout(() => {
+    const closeHandler = (e) => {
+      const wrap = document.getElementById('spw_' + index);
+      if (wrap && !wrap.contains(e.target)) {
+        list.classList.remove('open');
+        document.removeEventListener('click', closeHandler);
+      }
+    };
+    document.addEventListener('click', closeHandler);
+  }, 0);
+}
+
+function selectScanProduct(index, productId, productName) {
+  if (productId === null) {
     scannedItems[index].matched_product_id = null;
     scannedItems[index].is_new = true;
     scannedItems[index].auto_mapped = false;
   } else {
-    scannedItems[index].matched_product_id = parseInt(productId);
+    scannedItems[index].matched_product_id = productId;
     scannedItems[index].is_new = false;
-    scannedItems[index].auto_mapped = false; // manually matched
+    scannedItems[index].auto_mapped = false;
   }
   renderScanItems();
 }
 
-function unmapItem(index) {
+function unmapScanItem(index) {
   scannedItems[index].matched_product_id = null;
   scannedItems[index].auto_mapped = false;
-  scannedItems[index].is_new = false;
+  scannedItems[index].is_new = !!(scannedItems[index].product_name);
   renderScanItems();
 }
 
+// ── Store location helpers ──
+function setScanItemLocation(index, loc) {
+  scannedItems[index].location = loc;
+  const qty = parseInt(scannedItems[index].quantity) || 1;
+  if (loc === 'back')  { scannedItems[index].back_qty = qty; scannedItems[index].main_qty = 0; }
+  if (loc === 'main')  { scannedItems[index].main_qty = qty; scannedItems[index].back_qty = 0; }
+  if (loc === 'split') { scannedItems[index].back_qty = qty; scannedItems[index].main_qty = 0; }
+  renderScanItems();
+}
+
+function updateScanItemSplit(index, side, value) {
+  const qty = parseInt(scannedItems[index].quantity) || 1;
+  const v = Math.max(0, Math.min(qty, parseInt(value) || 0));
+  if (side === 'back') {
+    scannedItems[index].back_qty = v;
+    scannedItems[index].main_qty = qty - v;
+  } else {
+    scannedItems[index].main_qty = v;
+    scannedItems[index].back_qty = qty - v;
+  }
+}
+
 function updateScanItem(index, field, value) {
+  const oldQty = parseInt(scannedItems[index].quantity) || 1;
   scannedItems[index][field] = parseFloat(value) || 0;
-  if (field === 'quantity' || field === 'unit_price') {
-    scannedItems[index].total_price = (scannedItems[index].quantity || 0) * (scannedItems[index].unit_price || 0);
+  if (field === 'quantity') {
+    const newQty = parseInt(value) || 1;
+    // Keep split proportions when qty changes
+    const loc = scannedItems[index].location || 'back';
+    if (loc === 'back')  { scannedItems[index].back_qty = newQty; scannedItems[index].main_qty = 0; }
+    if (loc === 'main')  { scannedItems[index].main_qty = newQty; scannedItems[index].back_qty = 0; }
+    if (loc === 'split') {
+      // scale proportionally
+      const ratio = oldQty > 0 ? (scannedItems[index].back_qty / oldQty) : 1;
+      scannedItems[index].back_qty = Math.round(newQty * ratio);
+      scannedItems[index].main_qty = newQty - scannedItems[index].back_qty;
+    }
+    scannedItems[index].total_price = newQty * (scannedItems[index].unit_price || 0);
+    renderScanItems();
+    return;
+  }
+  if (field === 'unit_price') {
+    scannedItems[index].total_price = (scannedItems[index].quantity || 0) * (parseFloat(value) || 0);
   }
 }
 
@@ -2383,21 +2610,49 @@ function removeScanItem(index) {
 }
 
 function addManualItem() {
-  scannedItems.push({ product_name: '', quantity: 1, unit_price: 0, total_price: 0, matched_product_id: null, is_new: true });
+  scannedItems.push({
+    product_name: 'New Item',
+    quantity: 1,
+    unit_price: 0,
+    total_price: 0,
+    matched_product_id: null,
+    is_new: true,
+    location: 'back',
+    back_qty: 1,
+    main_qty: 0
+  });
   renderScanItems();
-  // Focus last item name
   setTimeout(() => {
-    const items = document.querySelectorAll('.scan-item-name');
-    if (items.length) items[items.length-1].closest('.scan-result-item').scrollIntoView({ behavior: 'smooth' });
+    const items = document.querySelectorAll('.scan-result-item');
+    if (items.length) {
+      items[items.length - 1].scrollIntoView({ behavior: 'smooth' });
+      // Focus the search input of the last item
+      const lastIdx = scannedItems.length - 1;
+      const inp = document.getElementById('spi_' + lastIdx);
+      if (inp) { inp.value = ''; inp.focus(); }
+    }
   }, 100);
 }
 
 function showConfirmSummary() {
-  // Show summary modal before final save
   const supplierId = document.getElementById('p_supplier').value || null;
   const date = document.getElementById('p_date').value;
   if (!date) { showToast('Please select a date', 'error'); return; }
   if (!scannedItems.length) { showToast('Add at least one item', 'error'); return; }
+
+  // Validate splits
+  for (let i = 0; i < scannedItems.length; i++) {
+    const item = scannedItems[i];
+    if (item.location === 'split') {
+      const total = parseInt(item.quantity) || 1;
+      const back = parseInt(item.back_qty) || 0;
+      const main = parseInt(item.main_qty) || 0;
+      if (back + main !== total) {
+        showToast(`Item ${i+1}: Back + Main must equal ${total} (got ${back}+${main})`, 'error');
+        return;
+      }
+    }
+  }
 
   const supplier = supplierId ? allSuppliers.find(s => s.supplier_id == supplierId) : null;
   const sName = supplier ? supplier.supplier_name : 'No supplier selected';
@@ -2408,20 +2663,33 @@ function showConfirmSummary() {
       <div style="font-weight:700;margin-bottom:4px;">${sName}</div>
       <div style="color:var(--muted);">📅 ${date}${total ? ' · KES ' + Number(total).toLocaleString() : ''}</div>
     </div>
-    <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">Items to add to Back Godown</div>`;
+    <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">Stock Distribution</div>`;
 
   scannedItems.forEach(item => {
     const prod = item.matched_product_id ? allProducts.find(p => p.product_id === item.matched_product_id) : null;
     const name = prod ? prod.product_name : (item.product_name || 'Unnamed');
     const isNew = !item.matched_product_id;
+    const loc = item.location || 'back';
+    const qty = parseInt(item.quantity) || 1;
+
+    let locationLine = '';
+    if (loc === 'back') locationLine = `<span style="color:var(--warn)">Back Godown: +${qty}</span>`;
+    else if (loc === 'main') locationLine = `<span style="color:var(--accent)">Main Store: +${qty}</span>`;
+    else {
+      const b = parseInt(item.back_qty) || 0;
+      const m = parseInt(item.main_qty) || 0;
+      locationLine = `<span style="color:var(--warn)">Back: +${b}</span> · <span style="color:var(--accent)">Main: +${m}</span>`;
+    }
+
     summaryHtml += `
-      <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border);font-size:13px;">
-        <div>
-          <div style="font-weight:600;">${name}</div>
-          ${isNew ? '<div style="font-size:10px;color:var(--warn);">🆕 Will be created as new product</div>' : ''}
-          ${item.unit_price ? `<div style="font-size:11px;color:var(--muted);">KES ${item.unit_price}/unit</div>` : ''}
+      <div style="padding:8px 0;border-bottom:1px solid var(--border);font-size:13px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;">
+          <div style="font-weight:600;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${name}</div>
+          <div style="font-weight:700;font-size:15px;flex-shrink:0;margin-left:8px;">×${qty}</div>
         </div>
-        <div style="font-weight:700;color:var(--accent);font-size:16px;">+${item.quantity}</div>
+        ${isNew ? '<div style="font-size:10px;color:var(--warn);margin-top:2px;">🆕 New product will be created</div>' : ''}
+        ${item.unit_price ? `<div style="font-size:11px;color:var(--muted);margin-top:1px;">KES ${item.unit_price}/unit</div>` : ''}
+        <div style="font-size:11px;margin-top:4px;">${locationLine}</div>
       </div>`;
   });
 
@@ -2510,23 +2778,45 @@ async function confirmPurchase() {
         })
       });
 
-      // Update stock in Back Godown
+      // Update stock based on store selection
       if (productId) {
-        const qty = parseInt(item.quantity) || 1;
-        await upsertLocationStock(productId, 2, (locationStock[productId]?.[2] ?? 0) + qty);
-        await fetch(`${SUPABASE_URL}/rest/v1/stock_movements`, {
-          method: 'POST', headers: H,
-          body: JSON.stringify({
-            product_id: productId,
-            to_location_id: 2,
-            quantity: qty,
-            movement_type: 'PURCHASE_IN',
-            reason: `Purchase #${purchaseId}`,
-            performed_by: currentUser.db_id,
-            approved_by: currentUser.db_id,
-            status: 'APPROVED'
-          })
-        });
+        const totalQty = parseInt(item.quantity) || 1;
+        const loc = item.location || 'back';
+        const backQty = loc === 'back' ? totalQty : (loc === 'split' ? (parseInt(item.back_qty) || 0) : 0);
+        const mainQty = loc === 'main' ? totalQty : (loc === 'split' ? (parseInt(item.main_qty) || 0) : 0);
+
+        if (backQty > 0) {
+          await upsertLocationStock(productId, 2, (locationStock[productId]?.[2] ?? 0) + backQty);
+          await fetch(`${SUPABASE_URL}/rest/v1/stock_movements`, {
+            method: 'POST', headers: H,
+            body: JSON.stringify({
+              product_id: productId,
+              to_location_id: 2,
+              quantity: backQty,
+              movement_type: 'PURCHASE_IN',
+              reason: `Purchase #${purchaseId}`,
+              performed_by: currentUser.db_id,
+              approved_by: currentUser.db_id,
+              status: 'APPROVED'
+            })
+          });
+        }
+        if (mainQty > 0) {
+          await upsertLocationStock(productId, 1, (locationStock[productId]?.[1] ?? 0) + mainQty);
+          await fetch(`${SUPABASE_URL}/rest/v1/stock_movements`, {
+            method: 'POST', headers: H,
+            body: JSON.stringify({
+              product_id: productId,
+              to_location_id: 1,
+              quantity: mainQty,
+              movement_type: 'PURCHASE_IN',
+              reason: `Purchase #${purchaseId}`,
+              performed_by: currentUser.db_id,
+              approved_by: currentUser.db_id,
+              status: 'APPROVED'
+            })
+          });
+        }
       }
     }
 
