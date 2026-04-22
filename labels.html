@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<script>
+  (function(){
+    var t = localStorage.getItem('ae_theme') || 'dark';
+    document.documentElement.setAttribute('data-theme', t);
+    document.documentElement.style.colorScheme = t;
+  })();
+</script>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Label Printer · Aadinath</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
+<style>
+:root { --radius: 10px; --radius-lg: 16px; }
+:root, [data-theme="dark"] {
+  --bg: #0d0f12; --surface: #13161b; --surface2: #1a1e25; --surface3: #21262f;
+  --border: #252b35; --border2: #2e3540; --accent: #4ade80; --accent-dim: #16a34a;
+  --accent-glow: rgba(74,222,128,0.15); --text: #e8edf2; --text2: #a8b3c0;
+  --muted: #5a6678; --danger: #f87171; --danger-dim: rgba(248,113,113,0.12);
+  --success: #4ade80; --success-dim: rgba(74,222,128,0.12);
+  --warn: #fbbf24; --warn-dim: rgba(251,191,36,0.12);
+  --blue: #60a5fa; --purple: #a78bfa;
+}
+[data-theme="light"] {
+  --bg: #f5f6f8; --surface: #ffffff; --surface2: #f0f2f5; --surface3: #e8ebf0;
+  --border: #e2e5eb; --border2: #cdd1da; --accent: #16a34a; --accent-dim: #15803d;
+  --accent-glow: rgba(22,163,74,0.12); --text: #111827; --text2: #374151;
+  --muted: #9ca3af; --danger: #dc2626; --danger-dim: rgba(220,38,38,0.08);
+  --success: #16a34a; --success-dim: rgba(22,163,74,0.08);
+  --warn: #d97706; --warn-dim: rgba(217,119,6,0.08);
+  --blue: #2563eb; --purple: #7c3aed;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: 'DM Sans', sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; font-size: 14px; -webkit-font-smoothing: antialiased; display: flex; flex-direction: column; }
+
+/* HEADER */
+header { background: var(--surface); border-bottom: 1px solid var(--border); padding: 10px 16px; display: flex; align-items: center; gap: 10px; position: sticky; top: 0; z-index: 200; flex-shrink: 0; }
+.back-btn { background: var(--surface2); border: 1px solid var(--border); border-radius: 6px; color: var(--text2); padding: 5px 10px; font-size: 13px; font-family: 'DM Sans', sans-serif; cursor: pointer; text-decoration: none; display: inline-flex; align-items: center; gap: 5px; transition: border-color 0.15s; }
+.back-btn:hover { border-color: var(--border2); }
+.header-title { font-size: 15px; font-weight: 700; flex: 1; }
+.print-btn { background: var(--accent); color: #000; border: none; border-radius: 6px; padding: 7px 16px; font-size: 13px; font-family: 'DM Sans', sans-serif; font-weight: 700; cursor: pointer; transition: opacity 0.15s; display: flex; align-items: center; gap: 6px; }
+.print-btn:hover { opacity: 0.85; }
+.print-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.label-count { font-size: 12px; color: var(--muted); font-family: 'DM Mono', monospace; white-space: nowrap; }
+
+/* LAYOUT */
+.app-body { flex: 1; display: flex; min-height: 0; }
+
+/* SIDEBAR */
+.sidebar { width: 280px; flex-shrink: 0; background: var(--surface); border-right: 1px solid var(--border); display: flex; flex-direction: column; }
+.sidebar-top { padding: 12px; border-bottom: 1px solid var(--border); }
+.search-wrap { position: relative; }
+.search-wrap input { width: 100%; background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text); padding: 8px 10px 8px 32px; font-family: 'DM Sans', sans-serif; font-size: 13px; outline: none; transition: border-color 0.15s; }
+.search-wrap input:focus { border-color: var(--border2); }
+.search-wrap .si { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); color: var(--muted); font-size: 13px; pointer-events: none; }
+.sidebar-actions { display: flex; gap: 6px; margin-top: 8px; }
+.sa-btn { flex: 1; padding: 5px 8px; font-size: 11px; font-family: 'DM Sans', sans-serif; font-weight: 600; border-radius: 5px; border: 1px solid var(--border); background: var(--surface2); color: var(--muted); cursor: pointer; transition: all 0.15s; text-align: center; }
+.sa-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+.sidebar-list { flex: 1; overflow-y: auto; padding: 8px; display: flex; flex-direction: column; gap: 3px; }
+.sidebar-list::-webkit-scrollbar { width: 4px; }
+.sidebar-list::-webkit-scrollbar-track { background: transparent; }
+.sidebar-list::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 2px; }
+
+.prod-item { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 8px; cursor: pointer; transition: background 0.1s; border: 1px solid transparent; }
+.prod-item:hover { background: var(--surface2); }
+.prod-item.selected { background: var(--success-dim); border-color: rgba(74,222,128,0.2); }
+.prod-check { width: 16px; height: 16px; border-radius: 4px; border: 1.5px solid var(--border2); display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: 10px; transition: all 0.15s; }
+.prod-item.selected .prod-check { background: var(--accent); border-color: var(--accent); color: #000; }
+.prod-info { flex: 1; min-width: 0; }
+.prod-name { font-size: 12px; font-weight: 600; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.prod-sku  { font-size: 10px; color: var(--muted); font-family: 'DM Mono', monospace; margin-top: 1px; }
+.copies-inp { width: 36px; text-align: center; background: var(--surface2); border: 1px solid var(--border); border-radius: 5px; color: var(--text); padding: 3px 4px; font-family: 'DM Sans', sans-serif; font-size: 12px; font-weight: 700; outline: none; flex-shrink: 0; }
+.copies-inp:focus { border-color: var(--accent); }
+
+/* PREVIEW AREA */
+.preview-area { flex: 1; overflow-y: auto; padding: 20px; }
+.empty-state { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; min-height: 300px; color: var(--muted); text-align: center; }
+.empty-state .big { font-size: 40px; margin-bottom: 12px; }
+.empty-state p { font-size: 13px; }
+
+/* LABEL GRID — 4×6 per page */
+.label-page { background: white; width: 210mm; min-height: 297mm; margin: 0 auto 20px; padding: 10mm 5mm; display: grid; grid-template-columns: repeat(4, 1fr); grid-template-rows: repeat(6, 1fr); gap: 0; box-shadow: 0 4px 20px rgba(0,0,0,0.3); border-radius: 4px; }
+
+.label { border: 0.5px dashed #ccc; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 4px 6px; height: calc((297mm - 20mm) / 6); overflow: hidden; }
+.label-barcode svg { max-width: 100%; height: 40px; }
+.label-name { font-size: 7px; font-weight: 600; color: #111; text-align: center; margin-top: 2px; line-height: 1.2; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: 'DM Sans', sans-serif; }
+.label-price { font-size: 8px; font-weight: 700; color: #000; margin-top: 2px; font-family: 'DM Sans', sans-serif; }
+.label-nosku { font-size: 8px; color: #888; font-family: 'DM Mono', monospace; }
+
+/* LOADER */
+.loader { display: flex; align-items: center; justify-content: center; padding: 60px; color: var(--muted); gap: 8px; }
+.spinner { width: 18px; height: 18px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.7s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* TOAST */
+.toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%) translateY(60px); background: var(--surface3); border: 1px solid var(--border2); color: var(--text); border-radius: 8px; padding: 10px 20px; font-size: 13px; font-weight: 600; z-index: 999; transition: transform 0.25s ease; white-space: nowrap; box-shadow: 0 4px 20px rgba(0,0,0,0.4); pointer-events: none; }
+.toast.show { transform: translateX(-50%) translateY(0); }
+.toast.success { background: var(--success-dim); border-color: rgba(74,222,128,0.3); color: var(--accent); }
+.toast.error   { background: var(--danger-dim); border-color: rgba(248,113,113,0.3); color: var(--danger); }
+
+/* ─── PRINT STYLES ─────────────────────── */
+@media print {
+  * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+  header, .sidebar, .preview-area > .empty-state { display: none !important; }
+  .app-body { display: block; }
+  .preview-area { padding: 0; overflow: visible; }
+  .label-page { box-shadow: none; border-radius: 0; margin: 0; page-break-after: always; }
+  .label-page:last-child { page-break-after: auto; }
+  .label { border-color: #ddd; }
+  /* Force barcode elements to black */
+  .label-barcode svg rect { fill: #000 !important; }
+  .label-barcode svg text { fill: #000 !important; }
+  @page { size: A4; margin: 0; }
+}
+</style>
+</head>
+<body>
+
+<header>
+  <a href="index.html" class="back-btn">← Back</a>
+  <div class="header-title">🏷️ Label Printer</div>
+  <div class="label-count" id="labelCount">0 labels</div>
+  <button class="print-btn" id="printBtn" onclick="doPrint()" disabled>🖨️ Print</button>
+</header>
+
+<div class="app-body">
+
+  <div class="sidebar">
+    <div class="sidebar-top">
+      <div class="search-wrap">
+        <span class="si">🔍</span>
+        <input type="text" id="searchInput" placeholder="Search products…" oninput="renderList()">
+      </div>
+      <div class="sidebar-actions">
+        <div class="sa-btn" onclick="selectAll()">Select All</div>
+        <div class="sa-btn" onclick="clearAll()">Clear All</div>
+      </div>
+    </div>
+    <div class="sidebar-list" id="prodList">
+      <div class="loader"><div class="spinner"></div></div>
+    </div>
+  </div>
+
+  <div class="preview-area" id="previewArea">
+    <div class="empty-state">
+      <div class="big">🏷️</div>
+      <p>Select products from the sidebar<br>to generate barcode labels.</p>
+    </div>
+  </div>
+
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const SUPABASE_URL = 'https://mculftdutoavwueluyma.supabase.co';
+const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1jdWxmdGR1dG9hdnd1ZWx1eW1hIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ0Mjk2NzAsImV4cCI6MjA5MDAwNTY3MH0.s-OLgLDXR5aN3uQlS5yAO2sk6Bot0TibtI4qFjrzZh4';
+const H = { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` };
+
+let allProducts = [], selected = {}; // { productId: copies }
+
+async function init() {
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/products?select=*&active_status=eq.true&order=product_name.asc`, { headers: H });
+    if (!res.ok) throw new Error(await res.text());
+    allProducts = await res.json();
+    renderList();
+  } catch(e) {
+    document.getElementById('prodList').innerHTML = `<div style="padding:16px;color:var(--danger);font-size:12px;">${e.message}</div>`;
+  }
+}
+
+function renderList() {
+  const q = document.getElementById('searchInput').value.toLowerCase();
+  const filtered = allProducts.filter(p =>
+    !q || p.product_name.toLowerCase().includes(q) || (p.stock_keeping_unit || '').toLowerCase().includes(q) || (p.type || '').toLowerCase().includes(q)
+  );
+  const el = document.getElementById('prodList');
+  if (!filtered.length) { el.innerHTML = `<div style="padding:16px;text-align:center;color:var(--muted);font-size:12px;">No products found</div>`; return; }
+  el.innerHTML = filtered.map(p => `
+    <div class="prod-item ${selected[p.product_id] ? 'selected' : ''}" onclick="toggleProduct(${p.product_id})" id="pi_${p.product_id}">
+      <div class="prod-check">${selected[p.product_id] ? '✓' : ''}</div>
+      <div class="prod-info">
+        <div class="prod-name">${p.product_name}</div>
+        <div class="prod-sku">${p.stock_keeping_unit || 'No SKU'}</div>
+      </div>
+      ${selected[p.product_id] ? `
+        <input class="copies-inp" type="number" value="${selected[p.product_id]}" min="1" max="99"
+          onclick="event.stopPropagation()" onchange="setCopies(${p.product_id}, this.value)" title="Copies">
+      ` : ''}
+    </div>`).join('');
+}
+
+function toggleProduct(id) {
+  if (selected[id]) delete selected[id];
+  else selected[id] = 1;
+  renderList();
+  renderPreview();
+}
+
+function setCopies(id, val) {
+  const n = Math.max(1, Math.min(99, parseInt(val) || 1));
+  if (selected[id] !== undefined) { selected[id] = n; renderPreview(); }
+}
+
+function selectAll() {
+  allProducts.forEach(p => { if (!selected[p.product_id]) selected[p.product_id] = 1; });
+  renderList(); renderPreview();
+}
+
+function clearAll() {
+  selected = {};
+  renderList(); renderPreview();
+}
+
+const LABELS_PER_PAGE = 24;
+
+function renderPreview() {
+  const preview = document.getElementById('previewArea');
+  const printBtn = document.getElementById('printBtn');
+  const countEl  = document.getElementById('labelCount');
+
+  // Build flat list of labels
+  const labels = [];
+  allProducts.forEach(p => {
+    const copies = selected[p.product_id];
+    if (!copies) return;
+    for (let i = 0; i < copies; i++) labels.push(p);
+  });
+
+  countEl.textContent = `${labels.length} label${labels.length !== 1 ? 's' : ''}`;
+  printBtn.disabled = labels.length === 0;
+
+  if (!labels.length) {
+    preview.innerHTML = `<div class="empty-state"><div class="big">🏷️</div><p>Select products from the sidebar<br>to generate barcode labels.</p></div>`;
+    return;
+  }
+
+  // Split into pages of 24
+  const pages = [];
+  for (let i = 0; i < labels.length; i += LABELS_PER_PAGE) {
+    pages.push(labels.slice(i, i + LABELS_PER_PAGE));
+  }
+
+  preview.innerHTML = pages.map((page, pi) => `
+    <div class="label-page" id="page_${pi}">
+      ${page.map((p, li) => `
+        <div class="label" id="lbl_${pi}_${li}">
+          ${p.stock_keeping_unit
+            ? `<div class="label-barcode"><svg id="bc_${pi}_${li}"></svg></div>`
+            : `<div class="label-nosku">${p.product_name.substring(0,16)}</div>`}
+          <div class="label-name">${p.product_name}</div>
+          ${p.selling_price != null ? `<div class="label-price">₹${p.selling_price}</div>` : ''}
+        </div>`).join('')}
+    </div>`).join('');
+
+  // Render barcodes
+  pages.forEach((page, pi) => {
+    page.forEach((p, li) => {
+      if (!p.stock_keeping_unit) return;
+      const svgEl = document.getElementById(`bc_${pi}_${li}`);
+      if (!svgEl) return;
+      try {
+        JsBarcode(svgEl, p.stock_keeping_unit, {
+          format: 'CODE128',
+          width: 1.2,
+          height: 32,
+          displayValue: true,
+          fontSize: 7,
+          margin: 2,
+          background: '#ffffff',
+          lineColor: '#000000',
+          textMargin: 2,
+          fontOptions: ''
+        });
+      } catch(e) {
+        svgEl.parentElement.innerHTML = `<div class="label-nosku">BAD SKU</div>`;
+      }
+    });
+  });
+}
+
+function doPrint() {
+  window.print();
+}
+
+let toastTimer;
+function showToast(msg, type = '') {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = 'toast' + (type ? ' ' + type : '');
+  t.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove('show'), 2400);
+}
+
+init();
+</script>
+</body>
+</html>

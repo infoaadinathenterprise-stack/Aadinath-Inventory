@@ -422,6 +422,8 @@ main { padding: 14px; max-width: 900px; margin: 0 auto; padding-bottom: 76px; }
     <div class="user-pill" id="userPill" onclick="openSwitchOverlay()" title="Switch account">—</div>
     <button id="pendingBadgeBtn" onclick="togglePendingPanel()">⏳ <span id="pendingCount">0</span> Pending</button>
     <button class="header-add-btn" onclick="openAddModal()">+ Add</button>
+    <a href="pricing.html" class="header-add-btn" id="pricesBtn" style="display:none;text-decoration:none;background:var(--purple);color:#fff;">💰 Prices</a>
+    <a href="labels.html"  class="header-add-btn" id="labelsBtn" style="display:none;text-decoration:none;background:var(--blue);color:#fff;">🏷️ Labels</a>
     <button class="theme-toggle-btn" id="themeToggleBtn" onclick="toggleTheme()" title="Toggle light/dark mode">🌙</button>
     <button class="logout-btn" onclick="doLogout()">Logout</button>
   </div>
@@ -939,6 +941,8 @@ function showApp() {
   const icon = currentUser.role === 'admin' ? '👑' : '👤';
   document.getElementById('userPill').innerHTML = `${icon} ${currentUser.name} ⇄`;
   document.getElementById('pendingBadgeBtn').style.display = currentUser.role === 'admin' ? 'inline-flex' : 'none';
+  document.getElementById('pricesBtn').style.display = currentUser.role === 'admin' ? 'inline-flex' : 'none';
+  document.getElementById('labelsBtn').style.display = currentUser.role === 'admin' ? 'inline-flex' : 'none';
   fetchAll();
 }
 
@@ -995,6 +999,8 @@ function instantSwitch(u) {
     const icon = currentUser.role === 'admin' ? '👑' : '👤';
     document.getElementById('userPill').innerHTML = `${icon} ${currentUser.name} ⇄`;
     document.getElementById('pendingBadgeBtn').style.display = currentUser.role === 'admin' ? 'inline-flex' : 'none';
+    document.getElementById('pricesBtn').style.display = currentUser.role === 'admin' ? 'inline-flex' : 'none';
+    document.getElementById('labelsBtn').style.display = currentUser.role === 'admin' ? 'inline-flex' : 'none';
     showToast(`Switched to ${currentUser.name} ✓`, 'success');
     fetchAll();
   } else {
@@ -1026,6 +1032,8 @@ function confirmSwitchLogin() {
     const icon = currentUser.role === 'admin' ? '👑' : '👤';
     document.getElementById('userPill').innerHTML = `${icon} ${currentUser.name} ⇄`;
     document.getElementById('pendingBadgeBtn').style.display = currentUser.role === 'admin' ? 'inline-flex' : 'none';
+    document.getElementById('pricesBtn').style.display = currentUser.role === 'admin' ? 'inline-flex' : 'none';
+    document.getElementById('labelsBtn').style.display = currentUser.role === 'admin' ? 'inline-flex' : 'none';
     showToast(`Switched to ${currentUser.name} ✓`, 'success');
     fetchAll();
   } else {
