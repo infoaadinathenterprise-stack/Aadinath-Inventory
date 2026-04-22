@@ -36,18 +36,20 @@
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body { font-family: 'DM Sans', sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; font-size: 14px; -webkit-font-smoothing: antialiased; display: flex; flex-direction: column; overflow: hidden; height: 100vh; }
 
-header { background: var(--surface); border-bottom: 1px solid var(--border); padding: 10px 16px; display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
-.back-btn { background: var(--surface2); border: 1px solid var(--border); border-radius: 6px; color: var(--text2); padding: 5px 10px; font-size: 13px; font-family: 'DM Sans', sans-serif; cursor: pointer; text-decoration: none; display: inline-flex; align-items: center; gap: 5px; transition: border-color 0.15s; }
+/* ── HEADER ──────────────────────────────── */
+header { background: var(--surface); border-bottom: 1px solid var(--border); padding: 10px 14px; display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+.back-btn { background: var(--surface2); border: 1px solid var(--border); border-radius: 6px; color: var(--text2); padding: 5px 10px; font-size: 13px; font-family: 'DM Sans', sans-serif; cursor: pointer; text-decoration: none; display: inline-flex; align-items: center; gap: 5px; transition: border-color 0.15s; flex-shrink: 0; }
 .back-btn:hover { border-color: var(--border2); }
 .header-title { font-size: 15px; font-weight: 700; flex: 1; }
 .progress-text { font-size: 12px; color: var(--muted); font-family: 'DM Mono', monospace; white-space: nowrap; }
+.search-btn { background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; color: var(--text2); padding: 6px 10px; font-size: 16px; cursor: pointer; transition: all 0.15s; flex-shrink: 0; line-height: 1; }
+.search-btn:hover { border-color: var(--accent); color: var(--accent); }
 
 .progress-bar-wrap { height: 3px; background: var(--surface2); flex-shrink: 0; }
 .progress-bar-fill { height: 100%; background: var(--accent); transition: width 0.4s ease; width: 0%; }
 
+/* ── CARD AREA ────────────────────────────── */
 .pricing-main { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 16px; overflow: hidden; }
-
-/* CARD STACK */
 .card-stack { position: relative; width: 100%; max-width: 400px; height: 440px; }
 .price-card { position: absolute; inset: 0; background: var(--surface); border: 1px solid var(--border2); border-radius: 20px; padding: 22px; cursor: grab; user-select: none; touch-action: none; box-shadow: 0 12px 40px rgba(0,0,0,0.3); will-change: transform; transition: box-shadow 0.2s; overflow: hidden; }
 .price-card:active { cursor: grabbing; }
@@ -72,7 +74,7 @@ header { background: var(--surface); border-bottom: 1px solid var(--border); pad
 .stock-chip-num { font-size: 22px; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; }
 .stock-chip-label { font-size: 8px; margin-top: 2px; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 700; }
 
-.cur-prices-row { display: flex; gap: 8px; margin-bottom: 14px; }
+.cur-prices-row { display: flex; gap: 8px; margin-bottom: 14px; flex-wrap: wrap; }
 .cur-price-chip { font-size: 11px; background: var(--surface2); border: 1px solid var(--border); border-radius: 5px; padding: 3px 9px; color: var(--muted); }
 .cur-price-chip b { color: var(--text2); }
 
@@ -82,7 +84,7 @@ header { background: var(--surface); border-bottom: 1px solid var(--border); pad
 .price-field input::-webkit-outer-spin-button, .price-field input::-webkit-inner-spin-button { -webkit-appearance: none; }
 .price-field input:focus { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-glow); }
 
-/* BOTTOM ACTION BAR */
+/* ── ACTION BAR ───────────────────────────── */
 .action-bar { background: var(--surface); border-top: 1px solid var(--border); display: flex; align-items: center; justify-content: center; gap: 20px; padding: 14px 20px 30px; flex-shrink: 0; }
 .action-col { display: flex; flex-direction: column; align-items: center; gap: 4px; }
 .action-circle { width: 58px; height: 58px; border-radius: 50%; border: none; display: flex; align-items: center; justify-content: center; font-size: 22px; cursor: pointer; transition: transform 0.15s, opacity 0.15s; font-family: 'DM Sans', sans-serif; }
@@ -94,30 +96,65 @@ header { background: var(--surface); border-bottom: 1px solid var(--border); pad
 .btn-save:hover { background: var(--accent); color: #fff; }
 .action-label { font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: var(--muted); }
 
-/* SCREENS */
+/* ── SCREENS ──────────────────────────────── */
 .screen { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 32px 20px; text-align: center; flex: 1; }
 .screen-icon { font-size: 56px; margin-bottom: 16px; }
 .screen-title { font-size: 22px; font-weight: 700; margin-bottom: 8px; }
 .screen-sub { font-size: 13px; color: var(--muted); margin-bottom: 24px; line-height: 1.6; max-width: 320px; }
 .btn-primary { background: linear-gradient(135deg, var(--accent), var(--accent-dim)); color: #fff; border: none; border-radius: var(--radius); padding: 12px 28px; font-weight: 700; font-size: 14px; cursor: pointer; font-family: 'DM Sans', sans-serif; text-decoration: none; display: inline-block; box-shadow: 0 4px 14px var(--accent-glow); transition: opacity 0.15s, transform 0.15s; }
 .btn-primary:hover { opacity: 0.9; transform: translateY(-1px); }
-.btn-ghost { background: var(--surface2); color: var(--text2); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 20px; font-weight: 600; font-size: 13px; cursor: pointer; font-family: 'DM Sans', sans-serif; text-decoration: none; display: inline-block; margin-top: 8px; transition: border-color 0.15s, color 0.15s; }
+[data-theme="light"] .btn-primary { color: #fff; }
+.btn-ghost { background: var(--surface2); color: var(--text2); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 20px; font-weight: 600; font-size: 13px; cursor: pointer; font-family: 'DM Sans', sans-serif; text-decoration: none; display: inline-block; transition: border-color 0.15s, color 0.15s; }
 .btn-ghost:hover { border-color: var(--border2); color: var(--text); }
 
-/* SKIPPED REVIEW */
-.skipped-list { width: 100%; max-width: 480px; display: flex; flex-direction: column; gap: 8px; max-height: 320px; overflow-y: auto; padding: 4px; }
-.skipped-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 14px; display: flex; align-items: center; gap: 12px; }
-.skipped-name { font-weight: 600; font-size: 13px; }
-.skipped-sku { font-size: 10px; color: var(--muted); font-family: 'DM Mono', monospace; margin-top: 2px; }
+/* ── SKIP PICK LIST (end screen) ──────────── */
+.skip-pick-wrap { width: 100%; max-width: 500px; overflow: hidden; display: flex; flex-direction: column; }
+.skip-pick-search { width: 100%; background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text); padding: 10px 14px; font-family: 'DM Sans', sans-serif; font-size: 14px; outline: none; margin-bottom: 10px; }
+.skip-pick-search:focus { border-color: var(--accent); }
+.skip-pick-search::placeholder { color: var(--muted); }
+.skip-pick-list { display: flex; flex-direction: column; gap: 6px; overflow-y: auto; max-height: calc(100vh - 320px); padding: 2px; }
+.skip-pick-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 11px 14px; display: flex; align-items: center; gap: 10px; cursor: pointer; transition: all 0.15s; }
+.skip-pick-card:hover { border-color: var(--accent); transform: translateY(-1px); box-shadow: 0 4px 16px rgba(0,0,0,0.25); }
+.skip-pick-card:active { transform: scale(0.98); }
+.skip-pick-info { flex: 1; min-width: 0; }
+.skip-pick-name { font-weight: 600; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.skip-pick-sku { font-size: 10px; color: var(--muted); font-family: 'DM Mono', monospace; margin-top: 2px; }
+.skip-pick-arrow { color: var(--accent); font-size: 16px; flex-shrink: 0; }
 
+/* ── SEARCH OVERLAY ───────────────────────── */
+#searchOverlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 500; backdrop-filter: blur(4px); flex-direction: column; align-items: center; padding-top: 60px; }
+#searchOverlay.active { display: flex; }
+.search-panel { background: var(--surface); border: 1px solid var(--border2); border-radius: 18px 18px 0 0; width: 100%; max-width: 520px; max-height: 85vh; display: flex; flex-direction: column; animation: slideUp 0.22s ease; overflow: hidden; }
+@keyframes slideUp { from { transform: translateY(60px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+.search-panel-handle { width: 32px; height: 3px; background: var(--border2); border-radius: 2px; margin: 14px auto 0; flex-shrink: 0; }
+.search-panel-head { padding: 14px 16px 10px; flex-shrink: 0; }
+.search-panel-head h3 { font-size: 15px; font-weight: 700; margin-bottom: 10px; }
+.search-input-wrap { position: relative; }
+.search-input-wrap input { width: 100%; background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text); padding: 11px 14px 11px 38px; font-family: 'DM Sans', sans-serif; font-size: 14px; outline: none; }
+.search-input-wrap input:focus { border-color: var(--accent); }
+.search-input-wrap input::placeholder { color: var(--muted); }
+.search-input-wrap .si { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: var(--muted); font-size: 14px; pointer-events: none; }
+.search-results { overflow-y: auto; flex: 1; padding: 6px 10px 20px; }
+.search-result-item { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: var(--radius); cursor: pointer; transition: background 0.12s; margin-bottom: 3px; }
+.search-result-item:hover { background: var(--surface2); }
+.search-result-item:active { background: var(--surface3); }
+.sri-info { flex: 1; min-width: 0; }
+.sri-name { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sri-sub { font-size: 11px; color: var(--muted); margin-top: 1px; }
+.sri-badge { font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 4px; flex-shrink: 0; white-space: nowrap; }
+.sri-badge.priced { background: var(--success-dim); color: var(--accent); border: 1px solid rgba(74,222,128,0.2); }
+.sri-badge.unpriced { background: var(--warn-dim); color: var(--warn); border: 1px solid rgba(252,211,77,0.2); }
+.sri-badge.queued { background: var(--blue-dim); color: var(--blue); border: 1px solid rgba(96,196,250,0.2); }
+.search-empty { text-align: center; color: var(--muted); font-size: 13px; padding: 32px 0; }
+
+/* ── MISC ─────────────────────────────────── */
 .loader { display: flex; align-items: center; justify-content: center; gap: 8px; color: var(--muted); }
 .spinner { width: 18px; height: 18px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.7s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
-
 .toast { position: fixed; bottom: 120px; left: 50%; transform: translateX(-50%) translateY(60px); background: var(--surface3); border: 1px solid var(--border2); color: var(--text); border-radius: 8px; padding: 10px 20px; font-size: 13px; font-weight: 600; z-index: 999; transition: transform 0.25s ease; white-space: nowrap; box-shadow: 0 4px 20px rgba(0,0,0,0.4); pointer-events: none; }
 .toast.show { transform: translateX(-50%) translateY(0); }
 .toast.success { background: var(--success-dim); border-color: rgba(74,222,128,0.3); color: var(--accent); }
-.toast.error   { background: var(--danger-dim);  border-color: rgba(248,113,113,0.3); color: var(--danger); }
+.toast.error   { background: var(--danger-dim);  border-color: rgba(248,113,133,0.3); color: var(--danger); }
 .toast.info    { background: var(--purple-dim);  border-color: rgba(167,139,250,0.3); color: var(--purple); }
 </style>
 </head>
@@ -127,6 +164,7 @@ header { background: var(--surface); border-bottom: 1px solid var(--border); pad
   <a href="index.html" class="back-btn">← Back</a>
   <div class="header-title">💰 Price Setter</div>
   <div class="progress-text" id="progressText">Loading…</div>
+  <button class="search-btn" id="searchBtn" onclick="openSearch()" title="Search product" style="display:none">🔍</button>
 </header>
 <div class="progress-bar-wrap"><div class="progress-bar-fill" id="progressBar"></div></div>
 
@@ -146,6 +184,22 @@ header { background: var(--surface); border-bottom: 1px solid var(--border); pad
   <div class="action-col">
     <button class="action-circle btn-save" onclick="doSave()" title="Save price">✓</button>
     <div class="action-label">Save</div>
+  </div>
+</div>
+
+<!-- SEARCH OVERLAY -->
+<div id="searchOverlay" onclick="closeSearchOnBg(event)">
+  <div style="flex:1"></div>
+  <div class="search-panel">
+    <div class="search-panel-handle"></div>
+    <div class="search-panel-head">
+      <h3>Search Product</h3>
+      <div class="search-input-wrap">
+        <span class="si">🔍</span>
+        <input type="text" id="searchInput" placeholder="Type product name…" oninput="renderSearchResults()" autocomplete="off">
+      </div>
+    </div>
+    <div class="search-results" id="searchResults"></div>
   </div>
 </div>
 
@@ -171,7 +225,11 @@ async function init() {
       if (!locationStock[r.product_id]) locationStock[r.product_id] = {};
       locationStock[r.product_id][r.location_id] = r.quantity;
     });
-    queue = [...allProducts];
+
+    // Only queue products that don't have a selling price set yet
+    queue = allProducts.filter(p => p.selling_price == null);
+
+    document.getElementById('searchBtn').style.display = 'block';
     renderCard();
   } catch(e) {
     document.getElementById('mainArea').innerHTML = `<div class="screen"><div class="screen-icon">⚠️</div><div class="screen-title">Error</div><div class="screen-sub">${e.message}</div><a href="index.html" class="btn-ghost">← Back</a></div>`;
@@ -179,9 +237,10 @@ async function init() {
 }
 
 function updateProgress() {
-  const done = allProducts.length - queue.length - skipped.length;
+  const total = queue.length + skipped.length;
+  const done = allProducts.filter(p => p.selling_price != null).length;
   const pct = allProducts.length ? (done / allProducts.length * 100) : 0;
-  document.getElementById('progressText').textContent = `${done} / ${allProducts.length}`;
+  document.getElementById('progressText').textContent = `${queue.length} left`;
   document.getElementById('progressBar').style.width = pct + '%';
 }
 
@@ -220,17 +279,17 @@ function renderCard() {
         </div>
         ${(p.selling_price != null || p.buying_price != null) ? `
           <div class="cur-prices-row">
-            ${p.selling_price != null ? `<div class="cur-price-chip">Sell: <b>₹${p.selling_price}</b></div>` : ''}
-            ${p.buying_price  != null ? `<div class="cur-price-chip">Buy: <b>₹${p.buying_price}</b></div>`  : ''}
+            ${p.selling_price != null ? `<div class="cur-price-chip">Sell: <b>KES ${p.selling_price}</b></div>` : ''}
+            ${p.buying_price  != null ? `<div class="cur-price-chip">Buy: <b>KES ${p.buying_price}</b></div>`  : ''}
           </div>
         ` : ''}
         <div class="price-inputs">
           <div class="price-field">
-            <label>Selling Price ₹</label>
+            <label>Selling Price (KES)</label>
             <input type="number" id="inp_sell" placeholder="0.00" value="${p.selling_price ?? ''}" min="0" step="0.01" inputmode="decimal">
           </div>
           <div class="price-field">
-            <label>Buying Price ₹</label>
+            <label>Buying Price (KES)</label>
             <input type="number" id="inp_buy" placeholder="0.00" value="${p.buying_price ?? ''}" min="0" step="0.01" inputmode="decimal">
           </div>
         </div>
@@ -328,44 +387,157 @@ async function doUndo() {
   } catch(e) { showToast('Undo failed', 'error'); }
 }
 
+// ── END SCREEN: pick any skipped item ──────
 function showEndScreen(main) {
   if (!skipped.length) {
+    const priced = allProducts.filter(p => p.selling_price != null).length;
     main.innerHTML = `
       <div class="screen">
         <div class="screen-icon">🎉</div>
         <div class="screen-title">All done!</div>
-        <div class="screen-sub">Prices set for all ${allProducts.length} products.</div>
+        <div class="screen-sub">Prices set for all ${priced} products. ${allProducts.length - priced > 0 ? `${allProducts.length - priced} products have no price yet — use 🔍 search to find them.` : ''}</div>
         <a href="index.html" class="btn-primary">← Back to Inventory</a>
       </div>`;
     return;
   }
 
+  // Show tappable list of skipped items
+  renderSkipPickScreen(main, '');
+}
+
+function renderSkipPickScreen(main, filter) {
+  const filtered = skipped.filter(p =>
+    !filter || p.product_name.toLowerCase().includes(filter.toLowerCase())
+  );
+
   main.innerHTML = `
-    <div class="screen" style="width:100%;max-width:480px;">
-      <div class="screen-icon">🔄</div>
-      <div class="screen-title">Review Skipped</div>
-      <div class="screen-sub">${skipped.length} product${skipped.length > 1 ? 's were' : ' was'} skipped.</div>
-      <button class="btn-primary" onclick="reviewSkipped()" style="margin-bottom:8px;">Set Prices for Skipped</button>
-      <a href="index.html" class="btn-ghost">Skip & go to Inventory</a>
-      <div class="skipped-list" style="margin-top:20px;">
-        ${skipped.map(p => `
-          <div class="skipped-card">
-            <div style="flex:1">
-              <div class="skipped-name">${p.product_name}</div>
-              <div class="skipped-sku">${p.stock_keeping_unit || 'No SKU'}</div>
-            </div>
-          </div>`).join('')}
+    <div class="screen" style="padding: 20px 16px; justify-content: flex-start; align-items: flex-start; width: 100%; max-width: 500px; margin: 0 auto;">
+      <div style="font-size:28px;margin-bottom:8px;">📋</div>
+      <div style="font-size:18px;font-weight:700;margin-bottom:4px;">Skipped Products</div>
+      <div style="font-size:13px;color:var(--muted);margin-bottom:16px;">${skipped.length} product${skipped.length !== 1 ? 's' : ''} skipped — tap any to set its price</div>
+
+      <div class="skip-pick-wrap">
+        <input class="skip-pick-search" type="text" placeholder="Search skipped products…"
+          value="${filter}" oninput="renderSkipPickScreen(document.getElementById('mainArea'), this.value)" autocomplete="off">
+
+        <div class="skip-pick-list">
+          ${filtered.length === 0 ? `<div style="color:var(--muted);font-size:13px;padding:20px;text-align:center;">No matches</div>` :
+            filtered.map(p => {
+              const locs = locationStock[p.product_id] || {};
+              const stock = (locs[1]||0) + (locs[2]||0);
+              return `
+              <div class="skip-pick-card" onclick="priceSingleSkipped(${p.product_id})">
+                <div class="skip-pick-info">
+                  <div class="skip-pick-name">${p.product_name}</div>
+                  <div class="skip-pick-sku">${p.stock_keeping_unit || 'No SKU'} · Stock: ${stock}</div>
+                </div>
+                <span class="skip-pick-arrow">→</span>
+              </div>`;
+            }).join('')}
+        </div>
+      </div>
+
+      <div style="margin-top:16px;display:flex;gap:8px;">
+        <button class="btn-primary" onclick="reviewAllSkipped()" style="font-size:13px;padding:10px 18px;">Go through all →</button>
+        <a href="index.html" class="btn-ghost" style="font-size:13px;padding:10px 16px;">← Inventory</a>
       </div>
     </div>`;
 }
 
-function reviewSkipped() {
+function priceSingleSkipped(productId) {
+  const idx = skipped.findIndex(p => p.product_id === productId);
+  if (idx < 0) return;
+  // Move this product to front of queue, keep the rest of skipped for the end screen after
+  const product = skipped.splice(idx, 1)[0];
+  queue = [product];
+  document.getElementById('actionBar').style.display = 'flex';
+  renderCard();
+}
+
+function reviewAllSkipped() {
   queue = [...skipped];
   skipped = [];
   document.getElementById('actionBar').style.display = 'flex';
   renderCard();
 }
 
+// ── SEARCH OVERLAY ─────────────────────────
+function openSearch() {
+  document.getElementById('searchOverlay').classList.add('active');
+  document.getElementById('searchInput').value = '';
+  renderSearchResults();
+  setTimeout(() => document.getElementById('searchInput').focus(), 100);
+}
+
+function closeSearch() {
+  document.getElementById('searchOverlay').classList.remove('active');
+}
+
+function closeSearchOnBg(e) {
+  if (e.target === document.getElementById('searchOverlay')) closeSearch();
+}
+
+function renderSearchResults() {
+  const q = document.getElementById('searchInput').value.toLowerCase().trim();
+  const el = document.getElementById('searchResults');
+
+  const results = allProducts
+    .filter(p => !q || p.product_name.toLowerCase().includes(q) || (p.stock_keeping_unit||'').toLowerCase().includes(q))
+    .slice(0, 40);
+
+  if (!results.length) {
+    el.innerHTML = `<div class="search-empty">No products found</div>`;
+    return;
+  }
+
+  el.innerHTML = results.map(p => {
+    const inQueue   = queue.some(x => x.product_id === p.product_id);
+    const inSkipped = skipped.some(x => x.product_id === p.product_id);
+    const hasSell   = p.selling_price != null;
+    const hasBuy    = p.buying_price  != null;
+    const locs      = locationStock[p.product_id] || {};
+    const stock     = (locs[1]||0) + (locs[2]||0);
+
+    let badge = '', badgeClass = '';
+    if (inQueue)        { badge = 'In Queue'; badgeClass = 'queued'; }
+    else if (inSkipped) { badge = 'Skipped';  badgeClass = 'unpriced'; }
+    else if (hasSell)   { badge = `KES ${p.selling_price}`; badgeClass = 'priced'; }
+    else                { badge = 'No price'; badgeClass = 'unpriced'; }
+
+    const sub = [p.type, p.brand].filter(Boolean).join(' · ') || `Stock: ${stock}`;
+
+    return `
+      <div class="search-result-item" onclick="jumpToProduct(${p.product_id})">
+        <div class="sri-info">
+          <div class="sri-name">${p.product_name}</div>
+          <div class="sri-sub">${sub} · Stock: ${stock}</div>
+        </div>
+        <span class="sri-badge ${badgeClass}">${badge}</span>
+      </div>`;
+  }).join('');
+}
+
+function jumpToProduct(productId) {
+  closeSearch();
+  const product = allProducts.find(p => p.product_id === productId);
+  if (!product) return;
+
+  // Remove from wherever it currently is
+  const qIdx = queue.findIndex(p => p.product_id === productId);
+  if (qIdx > 0) queue.splice(qIdx, 1);
+  else if (qIdx === 0) { /* already at front */ renderCard(); return; }
+
+  const sIdx = skipped.findIndex(p => p.product_id === productId);
+  if (sIdx >= 0) skipped.splice(sIdx, 1);
+
+  // Put it first in queue
+  queue.unshift(product);
+  document.getElementById('actionBar').style.display = 'flex';
+  renderCard();
+  showToast(`Jumped to: ${product.product_name.substring(0, 30)}`, 'info');
+}
+
+// ── TOAST ──────────────────────────────────
 let toastTimer;
 function showToast(msg, type = '') {
   const t = document.getElementById('toast');
