@@ -1783,7 +1783,10 @@ function renderSuppliers() {
         <div class="supplier-name">${s.supplier_name}</div>
         <div class="supplier-meta">${[s.phone, s.address].filter(Boolean).join(' · ') || 'No contact info'}</div>
       </div>
-      <div class="icon-btn" onclick="openEditSupplier(${s.supplier_id})" style="flex-shrink:0;">✏️</div>
+      <div style="display:flex;gap:6px;flex-shrink:0;">
+        <div class="icon-btn" onclick="openEditSupplier(${s.supplier_id})" title="Edit">✏️</div>
+        <div class="icon-btn" onclick="confirmDeleteSupplier(${s.supplier_id},'${s.supplier_name.replace(/'/g,"\\'")}')" title="Delete" style="color:var(--danger);border-color:var(--danger-dim);">🗑</div>
+      </div>
     </div>`).join('');
 
   // Also populate supplier dropdown in purchase modal
@@ -1816,6 +1819,18 @@ function openEditSupplier(id) {
 async function saveSupplier() {
   const name = document.getElementById('s_name').value.trim();
   if (!name) { showToast('Supplier name is required', 'error'); return; }
+  const sid = document.getElementById('s_id').value;
+
+  // Duplicate check — case-insensitive, skip the current record when editing
+  const duplicate = allSuppliers.find(s =>
+    s.supplier_name.toLowerCase() === name.toLowerCase() &&
+    String(s.supplier_id) !== String(sid)
+  );
+  if (duplicate) {
+    showToast(`"${duplicate.supplier_name}" already exists`, 'error');
+    return;
+  }
+
   const payload = {
     supplier_name: name,
     phone: document.getElementById('s_phone').value.trim() || null,
@@ -1823,7 +1838,6 @@ async function saveSupplier() {
     notes: document.getElementById('s_notes').value.trim() || null,
     active_status: true
   };
-  const sid = document.getElementById('s_id').value;
   try {
     const res = sid
       ? await fetch(`${SUPABASE_URL}/rest/v1/suppliers?supplier_id=eq.${sid}`, { method: 'PATCH', headers: H, body: JSON.stringify(payload) })
@@ -1831,6 +1845,31 @@ async function saveSupplier() {
     if (!res.ok) throw new Error(await res.text());
     closeModal('supplierModal');
     showToast(sid ? 'Supplier updated ✓' : 'Supplier added ✓', 'success');
+    await fetchSuppliers();
+  } catch(e) { showToast('Error: ' + e.message, 'error'); }
+}
+
+function confirmDeleteSupplier(id, name) {
+  document.getElementById('confirmIcon').textContent = '🗑️';
+  document.getElementById('confirmTitle').textContent = `Delete "${name}"?`;
+  document.getElementById('confirmText').textContent = 'This removes the supplier. Past purchases linked to them will still remain.';
+  document.getElementById('confirmOkBtn').textContent = 'Delete';
+  document.getElementById('confirmOkBtn').className = 'btn btn-danger';
+  confirmCb = () => {
+    document.getElementById('confirmOkBtn').textContent = 'Confirm';
+    document.getElementById('confirmOkBtn').className = 'btn btn-primary';
+    deleteSupplier(id);
+  };
+  document.getElementById('confirmOverlay').classList.add('active');
+}
+
+async function deleteSupplier(id) {
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/suppliers?supplier_id=eq.${id}`, {
+      method: 'DELETE', headers: H
+    });
+    if (!res.ok) throw new Error(await res.text());
+    showToast('Supplier deleted', 'success');
     await fetchSuppliers();
   } catch(e) { showToast('Error: ' + e.message, 'error'); }
 }
