@@ -1866,10 +1866,11 @@ function confirmDeleteSupplier(id, name) {
 async function deleteSupplier(id) {
   try {
     const res = await fetch(`${SUPABASE_URL}/rest/v1/suppliers?supplier_id=eq.${id}`, {
-      method: 'DELETE', headers: H
+      method: 'PATCH', headers: H,
+      body: JSON.stringify({ active_status: false })
     });
     if (!res.ok) throw new Error(await res.text());
-    showToast('Supplier deleted', 'success');
+    showToast('Supplier removed', 'success');
     await fetchSuppliers();
   } catch(e) { showToast('Error: ' + e.message, 'error'); }
 }
