@@ -11,7 +11,7 @@
   })();
 </script>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <title>Aadinath Enterprise</title>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
@@ -20,6 +20,7 @@
 :root {
 --radius: 10px;
 --radius-lg: 16px;
+--vh: 1vh;
 }
 
 /* ─── DARK THEME (default) ──────────────── */
@@ -77,7 +78,7 @@
 }
 
 - { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: ‘DM Sans’, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; font-size: 14px; -webkit-font-smoothing: antialiased; }
+  body { font-family: ‘DM Sans’, sans-serif; background: var(--bg); color: var(--text); min-height: calc(var(--vh, 1vh) * 100); font-size: 14px; -webkit-font-smoothing: antialiased; }
 
 /* ─── LOGIN ─────────────────────────────── */
 #loginScreen { display: none; position: fixed; inset: 0; background: var(--bg); z-index: 9999; align-items: center; justify-content: center; padding: 24px; }
@@ -142,7 +143,7 @@ content: ‘’; height: 1px; width: 40px; background: var(--border2);
 #appContent.active { display: block; }
 
 /* ─── HEADER ───────────────────────────── */
-header { background: var(--surface); border-bottom: 1px solid var(--border); padding: 10px 16px; display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; z-index: 100; gap: 8px; box-shadow: 0 1px 0 var(--border), 0 4px 20px rgba(0,0,0,0.25); }
+header { background: var(--surface); border-bottom: 1px solid var(--border); padding: calc(10px + env(safe-area-inset-top)) 16px 10px; display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; z-index: 100; gap: 8px; box-shadow: 0 1px 0 var(--border), 0 4px 20px rgba(0,0,0,0.25); }
 [data-theme="dark"] header { background: linear-gradient(135deg, #0d1525 0%, #0a1020 100%); }
 .logo { font-size: 16px; font-weight: 800; color: var(--text); flex-shrink: 0; letter-spacing: -0.5px; }
 .logo span { display: block; font-size: 9px; letter-spacing: 2px; color: var(--muted); font-weight: 500; text-transform: uppercase; margin-top: 1px; }
@@ -159,7 +160,7 @@ header { background: var(--surface); border-bottom: 1px solid var(--border); pad
 .theme-toggle-btn:hover { border-color: var(--border2); background: var(--surface3); }
 
 /* ─── BOTTOM NAV ────────────────────────── */
-.bottom-nav { position: fixed; bottom: 0; left: 0; right: 0; background: var(--surface); border-top: 1px solid var(--border); display: flex; z-index: 100; box-shadow: 0 -4px 20px rgba(0,0,0,0.2); }
+.bottom-nav { position: fixed; bottom: 0; left: 0; right: 0; background: var(--surface); border-top: 1px solid var(--border); display: flex; z-index: 100; box-shadow: 0 -4px 20px rgba(0,0,0,0.2); padding-bottom: env(safe-area-inset-bottom); }
 [data-theme="dark"] .bottom-nav { background: linear-gradient(180deg, #0d1525 0%, #080c18 100%); backdrop-filter: blur(12px); }
 .nav-item { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 9px 0 11px; font-size: 10px; font-weight: 600; color: var(--muted); cursor: pointer; gap: 3px; transition: color 0.2s; text-transform: uppercase; letter-spacing: 0.5px; position: relative; }
 .nav-item span:first-child { font-size: 18px; transition: transform 0.2s; }
@@ -1045,6 +1046,14 @@ main { padding: 14px; max-width: 900px; margin: 0 auto; padding-bottom: 76px; }
 <div class="toast" id="toast"></div>
 
 <script>
+
+function setVH() {
+  let vh = window.innerHeight * 0.01;
+  document.documentElement.style.setProperty('--vh', vh + 'px');
+}
+setVH();
+window.addEventListener('resize', setVH);
+window.addEventListener('orientationchange', setVH);
 
 const SUPABASE_URL = 'https://mculftdutoavwueluyma.supabase.co';
 const OCR_KEY = 'K89615870288957';

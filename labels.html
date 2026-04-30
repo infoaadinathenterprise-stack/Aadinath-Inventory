@@ -9,12 +9,12 @@
   })();
 </script>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <title>Label Printer · Aadinath</title>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
 <style>
-:root { --radius: 10px; --radius-lg: 16px; }
+:root { --radius: 10px; --radius-lg: 16px; --vh: 1vh; }
 :root, [data-theme="dark"] {
   --bg: #060b14; --surface: #0d1525; --surface2: #141f35; --surface3: #1b2a47;
   --border: #1e3252; --border2: #2a4468; --accent: #34d399; --accent-dim: #10b981;
@@ -37,10 +37,10 @@
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
-body { font-family: 'DM Sans', sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; font-size: 14px; -webkit-font-smoothing: antialiased; display: flex; flex-direction: column; }
+body { font-family: 'DM Sans', sans-serif; background: var(--bg); color: var(--text); min-height: calc(var(--vh, 1vh) * 100); font-size: 14px; -webkit-font-smoothing: antialiased; display: flex; flex-direction: column; }
 
 /* HEADER */
-header { background: var(--surface); border-bottom: 1px solid var(--border); padding: 10px 16px; display: flex; align-items: center; gap: 10px; position: sticky; top: 0; z-index: 200; flex-shrink: 0; }
+header { background: var(--surface); border-bottom: 1px solid var(--border); padding: calc(10px + env(safe-area-inset-top)) 16px 10px; display: flex; align-items: center; gap: 10px; position: sticky; top: 0; z-index: 200; flex-shrink: 0; }
 .back-btn { background: var(--surface2); border: 1px solid var(--border); border-radius: 6px; color: var(--text2); padding: 5px 10px; font-size: 13px; font-family: 'DM Sans', sans-serif; cursor: pointer; text-decoration: none; display: inline-flex; align-items: center; gap: 5px; transition: border-color 0.15s; }
 .back-btn:hover { border-color: var(--border2); }
 .header-title { font-size: 15px; font-weight: 700; flex: 1; }
@@ -205,6 +205,14 @@ header { background: var(--surface); border-bottom: 1px solid var(--border); pad
 </div>
 
 <script>
+function setVH() {
+  let vh = window.innerHeight * 0.01;
+  document.documentElement.style.setProperty('--vh', vh + 'px');
+}
+setVH();
+window.addEventListener('resize', setVH);
+window.addEventListener('orientationchange', setVH);
+
 const SUPABASE_URL = 'https://mculftdutoavwueluyma.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1jdWxmdGR1dG9hdnd1ZWx1eW1hIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ0Mjk2NzAsImV4cCI6MjA5MDAwNTY3MH0.s-OLgLDXR5aN3uQlS5yAO2sk6Bot0TibtI4qFjrzZh4';
 const H = { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}`, 'Content-Type': 'application/json' };
