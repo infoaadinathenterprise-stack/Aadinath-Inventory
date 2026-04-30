@@ -419,6 +419,38 @@ main { padding: 14px; max-width: 900px; margin: 0 auto; padding-bottom: 76px; }
 .purchase-card:hover { border-color: var(--border2); }
 .supplier-list { display: flex; flex-direction: column; gap: 8px; }
 .supplier-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 14px; }
+
+/* ─── BOX CONVERSION ────────────────────── */
+.box-convert-hint { font-size: 11px; color: var(--blue); background: var(--blue-dim); border: 1px solid rgba(96,196,250,0.2); border-radius: 6px; padding: 4px 10px; margin-top: 5px; font-weight: 600; display: none; }
+.box-convert-section { background: var(--blue-dim); border: 1px solid rgba(96,196,250,0.22); border-radius: var(--radius); padding: 10px 12px; margin-bottom: 12px; }
+.box-convert-section .bc-title { font-size: 11px; font-weight: 700; color: var(--blue); margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px; }
+.box-convert-section .bc-preview { font-size: 13px; font-weight: 700; color: var(--blue); margin-top: 8px; min-height: 18px; }
+.qty-mode-toggle { display: flex; gap: 6px; }
+.qty-mode-toggle button { flex: 1; padding: 7px; border-radius: var(--radius); border: 1px solid var(--border); background: var(--surface2); color: var(--muted); font-family: 'DM Sans', sans-serif; font-size: 12px; font-weight: 600; cursor: pointer; transition: all 0.15s; }
+.qty-mode-toggle button.active-mode { border-color: rgba(96,196,250,0.4); color: var(--blue); background: var(--blue-dim); }
+.box-type-badge { display: inline-flex; align-items: center; gap: 4px; background: var(--blue-dim); color: var(--blue); border: 1px solid rgba(96,196,250,0.2); border-radius: 4px; font-size: 9px; font-weight: 700; padding: 2px 6px; text-transform: uppercase; letter-spacing: 0.3px; flex-shrink: 0; }
+
+/* ─── COMPONENTS ────────────────────────── */
+.comp-item { display:flex; align-items:center; gap:8px; padding:8px 10px; background:var(--surface2); border:1px solid var(--border); border-radius:var(--radius); margin-bottom:5px; }
+.comp-item-info { flex:1; min-width:0; }
+.comp-item-name { font-size:12px; font-weight:600; color:var(--text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.comp-item-qty  { font-size:11px; color:var(--muted); margin-top:1px; }
+.comp-remove-btn { background:none; border:none; color:var(--muted); font-size:15px; cursor:pointer; flex-shrink:0; padding:2px 4px; line-height:1; transition:color 0.15s; }
+.comp-remove-btn:hover { color:var(--danger); }
+.comp-section-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:8px; }
+.comp-section-label { font-size:11px; font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:1px; }
+.comp-badge-pill { background:var(--purple-dim); color:var(--purple); border:1px solid rgba(192,132,252,0.2); font-size:10px; font-weight:700; padding:2px 8px; border-radius:4px; }
+.comp-add-row { display:flex; align-items:center; gap:8px; margin-top:8px; }
+.comp-warn-box { background:var(--purple-dim); border:1px solid rgba(192,132,252,0.22); border-radius:var(--radius); padding:10px 12px; margin-bottom:12px; }
+.comp-warn-title { font-size:12px; font-weight:700; color:var(--purple); margin-bottom:8px; }
+.comp-impact-item { font-size:12px; color:var(--text2); padding:3px 0; border-bottom:1px solid rgba(192,132,252,0.1); display:flex; gap:6px; }
+.comp-impact-item:last-child { border-bottom:none; }
+.comp-search-list { display:none; position:absolute; top:calc(100% + 3px); left:0; right:0; background:var(--surface); border:1px solid var(--border2); border-radius:var(--radius); z-index:500; max-height:160px; overflow-y:auto; box-shadow:0 8px 24px rgba(0,0,0,0.4); }
+.comp-search-opt { padding:9px 12px; font-size:13px; cursor:pointer; border-bottom:1px solid var(--border); color:var(--text2); }
+.comp-search-opt:last-child { border-bottom:none; }
+.comp-search-opt:hover { background:var(--surface2); color:var(--text); }
+.comp-search-opt mark { background:transparent; color:var(--accent); font-weight:700; }
+.comp-divider { height:1px; background:var(--border); margin:16px 0 12px; }
 </style>
 
 </head>
@@ -709,6 +741,23 @@ main { padding: 14px; max-width: 900px; margin: 0 auto; padding-bottom: 76px; }
         </div>
       </div>
     </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Unit Type</label>
+        <select id="f_unit_type" onchange="toggleBoxFields()">
+          <option value="piece">Piece (individual items)</option>
+          <option value="box">Box (contains multiple pieces)</option>
+        </select>
+      </div>
+      <div class="form-group" id="piecesPerBoxWrap" style="display:none">
+        <label>Pieces per Box</label>
+        <input type="number" id="f_pieces_per_box" placeholder="e.g. 12" min="1" oninput="updateStockConversionHint()">
+      </div>
+    </div>
+    <div class="form-group" id="displayUnitWrap" style="display:none">
+      <label>Display Unit <span style="color:var(--muted);font-size:10px;">e.g. "Box of 12", "Set of 6"</span></label>
+      <input type="text" id="f_display_unit" placeholder="Box of 12 · Piece · Set">
+    </div>
     <div class="form-group" id="stockFieldWrap">
       <label>Location * <span id="stockHintLabel" style="color:var(--hold);font-size:10px;display:none;">⏳ stock needs approval</span></label>
       <select id="f_location" onchange="toggleLocationFields()">
@@ -719,25 +768,58 @@ main { padding: 14px; max-width: 900px; margin: 0 auto; padding-bottom: 76px; }
       </select>
     </div>
     <div id="stockBackWrap" style="display:none;" class="form-group">
-      <label>Back Godown Stock</label>
+      <label id="stockBackLabel">Back Godown Stock</label>
       <div class="stock-adjust">
         <button class="adj-btn" onclick="adjustStockField('f_stock_back',-1)">−</button>
-        <input type="number" id="f_stock_back" class="adj-input" value="0" min="0">
+        <input type="number" id="f_stock_back" class="adj-input" value="0" min="0" oninput="updateStockConversionHint()">
         <button class="adj-btn" onclick="adjustStockField('f_stock_back',1)">+</button>
       </div>
+      <div class="box-convert-hint" id="stockBackHint"></div>
     </div>
     <div id="stockMainWrap" style="display:none;" class="form-group">
-      <label>Main Store Stock</label>
+      <label id="stockMainLabel">Main Store Stock</label>
       <div class="stock-adjust">
         <button class="adj-btn" onclick="adjustStockField('f_stock_main',-1)">−</button>
-        <input type="number" id="f_stock_main" class="adj-input" value="0" min="0">
+        <input type="number" id="f_stock_main" class="adj-input" value="0" min="0" oninput="updateStockConversionHint()">
         <button class="adj-btn" onclick="adjustStockField('f_stock_main',1)">+</button>
       </div>
+      <div class="box-convert-hint" id="stockMainHint"></div>
     </div>
     <div class="form-group">
       <label>Reorder Level</label>
       <input type="number" id="f_reorder" placeholder="0" value="0" min="0">
     </div>
+
+    <!-- COMPONENTS SECTION — edit only -->
+    <div id="componentsSection" style="display:none">
+      <div class="comp-divider"></div>
+      <div class="comp-section-header">
+        <div class="comp-section-label">🔧 Machine Components</div>
+        <span class="comp-badge-pill" id="compCountBadge" style="display:none"></span>
+      </div>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:8px;">Add parts that are sold/moved together with this product</div>
+      <div id="componentsList"></div>
+      <div style="margin-top:10px;">
+        <div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:5px;">Add Component</div>
+        <div style="position:relative;">
+          <input type="text" id="compSearchInput" placeholder="Search product to add as component…" autocomplete="off"
+            oninput="filterCompSearch()" onfocus="filterCompSearch()"
+            style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);padding:9px 12px;font-family:'DM Sans',sans-serif;font-size:13px;outline:none;transition:border-color 0.15s;">
+          <div id="compSearchList" class="comp-search-list"></div>
+        </div>
+        <div id="compSelectedWrap" style="display:none;margin-top:8px;background:var(--surface2);border-radius:var(--radius);padding:10px 12px;border:1px solid var(--border);">
+          <div id="compSelectedName" style="font-size:13px;font-weight:600;color:var(--text);margin-bottom:8px;"></div>
+          <div class="comp-add-row">
+            <span style="font-size:11px;color:var(--muted);white-space:nowrap;">Qty per machine:</span>
+            <input type="number" id="compQty" value="1" min="1"
+              style="width:64px;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:6px 8px;font-size:14px;font-weight:700;text-align:center;outline:none;font-family:'DM Sans',sans-serif;">
+            <button onclick="addComponent()"
+              style="flex:1;padding:7px 12px;background:var(--success-dim);color:var(--accent);border:1px solid rgba(74,222,128,0.25);border-radius:6px;font-family:'DM Sans',sans-serif;font-size:12px;font-weight:700;cursor:pointer;">+ Add Component</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <div class="modal-actions">
       <button class="btn btn-ghost" onclick="closeModal('productModal')">Cancel</button>
       <button class="btn btn-primary" onclick="saveProduct()">Save Product</button>
@@ -776,12 +858,28 @@ main { padding: 14px; max-width: 900px; margin: 0 auto; padding-bottom: 76px; }
       </div>
     </div>
     <div class="form-group">
-      <label>Quantity</label>
+      <label id="adjQtyLabel">Quantity</label>
       <div class="stock-adjust">
         <button class="adj-btn" onclick="adjustAdjQty(-1)">−</button>
-        <input type="number" id="adjQty" class="adj-input" value="1" min="1">
+        <input type="number" id="adjQty" class="adj-input" value="1" min="1" oninput="onAdjQtyChange()">
         <button class="adj-btn" onclick="adjustAdjQty(1)">+</button>
       </div>
+    </div>
+    <div id="boxConvertSection" style="display:none" class="box-convert-section">
+      <div class="bc-title" id="boxConvertInfo">📦 Box product</div>
+      <div class="qty-mode-toggle">
+        <button id="btnQtyBoxes" class="active-mode" onclick="setQtyMode('boxes')">📦 Enter Boxes</button>
+        <button id="btnQtyPieces" onclick="setQtyMode('pieces')">🔢 Enter Pieces</button>
+      </div>
+      <div class="bc-preview" id="boxConvertPreview"></div>
+    </div>
+    <div id="componentsWarning" style="display:none" class="comp-warn-box">
+      <div class="comp-warn-title" id="compWarnTitle">🔧 This product has components</div>
+      <label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;margin-bottom:0;">
+        <input type="checkbox" id="applyToComponents" style="margin-top:2px;accent-color:var(--purple);flex-shrink:0;" onchange="toggleCompImpact()">
+        <span style="font-size:12px;font-weight:600;color:var(--text);">Also move/remove components automatically</span>
+      </label>
+      <div id="compImpactList" style="display:none;margin-top:10px;padding-top:8px;border-top:1px solid rgba(192,132,252,0.2);"></div>
     </div>
     <div class="form-group">
       <label>Reason *</label>
@@ -958,7 +1056,9 @@ const USERS = {
   'akshat': { password: 'Akshat@2003',   name: 'Akshat', role: 'staff', db_id: 2 }
 };
 
-let currentUser = null, allProducts = [], locationStock = {}, pendingRequests = [], activeType = 'ALL', adjType = 'ADD', confirmCb = null;
+let currentUser = null, allProducts = [], locationStock = {}, pendingRequests = [], activeType = 'ALL', adjType = 'ADD', confirmCb = null, adjQtyMode = 'boxes';
+let allComponentMap = {};   // { parentProductId: [{component_id, component_product_id, quantity}] }
+let compSelectedProductId = null;
 // locationStock: { productId: { 1: qty, 2: qty } }
 
 // ── AUTH ───────────────────────────────
@@ -1150,6 +1250,7 @@ function confirmSwitch() { confirmSwitchLogin(); }
 async function fetchAll() {
   await fetchProducts();
   await fetchLocationStock();
+  await fetchAllComponents();
   if (currentUser.role === 'admin') { await fetchPending(); await fetchMovements(); }
 }
 
@@ -1176,6 +1277,20 @@ async function fetchProducts() {
   } catch(e) {
     document.getElementById('productList').innerHTML = `<div class="empty"><div class="big">⚠️</div><p>${e.message}</p></div>`;
   }
+}
+
+async function fetchAllComponents() {
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/product_components?select=*`, { headers: H });
+    if (!res.ok) throw new Error(await res.text());
+    const rows = await res.json();
+    allComponentMap = {};
+    rows.forEach(r => {
+      if (!allComponentMap[r.parent_product_id]) allComponentMap[r.parent_product_id] = [];
+      allComponentMap[r.parent_product_id].push(r);
+    });
+    renderProducts();
+  } catch(e) { console.error('Components fetch error:', e); }
 }
 
 async function fetchPending() {
@@ -1374,23 +1489,40 @@ function renderProducts() {
     const cls     = total === 0 ? 'zero' : total <= (p.reorder_level || 2) ? 'low' : 'ok';
 
 
+    const isBoxType = p.unit_type === 'box' && p.pieces_per_box > 0;
+    const ppb = p.pieces_per_box || 1;
+
     let locTagsHtml = '';
-    if (backQty !== null) locTagsHtml += `<span class="loc-tag back">Back: ${backQty}</span>`;
-    if (mainQty !== null) locTagsHtml += `<span class="loc-tag main">Main: ${mainQty}</span>`;
+    if (backQty !== null) {
+      const bxStr = isBoxType ? ` (${Math.floor(backQty/ppb)}bx)` : '';
+      locTagsHtml += `<span class="loc-tag back">Back: ${backQty}${bxStr}</span>`;
+    }
+    if (mainQty !== null) {
+      const bxStr = isBoxType ? ` (${Math.floor(mainQty/ppb)}bx)` : '';
+      locTagsHtml += `<span class="loc-tag main">Main: ${mainQty}${bxStr}</span>`;
+    }
     if (hold !== 0) locTagsHtml += `<span class="loc-tag hold">${hold > 0 ? '+' : ''}${hold} hold</span>`;
+    if (isBoxType) locTagsHtml += `<span class="box-type-badge">📦 1bx=${ppb}pc</span>`;
+
+    const stockNumHtml = isBoxType
+      ? `<div class="stock-num ${cls}" style="font-size:18px;line-height:1.1">${total}<br><span style="font-size:10px;font-weight:600;color:var(--muted)">${Math.floor(total/ppb)} boxes</span></div>`
+      : `<div class="stock-num ${cls}">${total}</div>`;
+
+    const compCount = (allComponentMap[p.product_id] || []).length;
+    const compBadge = compCount > 0 ? `<span class="comp-badge-pill" style="margin-left:4px;font-size:9px;">🔧 ${compCount} part${compCount !== 1 ? 's' : ''}</span>` : '';
 
     return `
       <div class="product-card">
         <div class="product-type-badge">${p.type || '—'}</div>
         <div class="product-info">
-          <div class="product-name">${p.product_name}</div>
-          <div class="product-meta">${[p.brand, p.model].filter(Boolean).join(' · ') || '—'} · ${p.unit_of_measure || 'Piece'}</div>
+          <div class="product-name">${p.product_name}${compBadge}</div>
+          <div class="product-meta">${[p.brand, p.model].filter(Boolean).join(' · ') || '—'} · ${p.display_unit || p.unit_of_measure || 'Piece'}</div>
           <div class="product-sku">${p.stock_keeping_unit || ''}</div>
           <div class="product-locs">${locTagsHtml}</div>
         </div>
         <div class="stock-pill">
-          <div class="stock-num ${cls}">${total}</div>
-          <div class="stock-label">Total</div>
+          ${stockNumHtml}
+          <div class="stock-label">${isBoxType ? 'pcs' : 'Total'}</div>
         </div>
         <div class="card-actions">
           ${isAdmin ? `<div class="icon-btn" onclick="openEditModal(${p.product_id})" title="Edit">✏️</div>` : ''}
@@ -1413,7 +1545,17 @@ function openAddModal() {
   document.getElementById('stockMainWrap').style.display = 'none';
   document.getElementById('stockFieldWrap').style.display = 'block';
   document.getElementById('f_reorder').value = 0;
+  document.getElementById('f_unit_type').value = 'piece';
+  document.getElementById('f_pieces_per_box').value = '';
+  document.getElementById('f_display_unit').value = '';
+  document.getElementById('piecesPerBoxWrap').style.display = 'none';
+  document.getElementById('displayUnitWrap').style.display  = 'none';
+  document.getElementById('stockBackLabel').textContent = 'Back Godown Stock';
+  document.getElementById('stockMainLabel').textContent = 'Main Store Stock';
+  document.getElementById('stockBackHint').style.display = 'none';
+  document.getElementById('stockMainHint').style.display = 'none';
   document.getElementById('stockHintLabel').style.display = currentUser.role === 'staff' ? 'inline' : 'none';
+  document.getElementById('componentsSection').style.display = 'none';
   document.getElementById('productModal').classList.add('active');
 }
 
@@ -1446,14 +1588,35 @@ function openEditModal(id) {
   document.getElementById('stockBackWrap').style.display = (hasBack || hasBoth) ? 'block' : 'none';
   document.getElementById('stockMainWrap').style.display = (hasMain || hasBoth) ? 'block' : 'none';
   document.getElementById('f_reorder').value = p.reorder_level ?? 0;
+  const isBox = p.unit_type === 'box';
+  document.getElementById('f_unit_type').value     = p.unit_type || 'piece';
+  document.getElementById('f_pieces_per_box').value = p.pieces_per_box || '';
+  document.getElementById('f_display_unit').value  = p.display_unit || '';
+  document.getElementById('piecesPerBoxWrap').style.display = isBox ? 'block' : 'none';
+  document.getElementById('displayUnitWrap').style.display  = isBox ? 'block' : 'none';
+  // When editing, stock values are already in pieces — keep labels as pieces
+  document.getElementById('stockBackLabel').textContent = 'Back Godown Stock (pieces)';
+  document.getElementById('stockMainLabel').textContent = 'Main Store Stock (pieces)';
+  document.getElementById('stockBackHint').style.display = 'none';
+  document.getElementById('stockMainHint').style.display = 'none';
   document.getElementById('stockFieldWrap').style.display = 'block';
   document.getElementById('stockHintLabel').style.display = currentUser.role === 'staff' ? 'inline' : 'none';
+  // Show components section (edit only)
+  document.getElementById('componentsSection').style.display = 'block';
+  document.getElementById('compSearchInput').value = '';
+  document.getElementById('compSearchList').style.display = 'none';
+  document.getElementById('compSelectedWrap').style.display = 'none';
+  document.getElementById('compQty').value = 1;
+  compSelectedProductId = null;
+  renderComponentsList(id);
   document.getElementById('productModal').classList.add('active');
 }
 
 async function saveProduct() {
   const name = document.getElementById('f_name').value.trim();
   if (!name) { showToast('Product name is required', 'error'); return; }
+  const unitType   = document.getElementById('f_unit_type').value || 'piece';
+  const ppb        = parseInt(document.getElementById('f_pieces_per_box').value) || 1;
   const payload = {
     product_name: name,
     type: document.getElementById('f_type').value.trim() || null,
@@ -1462,17 +1625,23 @@ async function saveProduct() {
     stock_keeping_unit: document.getElementById('f_sku').value.trim() || null,
     unit_of_measure: document.getElementById('f_unit').value.trim() || 'Piece',
     reorder_level: parseInt(document.getElementById('f_reorder').value) || 0,
-    active_status: true
+    active_status: true,
+    unit_type: unitType,
+    pieces_per_box: unitType === 'box' ? ppb : null,
+    display_unit: document.getElementById('f_display_unit').value.trim() || null
   };
   const locChoice  = document.getElementById('f_location').value;
   if (!locChoice) { showToast('Please select a location', 'error'); return; }
-  const backQty    = parseInt(document.getElementById('f_stock_back').value) || 0;
-  const mainQty    = parseInt(document.getElementById('f_stock_main').value) || 0;
+  const editId = document.getElementById('editId').value;
+  const backQtyRaw = parseInt(document.getElementById('f_stock_back').value) || 0;
+  const mainQtyRaw = parseInt(document.getElementById('f_stock_main').value) || 0;
+  // On new products with box type: input is in boxes, convert to pieces for storage
+  const backQty    = (!editId && unitType === 'box') ? backQtyRaw * ppb : backQtyRaw;
+  const mainQty    = (!editId && unitType === 'box') ? mainQtyRaw * ppb : mainQtyRaw;
   const totalStock = (locChoice === '2' ? backQty : 0) + (locChoice === '1' ? mainQty : 0) + (locChoice === 'both' ? backQty + mainQty : 0);
 
   payload.current_stock = currentUser.role === 'admin' ? totalStock : 0;
 
-  const editId = document.getElementById('editId').value;
   try {
     // Always request representation so we get product back
     const saveHeaders = { ...H, 'Prefer': 'return=representation' };
@@ -1527,6 +1696,7 @@ async function saveProduct() {
 function adjustStockField(fieldId, delta) {
   const inp = document.getElementById(fieldId);
   inp.value = Math.max(0, (parseInt(inp.value) || 0) + delta);
+  updateStockConversionHint();
 }
 
 // ── STOCK ADJUST MODAL ─────────────────
@@ -1564,6 +1734,34 @@ function openStockModal(productId) {
     document.getElementById('adjSubmitBtn').textContent = 'Submit Request';
     document.getElementById('adjSubmitBtn').className = 'btn btn-hold';
   }
+  // Box product: show conversion section
+  const boxSection = document.getElementById('boxConvertSection');
+  const isBoxProd  = p.unit_type === 'box' && p.pieces_per_box > 0;
+  if (isBoxProd) {
+    document.getElementById('boxConvertInfo').textContent = `📦 Box product — 1 box = ${p.pieces_per_box} pieces`;
+    adjQtyMode = 'boxes';
+    document.getElementById('btnQtyBoxes').className  = 'active-mode';
+    document.getElementById('btnQtyPieces').className = '';
+    document.getElementById('adjQtyLabel').textContent = 'Quantity (boxes)';
+    boxSection.style.display = 'block';
+    updateBoxPreview();
+  } else {
+    boxSection.style.display = 'none';
+    adjQtyMode = 'boxes';
+    document.getElementById('adjQtyLabel').textContent = 'Quantity';
+  }
+  // Components warning
+  const compWarn = document.getElementById('componentsWarning');
+  const comps = allComponentMap[productId] || [];
+  if (comps.length > 0) {
+    document.getElementById('compWarnTitle').textContent = `🔧 This product has ${comps.length} component${comps.length !== 1 ? 's' : ''}`;
+    document.getElementById('applyToComponents').checked = false;
+    document.getElementById('compImpactList').style.display = 'none';
+    document.getElementById('compImpactList').innerHTML = '';
+    compWarn.style.display = 'block';
+  } else {
+    compWarn.style.display = 'none';
+  }
   document.getElementById('stockModal').classList.add('active');
 }
 
@@ -1582,14 +1780,200 @@ function setAdjType(type) {
 function adjustAdjQty(delta) {
   const inp = document.getElementById('adjQty');
   inp.value = Math.max(1, (parseInt(inp.value) || 1) + delta);
+  onAdjQtyChange();
+}
+
+// ── BOX CONVERSION HELPERS ─────────────────
+function toggleBoxFields() {
+  const isBox = document.getElementById('f_unit_type').value === 'box';
+  document.getElementById('piecesPerBoxWrap').style.display = isBox ? 'block' : 'none';
+  document.getElementById('displayUnitWrap').style.display  = isBox ? 'block' : 'none';
+  const isEditing = !!document.getElementById('editId').value;
+  document.getElementById('stockBackLabel').textContent = isBox && !isEditing ? 'Back Godown Stock (boxes)' : 'Back Godown Stock';
+  document.getElementById('stockMainLabel').textContent = isBox && !isEditing ? 'Main Store Stock (boxes)' : 'Main Store Stock';
+  updateStockConversionHint();
+}
+
+function updateStockConversionHint() {
+  const isBox    = document.getElementById('f_unit_type').value === 'box';
+  const ppb      = parseInt(document.getElementById('f_pieces_per_box').value) || 0;
+  const isEditing = !!document.getElementById('editId').value;
+  const bHint    = document.getElementById('stockBackHint');
+  const mHint    = document.getElementById('stockMainHint');
+  if (!isBox || !ppb || isEditing) {
+    if (bHint) bHint.style.display = 'none';
+    if (mHint) mHint.style.display = 'none';
+    return;
+  }
+  const backVal = parseInt(document.getElementById('f_stock_back').value) || 0;
+  const mainVal = parseInt(document.getElementById('f_stock_main').value) || 0;
+  if (bHint) { bHint.textContent = `= ${backVal * ppb} pieces`; bHint.style.display = backVal > 0 ? 'block' : 'none'; }
+  if (mHint) { mHint.textContent = `= ${mainVal * ppb} pieces`; mHint.style.display = mainVal > 0 ? 'block' : 'none'; }
+}
+
+function setQtyMode(mode) {
+  adjQtyMode = mode;
+  document.getElementById('btnQtyBoxes').className  = mode === 'boxes'  ? 'active-mode' : '';
+  document.getElementById('btnQtyPieces').className = mode === 'pieces' ? 'active-mode' : '';
+  const productId = parseInt(document.getElementById('adjProductId').value);
+  const p = allProducts.find(x => x.product_id === productId);
+  document.getElementById('adjQtyLabel').textContent = (mode === 'boxes' && p && p.unit_type === 'box') ? 'Quantity (boxes)' : 'Quantity';
+  updateBoxPreview();
+}
+
+function updateBoxPreview() {
+  const section = document.getElementById('boxConvertSection');
+  if (!section || section.style.display === 'none') return;
+  const productId = parseInt(document.getElementById('adjProductId').value);
+  const p = allProducts.find(x => x.product_id === productId);
+  if (!p || p.unit_type !== 'box' || !p.pieces_per_box) return;
+  const qty = parseInt(document.getElementById('adjQty').value) || 0;
+  const preview = document.getElementById('boxConvertPreview');
+  if (adjQtyMode === 'boxes') {
+    const pieces = qty * p.pieces_per_box;
+    preview.textContent = qty > 0 ? `${qty} box${qty !== 1 ? 'es' : ''} = ${pieces} pieces` : '';
+  } else {
+    const boxes = (qty / p.pieces_per_box).toFixed(2);
+    preview.textContent = qty > 0 ? `${qty} pieces ≈ ${boxes} boxes` : '';
+  }
+}
+
+function onAdjQtyChange() {
+  updateBoxPreview();
+  if (document.getElementById('applyToComponents').checked) {
+    renderCompImpactList();
+  }
+}
+
+// ── COMPONENT HELPERS ──────────────────
+
+function renderComponentsList(parentProductId) {
+  const comps = allComponentMap[parentProductId] || [];
+  const badge = document.getElementById('compCountBadge');
+  if (comps.length > 0) {
+    badge.textContent = `${comps.length} part${comps.length !== 1 ? 's' : ''}`;
+    badge.style.display = 'inline';
+  } else {
+    badge.style.display = 'none';
+  }
+  const listEl = document.getElementById('componentsList');
+  if (!comps.length) {
+    listEl.innerHTML = `<div style="font-size:12px;color:var(--muted);padding:6px 0;">No components added yet.</div>`;
+    return;
+  }
+  listEl.innerHTML = comps.map(c => {
+    const cp = allProducts.find(x => x.product_id === c.component_product_id);
+    const cName = cp ? cp.product_name : `Product #${c.component_product_id}`;
+    return `<div class="comp-item">
+      <div class="comp-item-info">
+        <div class="comp-item-name">${cName}</div>
+        <div class="comp-item-qty">Qty: ${c.quantity}</div>
+      </div>
+      <button class="comp-remove-btn" onclick="removeComponent(${c.component_id}, ${parentProductId})" title="Remove">✕</button>
+    </div>`;
+  }).join('');
+}
+
+function filterCompSearch() {
+  const q = document.getElementById('compSearchInput').value.toLowerCase().trim();
+  const resultsEl = document.getElementById('compSearchList');
+  const parentId = parseInt(document.getElementById('editId').value);
+  if (!q) { resultsEl.style.display = 'none'; return; }
+  const existing = new Set((allComponentMap[parentId] || []).map(c => c.component_product_id));
+  const matches = allProducts.filter(p =>
+    p.product_id !== parentId &&
+    !existing.has(p.product_id) &&
+    (p.product_name.toLowerCase().includes(q) || (p.brand||'').toLowerCase().includes(q))
+  ).slice(0, 6);
+  if (!matches.length) { resultsEl.style.display = 'none'; return; }
+  resultsEl.innerHTML = matches.map(p =>
+    `<div class="comp-search-opt" onmousedown="selectCompProduct(${p.product_id}, '${p.product_name.replace(/'/g, "\\'")}')">${p.product_name}${p.brand ? ' · '+p.brand : ''}</div>`
+  ).join('');
+  resultsEl.style.display = 'block';
+}
+
+function selectCompProduct(productId, productName) {
+  compSelectedProductId = productId;
+  document.getElementById('compSearchInput').value = productName;
+  document.getElementById('compSearchList').style.display = 'none';
+  document.getElementById('compSelectedName').textContent = productName;
+  document.getElementById('compSelectedWrap').style.display = 'block';
+}
+
+async function addComponent() {
+  const parentId = parseInt(document.getElementById('editId').value);
+  if (!compSelectedProductId) { showToast('Select a component product first', 'error'); return; }
+  const qty = parseInt(document.getElementById('compQty').value) || 1;
+  if (qty < 1) { showToast('Quantity must be at least 1', 'error'); return; }
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/product_components`, {
+      method: 'POST', headers: H,
+      body: JSON.stringify({ parent_product_id: parentId, component_product_id: compSelectedProductId, quantity: qty })
+    });
+    if (!res.ok) throw new Error(await res.text());
+    await fetchAllComponents();
+    renderComponentsList(parentId);
+    document.getElementById('compSearchInput').value = '';
+    document.getElementById('compQty').value = 1;
+    document.getElementById('compSelectedWrap').style.display = 'none';
+    compSelectedProductId = null;
+    showToast('Component added ✓', 'success');
+  } catch(e) { showToast('Error: ' + e.message, 'error'); }
+}
+
+async function removeComponent(componentId, parentProductId) {
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/product_components?component_id=eq.${componentId}`, {
+      method: 'DELETE', headers: H
+    });
+    if (!res.ok) throw new Error(await res.text());
+    await fetchAllComponents();
+    renderComponentsList(parentProductId);
+    showToast('Component removed', 'info');
+  } catch(e) { showToast('Error: ' + e.message, 'error'); }
+}
+
+function renderCompImpactList() {
+  const productId = parseInt(document.getElementById('adjProductId').value);
+  const rawQty = parseInt(document.getElementById('adjQty').value) || 0;
+  const adjProd = allProducts.find(x => x.product_id === productId);
+  let machineQty = rawQty;
+  if (adjProd && adjProd.unit_type === 'box' && adjProd.pieces_per_box > 0 && adjQtyMode === 'boxes') {
+    machineQty = rawQty * adjProd.pieces_per_box;
+  }
+  const comps = allComponentMap[productId] || [];
+  const listEl = document.getElementById('compImpactList');
+  if (!comps.length || machineQty < 1) { listEl.innerHTML = ''; return; }
+  listEl.innerHTML = comps.map(c => {
+    const cp = allProducts.find(x => x.product_id === c.component_product_id);
+    const cName = cp ? cp.product_name : `#${c.component_product_id}`;
+    return `<div class="comp-impact-item">→ ${machineQty * c.quantity}× ${cName}</div>`;
+  }).join('');
+}
+
+function toggleCompImpact() {
+  const checked = document.getElementById('applyToComponents').checked;
+  const listEl = document.getElementById('compImpactList');
+  if (checked) {
+    renderCompImpactList();
+    listEl.style.display = 'block';
+  } else {
+    listEl.style.display = 'none';
+    listEl.innerHTML = '';
+  }
 }
 
 async function submitStockRequest() {
   const productId = parseInt(document.getElementById('adjProductId').value);
-  const qty       = parseInt(document.getElementById('adjQty').value) || 0;
+  let   qty       = parseInt(document.getElementById('adjQty').value) || 0;
   const note      = document.getElementById('adjNote').value;
   if (qty < 1)  { showToast('Quantity must be at least 1', 'error'); return; }
   if (!note)    { showToast('Please select a reason', 'error'); return; }
+  // Convert boxes → pieces if product is box type and user entered in boxes
+  const adjProd = allProducts.find(x => x.product_id === productId);
+  if (adjProd && adjProd.unit_type === 'box' && adjProd.pieces_per_box > 0 && adjQtyMode === 'boxes') {
+    qty = qty * adjProd.pieces_per_box;
+  }
 
   const locationId = parseInt(document.getElementById('adjLocation').value);
   if (!locationId) { showToast('Please select a location', 'error'); return; }
@@ -1652,6 +2036,32 @@ async function submitStockRequest() {
         method: 'POST', headers: H,
         body: JSON.stringify({ product_id: productId, request_type: requestType, quantity: qty, to_location_id: locationId, requested_by: currentUser.db_id, status: 'APPROVED', approved_by: currentUser.db_id, approved_at: new Date().toISOString(), notes: note })
       });
+      // Apply to components if checkbox checked
+      const applyComps = document.getElementById('applyToComponents').checked;
+      if (applyComps) {
+        const comps = allComponentMap[productId] || [];
+        for (const c of comps) {
+          const cLocs = locationStock[c.component_product_id] || {};
+          const compQty = qty * c.quantity;
+          const cp = allProducts.find(x => x.product_id === c.component_product_id);
+          const compNote = `Auto: Component of ${adjProd ? adjProd.product_name : productId}`;
+          if (note === 'Moved to Main Store') {
+            await upsertLocationStock(c.component_product_id, 2, Math.max(0, (cLocs[2] ?? 0) - compQty));
+            await upsertLocationStock(c.component_product_id, 1, (cLocs[1] ?? 0) + compQty);
+            await fetch(`${SUPABASE_URL}/rest/v1/stock_movements`, { method: 'POST', headers: H, body: JSON.stringify({ product_id: c.component_product_id, from_location_id: 2, to_location_id: 1, quantity: compQty, movement_type: 'TRANSFER', reason: compNote, performed_by: currentUser.db_id, approved_by: currentUser.db_id, status: 'APPROVED' }) });
+          } else if (note === 'Moved from Main Store') {
+            await upsertLocationStock(c.component_product_id, 1, Math.max(0, (cLocs[1] ?? 0) - compQty));
+            await upsertLocationStock(c.component_product_id, 2, (cLocs[2] ?? 0) + compQty);
+            await fetch(`${SUPABASE_URL}/rest/v1/stock_movements`, { method: 'POST', headers: H, body: JSON.stringify({ product_id: c.component_product_id, from_location_id: 1, to_location_id: 2, quantity: compQty, movement_type: 'TRANSFER', reason: compNote, performed_by: currentUser.db_id, approved_by: currentUser.db_id, status: 'APPROVED' }) });
+          } else {
+            const cLocQty = cLocs[locationId] ?? 0;
+            const newCLocQty = isAdd ? cLocQty + compQty : Math.max(0, cLocQty - compQty);
+            await upsertLocationStock(c.component_product_id, locationId, newCLocQty);
+            await fetch(`${SUPABASE_URL}/rest/v1/stock_movements`, { method: 'POST', headers: H, body: JSON.stringify({ product_id: c.component_product_id, from_location_id: isAdd ? null : locationId, to_location_id: isAdd ? locationId : null, quantity: compQty, movement_type: requestType, reason: compNote, performed_by: currentUser.db_id, approved_by: currentUser.db_id, status: 'APPROVED' }) });
+          }
+          await fetch(`${SUPABASE_URL}/rest/v1/stock_requests`, { method: 'POST', headers: H, body: JSON.stringify({ product_id: c.component_product_id, request_type: requestType, quantity: compQty, to_location_id: locationId, requested_by: currentUser.db_id, status: 'APPROVED', approved_by: currentUser.db_id, approved_at: new Date().toISOString(), notes: compNote }) });
+        }
+      }
       closeModal('stockModal');
       showToast(`Stock updated ✓`, 'success');
       await fetchAll();
@@ -1663,6 +2073,19 @@ async function submitStockRequest() {
         body: JSON.stringify({ product_id: productId, request_type: requestType, quantity: qty, to_location_id: locationId, requested_by: currentUser.db_id, status: 'PENDING', notes: note })
       });
       if (!res.ok) throw new Error(await res.text());
+      // Create component requests if checkbox checked
+      const applyComps = document.getElementById('applyToComponents').checked;
+      if (applyComps) {
+        const comps = allComponentMap[productId] || [];
+        for (const c of comps) {
+          const compQty = qty * c.quantity;
+          const compNote = `Auto: Component of ${adjProd ? adjProd.product_name : productId} (x${qty})`;
+          await fetch(`${SUPABASE_URL}/rest/v1/stock_requests`, {
+            method: 'POST', headers: H,
+            body: JSON.stringify({ product_id: c.component_product_id, request_type: requestType, quantity: compQty, to_location_id: locationId, requested_by: currentUser.db_id, status: 'PENDING', notes: compNote })
+          });
+        }
+      }
       closeModal('stockModal');
       showToast('Request sent to Admin for approval', 'info');
       await fetchProducts();

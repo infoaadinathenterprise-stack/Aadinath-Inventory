@@ -272,24 +272,34 @@ function renderCard() {
         <div class="card-badge">${[p.type, p.brand].filter(Boolean).join(' · ') || 'Product'}</div>
         <div class="card-name">${p.product_name}</div>
         <div class="card-sku">${p.stock_keeping_unit || 'No SKU'}</div>
+        ${p.unit_type === 'box' && p.pieces_per_box ? `
+          <div style="display:inline-flex;align-items:center;gap:5px;background:var(--blue-dim);color:var(--blue);border:1px solid rgba(96,196,250,0.2);border-radius:5px;font-size:11px;font-weight:700;padding:3px 9px;margin-bottom:10px;">
+            📦 1 box = ${p.pieces_per_box} pieces · prices are per piece
+          </div>` : ''}
         <div class="card-stocks">
-          <div class="stock-chip main-loc"><div class="stock-chip-num">${mainQ}</div><div class="stock-chip-label">Main</div></div>
-          <div class="stock-chip back-loc"><div class="stock-chip-num">${backQ}</div><div class="stock-chip-label">Back</div></div>
+          <div class="stock-chip main-loc">
+            <div class="stock-chip-num">${mainQ}</div>
+            <div class="stock-chip-label">${p.unit_type === 'box' && p.pieces_per_box ? `Main (${Math.floor(mainQ/p.pieces_per_box)}bx)` : 'Main'}</div>
+          </div>
+          <div class="stock-chip back-loc">
+            <div class="stock-chip-num">${backQ}</div>
+            <div class="stock-chip-label">${p.unit_type === 'box' && p.pieces_per_box ? `Back (${Math.floor(backQ/p.pieces_per_box)}bx)` : 'Back'}</div>
+          </div>
           ${holdQ > 0 ? `<div class="stock-chip hold-loc"><div class="stock-chip-num">${holdQ}</div><div class="stock-chip-label">Hold</div></div>` : ''}
         </div>
         ${(p.selling_price != null || p.buying_price != null) ? `
           <div class="cur-prices-row">
-            ${p.selling_price != null ? `<div class="cur-price-chip">Sell: <b>KES ${p.selling_price}</b></div>` : ''}
-            ${p.buying_price  != null ? `<div class="cur-price-chip">Buy: <b>KES ${p.buying_price}</b></div>`  : ''}
+            ${p.selling_price != null ? `<div class="cur-price-chip">Sell: <b>KES ${p.selling_price}</b>${p.unit_type === 'box' && p.pieces_per_box ? `<span style="color:var(--muted)">/pc</span>` : ''}</div>` : ''}
+            ${p.buying_price  != null ? `<div class="cur-price-chip">Buy: <b>KES ${p.buying_price}</b>${p.unit_type === 'box' && p.pieces_per_box ? `<span style="color:var(--muted)">/pc</span>` : ''}</div>`  : ''}
           </div>
         ` : ''}
         <div class="price-inputs">
           <div class="price-field">
-            <label>Selling Price (KES)</label>
+            <label>${p.unit_type === 'box' && p.pieces_per_box ? `Selling Price/Piece (KES)` : 'Selling Price (KES)'}</label>
             <input type="number" id="inp_sell" placeholder="0.00" value="${p.selling_price ?? ''}" min="0" step="0.01" inputmode="decimal">
           </div>
           <div class="price-field">
-            <label>Buying Price (KES)</label>
+            <label>${p.unit_type === 'box' && p.pieces_per_box ? `Buying Price/Piece (KES)` : 'Buying Price (KES)'}</label>
             <input type="number" id="inp_buy" placeholder="0.00" value="${p.buying_price ?? ''}" min="0" step="0.01" inputmode="decimal">
           </div>
         </div>
