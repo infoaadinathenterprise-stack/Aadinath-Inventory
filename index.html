@@ -759,6 +759,10 @@ main { padding: 14px; max-width: 900px; margin: 0 auto; padding-bottom: 76px; }
       <label>Display Unit <span style="color:var(--muted);font-size:10px;">e.g. "Box of 12", "Set of 6"</span></label>
       <input type="text" id="f_display_unit" placeholder="Box of 12 · Piece · Set">
     </div>
+    <div class="form-group" id="boxPriceWrap" style="display:none">
+      <label>Box Selling Price (₹) <span style="color:var(--muted);font-size:10px;">price for the whole box</span></label>
+      <input type="number" id="f_box_price" placeholder="e.g. 480" min="0" step="0.01">
+    </div>
     <div class="form-group" id="stockFieldWrap">
       <label>Location * <span id="stockHintLabel" style="color:var(--hold);font-size:10px;display:none;">⏳ stock needs approval</span></label>
       <select id="f_location" onchange="toggleLocationFields()">
@@ -1065,10 +1069,11 @@ const USERS = {
   'akshat': { password: 'Akshat@2003',   name: 'Akshat', role: 'staff', db_id: 2 }
 };
 
-let currentUser = null, allProducts = [], locationStock = {}, pendingRequests = [], activeType = 'ALL', adjType = 'ADD', confirmCb = null, adjQtyMode = 'boxes';
+let currentUser = null, allProducts = [], locationStock = {}, boxStock = {}, pendingRequests = [], activeType = 'ALL', adjType = 'ADD', confirmCb = null, adjQtyMode = 'boxes';
 let allComponentMap = {};   // { parentProductId: [{component_id, component_product_id, quantity}] }
 let compSelectedProductId = null;
-// locationStock: { productId: { 1: qty, 2: qty } }
+// locationStock: { productId: { 1: looseQty, 2: looseQty } }
+// boxStock:      { productId: { 1: boxQty,   2: boxQty   } }
 
 // ── AUTH ───────────────────────────────
 let selectedLoginAccount = 'admin';
@@ -1269,9 +1274,14 @@ async function fetchLocationStock() {
     if (!res.ok) throw new Error(await res.text());
     const rows = await res.json();
     locationStock = {};
+    boxStock = {};
     rows.forEach(r => {
       if (!locationStock[r.product_id]) locationStock[r.product_id] = {};
       locationStock[r.product_id][r.location_id] = r.quantity;
+      if (r.box_quantity > 0) {
+        if (!boxStock[r.product_id]) boxStock[r.product_id] = {};
+        boxStock[r.product_id][r.location_id] = r.box_quantity;
+      }
     });
     renderProducts();
   } catch(e) { console.error('Location stock error:', e); }
@@ -1363,26 +1373,27 @@ function togglePendingPanel() {
 }
 
 // Helper: set stock for a location (update if exists, insert if not)
-async function upsertLocationStock(productId, locationId, newQty) {
-  // First check if row exists
+// newBoxQty = null → don't touch box_quantity; pass a number to write it
+async function upsertLocationStock(productId, locationId, newQty, newBoxQty = null) {
   const checkRes = await fetch(
     `${SUPABASE_URL}/rest/v1/stock_by_location?product_id=eq.${productId}&location_id=eq.${locationId}&select=id`,
     { headers: H }
   );
   const existing = await checkRes.json();
-
+  const patch = { quantity: newQty, updated_at: new Date().toISOString() };
+  if (newBoxQty !== null) patch.box_quantity = newBoxQty;
   if (existing && existing.length > 0) {
-    // Row exists — PATCH it
     const r = await fetch(
       `${SUPABASE_URL}/rest/v1/stock_by_location?product_id=eq.${productId}&location_id=eq.${locationId}`,
-      { method: 'PATCH', headers: H, body: JSON.stringify({ quantity: newQty, updated_at: new Date().toISOString() }) }
+      { method: 'PATCH', headers: H, body: JSON.stringify(patch) }
     );
     if (!r.ok) throw new Error('PATCH failed: ' + await r.text());
   } else {
-    // No row — INSERT
+    const insert = { product_id: productId, location_id: locationId, quantity: newQty, updated_at: new Date().toISOString() };
+    if (newBoxQty !== null) insert.box_quantity = newBoxQty;
     const r = await fetch(
       `${SUPABASE_URL}/rest/v1/stock_by_location`,
-      { method: 'POST', headers: H, body: JSON.stringify({ product_id: productId, location_id: locationId, quantity: newQty, updated_at: new Date().toISOString() }) }
+      { method: 'POST', headers: H, body: JSON.stringify(insert) }
     );
     if (!r.ok) throw new Error('INSERT failed: ' + await r.text());
   }
@@ -1450,9 +1461,9 @@ async function handlePending(requestId, decision, productId, requestType, quanti
 
 // ── TABS & FILTER ──────────────────────
 function renderTypeTabs() {
-  const types = ['ALL', ...new Set(allProducts.map(p => p.type).filter(Boolean).sort())];
+  const types = ['ALL', 'BOXES', ...new Set(allProducts.map(p => p.type).filter(Boolean).sort())];
   document.getElementById('filterTabs').innerHTML = types.map(t =>
-    `<div class="tab ${t === activeType ? 'active' : ''}" onclick="setTypeFilter('${t}',this)">${t === 'ALL' ? 'All' : t}</div>`
+    `<div class="tab ${t === activeType ? 'active' : ''}" onclick="setTypeFilter('${t}',this)">${t === 'ALL' ? 'All' : t === 'BOXES' ? '📦 Boxes' : t}</div>`
   ).join('');
 }
 
@@ -1469,7 +1480,8 @@ function scrollTabs(amount) { document.getElementById('filterTabs').scrollBy({ l
 function renderProducts() {
   const q = document.getElementById('searchInput').value.toLowerCase().trim();
   let list = allProducts;
-  if (activeType !== 'ALL') list = list.filter(p => p.type === activeType);
+  if (activeType === 'BOXES') list = list.filter(p => p.unit_type === 'box');
+  else if (activeType !== 'ALL') list = list.filter(p => p.type === activeType);
   if (q) list = list.filter(p =>
     (p.product_name||'').toLowerCase().includes(q) ||
     (p.brand||'').toLowerCase().includes(q) ||
@@ -1500,21 +1512,33 @@ function renderProducts() {
 
     const isBoxType = p.unit_type === 'box' && p.pieces_per_box > 0;
     const ppb = p.pieces_per_box || 1;
+    const bxBack = (boxStock[p.product_id] || {})[2] || 0;
+    const bxMain = (boxStock[p.product_id] || {})[1] || 0;
+    const looseBack = backQty ?? 0;
+    const looseMain = mainQty ?? 0;
+    const computedTotal = isBoxType ? looseBack + looseMain + (bxBack + bxMain) * ppb : total;
 
     let locTagsHtml = '';
-    if (backQty !== null) {
-      const bxStr = isBoxType ? ` (${Math.floor(backQty/ppb)}bx)` : '';
-      locTagsHtml += `<span class="loc-tag back">Back: ${backQty}${bxStr}</span>`;
+    if (backQty !== null || bxBack > 0) {
+      const str = isBoxType
+        ? `${bxBack}bx + ${looseBack}pcs`
+        : `${looseBack}`;
+      locTagsHtml += `<span class="loc-tag back">Back: ${str}</span>`;
     }
-    if (mainQty !== null) {
-      const bxStr = isBoxType ? ` (${Math.floor(mainQty/ppb)}bx)` : '';
-      locTagsHtml += `<span class="loc-tag main">Main: ${mainQty}${bxStr}</span>`;
+    if (mainQty !== null || bxMain > 0) {
+      const str = isBoxType
+        ? `${bxMain}bx + ${looseMain}pcs`
+        : `${looseMain}`;
+      locTagsHtml += `<span class="loc-tag main">Main: ${str}</span>`;
     }
     if (hold !== 0) locTagsHtml += `<span class="loc-tag hold">${hold > 0 ? '+' : ''}${hold} hold</span>`;
-    if (isBoxType) locTagsHtml += `<span class="box-type-badge">📦 1bx=${ppb}pc</span>`;
+    if (isBoxType) {
+      const priceStr = p.box_selling_price ? ` · ₹${p.box_selling_price}/bx` : ' · no box price';
+      locTagsHtml += `<span class="box-type-badge">📦 1bx=${ppb}pc${priceStr}</span>`;
+    }
 
     const stockNumHtml = isBoxType
-      ? `<div class="stock-num ${cls}" style="font-size:18px;line-height:1.1">${total}<br><span style="font-size:10px;font-weight:600;color:var(--muted)">${Math.floor(total/ppb)} boxes</span></div>`
+      ? `<div class="stock-num ${cls}" style="font-size:18px;line-height:1.1">${computedTotal}<br><span style="font-size:10px;font-weight:600;color:var(--muted)">${bxBack + bxMain}bx + ${looseBack + looseMain}pcs</span></div>`
       : `<div class="stock-num ${cls}">${total}</div>`;
 
     const compCount = (allComponentMap[p.product_id] || []).length;
@@ -1557,8 +1581,10 @@ function openAddModal() {
   document.getElementById('f_unit_type').value = 'piece';
   document.getElementById('f_pieces_per_box').value = '';
   document.getElementById('f_display_unit').value = '';
+  document.getElementById('f_box_price').value = '';
   document.getElementById('piecesPerBoxWrap').style.display = 'none';
   document.getElementById('displayUnitWrap').style.display  = 'none';
+  document.getElementById('boxPriceWrap').style.display     = 'none';
   document.getElementById('stockBackLabel').textContent = 'Back Godown Stock';
   document.getElementById('stockMainLabel').textContent = 'Main Store Stock';
   document.getElementById('stockBackHint').style.display = 'none';
@@ -1601,8 +1627,10 @@ function openEditModal(id) {
   document.getElementById('f_unit_type').value     = p.unit_type || 'piece';
   document.getElementById('f_pieces_per_box').value = p.pieces_per_box || '';
   document.getElementById('f_display_unit').value  = p.display_unit || '';
+  document.getElementById('f_box_price').value     = p.box_selling_price || '';
   document.getElementById('piecesPerBoxWrap').style.display = isBox ? 'block' : 'none';
   document.getElementById('displayUnitWrap').style.display  = isBox ? 'block' : 'none';
+  document.getElementById('boxPriceWrap').style.display     = isBox ? 'block' : 'none';
   // When editing, stock values are already in pieces — keep labels as pieces
   document.getElementById('stockBackLabel').textContent = 'Back Godown Stock (pieces)';
   document.getElementById('stockMainLabel').textContent = 'Main Store Stock (pieces)';
@@ -1637,17 +1665,24 @@ async function saveProduct() {
     active_status: true,
     unit_type: unitType,
     pieces_per_box: unitType === 'box' ? ppb : null,
-    display_unit: document.getElementById('f_display_unit').value.trim() || null
+    display_unit: document.getElementById('f_display_unit').value.trim() || null,
+    box_selling_price: unitType === 'box' ? (parseFloat(document.getElementById('f_box_price').value) || null) : null
   };
   const locChoice  = document.getElementById('f_location').value;
   if (!locChoice) { showToast('Please select a location', 'error'); return; }
   const editId = document.getElementById('editId').value;
   const backQtyRaw = parseInt(document.getElementById('f_stock_back').value) || 0;
   const mainQtyRaw = parseInt(document.getElementById('f_stock_main').value) || 0;
-  // On new products with box type: input is in boxes, convert to pieces for storage
-  const backQty    = (!editId && unitType === 'box') ? backQtyRaw * ppb : backQtyRaw;
-  const mainQty    = (!editId && unitType === 'box') ? mainQtyRaw * ppb : mainQtyRaw;
-  const totalStock = (locChoice === '2' ? backQty : 0) + (locChoice === '1' ? mainQty : 0) + (locChoice === 'both' ? backQty + mainQty : 0);
+  // For new box products: store initial stock as box_quantity (not converted pieces)
+  // For edits: the form already shows loose pieces — keep as-is
+  const isNewBox = !editId && unitType === 'box';
+  const backQty  = isNewBox ? 0 : backQtyRaw;   // loose pieces
+  const mainQty  = isNewBox ? 0 : mainQtyRaw;
+  const backBoxQty = isNewBox ? backQtyRaw : null;  // null = don't touch box_quantity on edit
+  const mainBoxQty = isNewBox ? mainQtyRaw : null;
+  const totalStock = (locChoice === '2' ? (backQty + (backBoxQty || 0) * ppb) : 0)
+                   + (locChoice === '1' ? (mainQty + (mainBoxQty || 0) * ppb) : 0)
+                   + (locChoice === 'both' ? (backQty + mainQty + ((backBoxQty || 0) + (mainBoxQty || 0)) * ppb) : 0);
 
   payload.current_stock = currentUser.role === 'admin' ? totalStock : 0;
 
@@ -1672,14 +1707,14 @@ async function saveProduct() {
     if (currentUser.role === 'admin') {
       // Upsert stock_by_location for each selected location
       const locUpdates = [];
-      if ((locChoice === '2' || locChoice === 'both') && backQty >= 0) locUpdates.push({ product_id: productId, location_id: 2, quantity: backQty, updated_at: new Date().toISOString() });
-      if ((locChoice === '1' || locChoice === 'both') && mainQty >= 0) locUpdates.push({ product_id: productId, location_id: 1, quantity: mainQty, updated_at: new Date().toISOString() });
+      if ((locChoice === '2' || locChoice === 'both') && backQty >= 0) locUpdates.push({ location_id: 2, qty: backQty, boxQty: backBoxQty });
+      if ((locChoice === '1' || locChoice === 'both') && mainQty >= 0) locUpdates.push({ location_id: 1, qty: mainQty, boxQty: mainBoxQty });
       for (const upd of locUpdates) {
-        await upsertLocationStock(upd.product_id, upd.location_id, upd.quantity);
+        await upsertLocationStock(productId, upd.location_id, upd.qty, upd.boxQty);
         // Log movement
         await fetch(`${SUPABASE_URL}/rest/v1/stock_movements`, {
           method: 'POST', headers: H,
-          body: JSON.stringify({ product_id: productId, to_location_id: upd.location_id, quantity: upd.quantity, movement_type: 'ADJUSTMENT_IN', reason: editId ? 'Stock updated' : 'Initial stock', performed_by: currentUser.db_id, approved_by: currentUser.db_id, status: 'APPROVED' })
+          body: JSON.stringify({ product_id: productId, to_location_id: upd.location_id, quantity: upd.qty + (upd.boxQty || 0) * ppb, movement_type: 'ADJUSTMENT_IN', reason: editId ? 'Stock updated' : 'Initial stock', performed_by: currentUser.db_id, approved_by: currentUser.db_id, status: 'APPROVED' })
         });
       }
       closeModal('productModal');
@@ -1797,6 +1832,7 @@ function toggleBoxFields() {
   const isBox = document.getElementById('f_unit_type').value === 'box';
   document.getElementById('piecesPerBoxWrap').style.display = isBox ? 'block' : 'none';
   document.getElementById('displayUnitWrap').style.display  = isBox ? 'block' : 'none';
+  document.getElementById('boxPriceWrap').style.display     = isBox ? 'block' : 'none';
   const isEditing = !!document.getElementById('editId').value;
   document.getElementById('stockBackLabel').textContent = isBox && !isEditing ? 'Back Godown Stock (boxes)' : 'Back Godown Stock';
   document.getElementById('stockMainLabel').textContent = isBox && !isEditing ? 'Main Store Stock (boxes)' : 'Main Store Stock';

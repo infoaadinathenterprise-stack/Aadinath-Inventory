@@ -108,6 +108,12 @@ header { background: var(--surface); border-bottom: 1px solid var(--border); pad
 .cam-close { background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; color: var(--text); padding: 10px 28px; font-size: 14px; font-weight: 700; cursor: pointer; font-family: 'DM Sans', sans-serif; transition: all 0.15s; }
 .cam-close:hover { border-color: var(--danger); color: var(--danger); }
 
+/* ── UNIT TOGGLE ── */
+.unit-toggle { display: flex; gap: 8px; margin-bottom: 16px; }
+.unit-btn { flex: 1; padding: 9px 12px; border-radius: 10px; border: 2px solid var(--border); background: var(--surface2); color: var(--text2); font-family: 'DM Sans', sans-serif; font-size: 13px; font-weight: 600; cursor: pointer; transition: all 0.15s; text-align: center; }
+.unit-btn.active-piece { border-color: var(--accent); background: var(--success-dim); color: var(--accent); }
+.unit-btn.active-box { border-color: var(--warn); background: var(--warn-dim); color: var(--warn); }
+
 /* ── ADJUSTMENT BOTTOM SHEET ── */
 .adj-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.65); z-index: 300; align-items: flex-end; justify-content: center; backdrop-filter: blur(4px); }
 .adj-overlay.active { display: flex; }
@@ -197,9 +203,10 @@ header { background: var(--surface); border-bottom: 1px solid var(--border); pad
     <div class="adj-handle"></div>
     <div class="adj-prod-name" id="adjProdName"></div>
     <div class="adj-stock-info" id="adjStockInfo"></div>
+    <div id="adjUnitRow" style="display:none;gap:8px;margin-bottom:16px;"></div>
     <div class="adj-section-label" id="adjActionLabel"></div>
     <div class="adj-options" id="adjOptions"></div>
-    <div class="adj-section-label">Quantity</div>
+    <div class="adj-section-label" id="adjQtyLabel">Quantity</div>
     <div class="adj-qty-row">
       <button class="adj-qty-btn" onclick="adjChangeQty(-1)">−</button>
       <input type="number" class="adj-qty-inp" id="adjQtyInput" value="1" min="1" max="9999" inputmode="numeric">
@@ -231,8 +238,8 @@ const _u = localStorage.getItem('ae_user') || 'admin';
 const isAdmin = _u === 'admin';
 const currentUserId = ({ admin: 1, akshat: 2 })[_u] || 1;
 
-let allProducts = [], backStockMap = {}, mainStockMap = {}, activeFilter = 'ALL';
-let adjProductId = null, adjDirection = null, adjSelectedAction = null;
+let allProducts = [], backStockMap = {}, mainStockMap = {}, backBoxMap = {}, mainBoxMap = {}, activeFilter = 'ALL';
+let adjProductId = null, adjDirection = null, adjSelectedAction = null, adjUnit = 'piece';
 
 // ── INIT ──────────────────────────────────────────────────────────────
 async function init() {
@@ -249,9 +256,17 @@ async function init() {
     const stockRows = stockRes.ok ? await stockRes.json() : [];
     backStockMap = {};
     mainStockMap = {};
+    backBoxMap = {};
+    mainBoxMap = {};
     stockRows.forEach(r => {
-      if (r.location_id === 2) backStockMap[r.product_id] = (backStockMap[r.product_id] || 0) + (r.quantity || 0);
-      if (r.location_id === 1) mainStockMap[r.product_id] = (mainStockMap[r.product_id] || 0) + (r.quantity || 0);
+      if (r.location_id === 2) {
+        backStockMap[r.product_id] = (backStockMap[r.product_id] || 0) + (r.quantity || 0);
+        if (r.box_quantity > 0) backBoxMap[r.product_id] = (backBoxMap[r.product_id] || 0) + r.box_quantity;
+      }
+      if (r.location_id === 1) {
+        mainStockMap[r.product_id] = (mainStockMap[r.product_id] || 0) + (r.quantity || 0);
+        if (r.box_quantity > 0) mainBoxMap[r.product_id] = (mainBoxMap[r.product_id] || 0) + r.box_quantity;
+      }
     });
     buildFilters();
     renderProducts();
@@ -264,7 +279,7 @@ async function init() {
 
 // ── FILTERS ───────────────────────────────────────────────────────────
 function buildFilters() {
-  const visible = allProducts.filter(p => (backStockMap[p.product_id] || 0) > 0);
+  const visible = allProducts.filter(p => (backStockMap[p.product_id] || 0) > 0 || (backBoxMap[p.product_id] || 0) > 0);
   const types = ['ALL', ...new Set(visible.map(p => p.type).filter(Boolean).sort())];
   document.getElementById('filterRow').innerHTML = types.map((t, i) =>
     `<div class="ftab${i === 0 ? ' active' : ''}" onclick="setFilter('${t.replace(/'/g, "\\'")}',this)">${t === 'ALL' ? 'All' : t}</div>`
@@ -281,7 +296,7 @@ function setFilter(type, el) {
 // ── RENDER ────────────────────────────────────────────────────────────
 function renderProducts() {
   const q = (document.getElementById('searchInput').value || '').toLowerCase().trim();
-  let list = allProducts.filter(p => (backStockMap[p.product_id] || 0) > 0);
+  let list = allProducts.filter(p => (backStockMap[p.product_id] || 0) > 0 || (backBoxMap[p.product_id] || 0) > 0);
   if (activeFilter !== 'ALL') list = list.filter(p => p.type === activeFilter);
   if (q) list = list.filter(p =>
     (p.product_name || '').toLowerCase().includes(q) ||
@@ -298,10 +313,16 @@ function renderProducts() {
   }
 
   el.innerHTML = list.map(p => {
-    const backQty = backStockMap[p.product_id] || 0;
+    const backQty  = backStockMap[p.product_id] || 0;
+    const bxBack   = backBoxMap[p.product_id] || 0;
+    const isBox    = p.unit_type === 'box' && p.pieces_per_box > 0;
+    const ppb      = p.pieces_per_box || 1;
+    const totalPcs = backQty + bxBack * ppb;
     const reorder  = p.reorder_level || 2;
-    const stockCls = backQty <= reorder ? 'low' : 'ok';
-    const stockTxt = backQty <= reorder ? `⚠ Low — ${backQty} left` : `${backQty} in back`;
+    const stockCls = totalPcs <= reorder ? 'low' : 'ok';
+    const stockTxt = isBox
+      ? (bxBack > 0 ? `${bxBack} boxes + ${backQty} pcs` : `${backQty} pcs`)
+      : (backQty <= reorder ? `⚠ Low — ${backQty} left` : `${backQty} in back`);
     return `
       <div class="prod-card" onclick="openAdjModal(${p.product_id}, null)">
         <div class="prod-type">${p.type || '—'}</div>
@@ -311,9 +332,9 @@ function renderProducts() {
           <div class="prod-stock-line ${stockCls}">${stockTxt}</div>
         </div>
         <div class="stock-count-wrap">
-          <button class="minus-btn" onclick="event.stopPropagation();openAdjModal(${p.product_id},'minus')" title="Sold / Move to Front">−</button>
-          <span class="back-qty-num">${backQty}</span>
-          <button class="plus-btn"  onclick="event.stopPropagation();openAdjModal(${p.product_id},'plus')"  title="Stock In / From Main">+</button>
+          <button class="minus-btn" onclick="event.stopPropagation();openAdjModal(${p.product_id},'minus')" title="Reduce stock">−</button>
+          <span class="back-qty-num">${isBox ? `${bxBack}bx` : totalPcs}</span>
+          <button class="plus-btn"  onclick="event.stopPropagation();openAdjModal(${p.product_id},'plus')"  title="Add stock">+</button>
         </div>
       </div>`;
   }).join('');
@@ -328,7 +349,7 @@ function onBarcodeKey(e) {
   const match = allProducts.find(p => (p.stock_keeping_unit || '').trim().toLowerCase() === code.toLowerCase())
              || allProducts.find(p => (p.product_name || '').toLowerCase().includes(code.toLowerCase()));
   if (!match) { showToast('No product found: ' + code, 'error'); return; }
-  if (!(backStockMap[match.product_id] > 0)) { showToast('Not in back godown: ' + match.product_name, 'error'); return; }
+  if (!(backStockMap[match.product_id] > 0) && !(backBoxMap[match.product_id] > 0)) { showToast('Not in back godown: ' + match.product_name, 'error'); return; }
   openAdjModal(match.product_id, 'minus');
 }
 
@@ -357,7 +378,7 @@ function scanFrame(vid) {
         const code  = codes[0].rawValue;
         const match = allProducts.find(p => (p.stock_keeping_unit || '').trim().toLowerCase() === code.toLowerCase())
                    || allProducts.find(p => (p.product_name || '').toLowerCase().includes(code.toLowerCase()));
-        if (match && backStockMap[match.product_id] > 0) openAdjModal(match.product_id, 'minus');
+        if (match && (backStockMap[match.product_id] > 0 || backBoxMap[match.product_id] > 0)) openAdjModal(match.product_id, 'minus');
         else if (match) showToast('Not in back godown: ' + match.product_name, 'error');
         else showToast('No product found: ' + code, 'error');
         return;
@@ -392,16 +413,45 @@ function openAdjModal(productId, direction) {
   adjProductId      = productId;
   adjDirection      = direction || 'minus';
   adjSelectedAction = null;
+  adjUnit           = 'piece';
 
-  const backQty = backStockMap[productId] || 0;
-  const mainQty = mainStockMap[productId] || 0;
+  const backQty  = backStockMap[productId] || 0;
+  const mainQty  = mainStockMap[productId] || 0;
+  const bxBack   = backBoxMap[productId] || 0;
+  const bxMain   = mainBoxMap[productId] || 0;
+  const isBox    = p.unit_type === 'box' && p.pieces_per_box > 0;
+  const ppb      = p.pieces_per_box || 1;
 
-  document.getElementById('adjProdName').textContent    = p.product_name;
-  document.getElementById('adjStockInfo').textContent   = `Back: ${backQty}   ·   Main: ${mainQty}`;
+  document.getElementById('adjProdName').textContent = p.product_name;
+  document.getElementById('adjStockInfo').textContent = isBox
+    ? `Back: ${bxBack}bx + ${backQty}pcs   ·   Main: ${bxMain}bx + ${mainQty}pcs`
+    : `Back: ${backQty}   ·   Main: ${mainQty}`;
   document.getElementById('adjActionLabel').textContent = adjDirection === 'minus' ? 'What happened?' : 'Where is it from?';
-  document.getElementById('adjQtyInput').value          = 1;
+  document.getElementById('adjQtyInput').value = 1;
+
+  // Unit toggle (only for box products)
+  const unitRow = document.getElementById('adjUnitRow');
+  if (isBox) {
+    unitRow.style.display = 'flex';
+    unitRow.innerHTML = `
+      <button class="unit-btn active-piece" id="unitBtnPiece" onclick="setAdjUnit('piece')">📌 Piece</button>
+      <button class="unit-btn" id="unitBtnBox" onclick="setAdjUnit('box')">📦 Box (${ppb} pcs each)</button>`;
+  } else {
+    unitRow.style.display = 'none';
+  }
+
   renderAdjOptions();
   document.getElementById('adjOverlay').classList.add('active');
+}
+
+function setAdjUnit(unit) {
+  adjUnit = unit;
+  const p = allProducts.find(x => x.product_id === adjProductId);
+  const ppb = p ? (p.pieces_per_box || 1) : 1;
+  document.getElementById('unitBtnPiece').className = 'unit-btn' + (unit === 'piece' ? ' active-piece' : '');
+  document.getElementById('unitBtnBox').className   = 'unit-btn' + (unit === 'box'   ? ' active-box'   : '');
+  document.getElementById('adjQtyLabel').textContent = unit === 'box' ? `Quantity (boxes · 1 box = ${ppb} pcs)` : 'Quantity';
+  document.getElementById('adjQtyInput').value = 1;
 }
 
 function renderAdjOptions() {
@@ -428,7 +478,7 @@ function adjChangeQty(delta) {
 
 function closeAdjModal() {
   document.getElementById('adjOverlay').classList.remove('active');
-  adjProductId = null; adjDirection = null; adjSelectedAction = null;
+  adjProductId = null; adjDirection = null; adjSelectedAction = null; adjUnit = 'piece';
 }
 
 function closeAdjOnBg(e) {
@@ -437,17 +487,33 @@ function closeAdjOnBg(e) {
 
 async function confirmAdj() {
   if (!adjProductId || !adjSelectedAction) { showToast('Select an action first', 'error'); return; }
-  const qty = parseInt(document.getElementById('adjQtyInput').value) || 0;
-  if (qty < 1) { showToast('Enter a quantity', 'error'); return; }
+  const rawQty = parseInt(document.getElementById('adjQtyInput').value) || 0;
+  if (rawQty < 1) { showToast('Enter a quantity', 'error'); return; }
 
-  const backQty = backStockMap[adjProductId] || 0;
-  const mainQty = mainStockMap[adjProductId] || 0;
+  const p = allProducts.find(x => x.product_id === adjProductId);
+  const ppb = p ? (p.pieces_per_box || 1) : 1;
+  const isBoxUnit = adjUnit === 'box';
 
-  if ((adjSelectedAction === 'sold' || adjSelectedAction === 'tofront') && qty > backQty) {
-    showToast(`Only ${backQty} in back godown`, 'error'); return;
-  }
-  if (adjSelectedAction === 'frommain' && qty > mainQty) {
-    showToast(`Only ${mainQty} in main store`, 'error'); return;
+  const backQty  = backStockMap[adjProductId] || 0;
+  const mainQty  = mainStockMap[adjProductId] || 0;
+  const bxBack   = backBoxMap[adjProductId] || 0;
+  const bxMain   = mainBoxMap[adjProductId] || 0;
+
+  // Validation
+  if (isBoxUnit) {
+    if ((adjSelectedAction === 'sold' || adjSelectedAction === 'tofront') && rawQty > bxBack) {
+      showToast(`Only ${bxBack} boxes in back godown`, 'error'); return;
+    }
+    if (adjSelectedAction === 'frommain' && rawQty > bxMain) {
+      showToast(`Only ${bxMain} boxes in main store`, 'error'); return;
+    }
+  } else {
+    if ((adjSelectedAction === 'sold' || adjSelectedAction === 'tofront') && rawQty > backQty) {
+      showToast(`Only ${backQty} pcs in back godown`, 'error'); return;
+    }
+    if (adjSelectedAction === 'frommain' && rawQty > mainQty) {
+      showToast(`Only ${mainQty} pcs in main store`, 'error'); return;
+    }
   }
 
   const btn = document.getElementById('adjConfirmBtn');
@@ -455,34 +521,60 @@ async function confirmAdj() {
 
   try {
     const now = new Date().toISOString();
+    const movQty = isBoxUnit ? rawQty * ppb : rawQty; // pieces equivalent for movement log
 
     if (adjSelectedAction === 'sold') {
-      await patchStock(adjProductId, 2, Math.max(0, backQty - qty), now);
-      await logMovement(adjProductId, 2, null, qty, 'SALE', 'Sold from back godown');
-      backStockMap[adjProductId] = Math.max(0, backQty - qty);
+      if (isBoxUnit) {
+        await patchBoxStock(adjProductId, 2, Math.max(0, bxBack - rawQty), now);
+        backBoxMap[adjProductId] = Math.max(0, bxBack - rawQty);
+      } else {
+        await patchStock(adjProductId, 2, Math.max(0, backQty - rawQty), now);
+        backStockMap[adjProductId] = Math.max(0, backQty - rawQty);
+      }
+      await logMovement(adjProductId, 2, null, movQty, 'SALE', isBoxUnit ? 'Sold box from back godown' : 'Sold from back godown');
 
     } else if (adjSelectedAction === 'tofront') {
-      await patchStock(adjProductId, 2, Math.max(0, backQty - qty), now);
-      await patchStock(adjProductId, 1, mainQty + qty, now);
-      await logMovement(adjProductId, 2, 1, qty, 'TRANSFER', 'Moved from Back Godown to Main Store');
-      backStockMap[adjProductId] = Math.max(0, backQty - qty);
-      mainStockMap[adjProductId] = mainQty + qty;
+      if (isBoxUnit) {
+        await patchBoxStock(adjProductId, 2, Math.max(0, bxBack - rawQty), now);
+        await patchBoxStock(adjProductId, 1, bxMain + rawQty, now);
+        backBoxMap[adjProductId] = Math.max(0, bxBack - rawQty);
+        mainBoxMap[adjProductId] = bxMain + rawQty;
+      } else {
+        await patchStock(adjProductId, 2, Math.max(0, backQty - rawQty), now);
+        await patchStock(adjProductId, 1, mainQty + rawQty, now);
+        backStockMap[adjProductId] = Math.max(0, backQty - rawQty);
+        mainStockMap[adjProductId] = mainQty + rawQty;
+      }
+      await logMovement(adjProductId, 2, 1, movQty, 'TRANSFER', 'Moved from Back Godown to Main Store');
 
     } else if (adjSelectedAction === 'frommain') {
-      await patchStock(adjProductId, 1, Math.max(0, mainQty - qty), now);
-      await patchStock(adjProductId, 2, backQty + qty, now);
-      await logMovement(adjProductId, 1, 2, qty, 'TRANSFER', 'Moved from Main Store to Back Godown');
-      mainStockMap[adjProductId] = Math.max(0, mainQty - qty);
-      backStockMap[adjProductId] = backQty + qty;
+      if (isBoxUnit) {
+        await patchBoxStock(adjProductId, 1, Math.max(0, bxMain - rawQty), now);
+        await patchBoxStock(adjProductId, 2, bxBack + rawQty, now);
+        mainBoxMap[adjProductId] = Math.max(0, bxMain - rawQty);
+        backBoxMap[adjProductId] = bxBack + rawQty;
+      } else {
+        await patchStock(adjProductId, 1, Math.max(0, mainQty - rawQty), now);
+        await patchStock(adjProductId, 2, backQty + rawQty, now);
+        mainStockMap[adjProductId] = Math.max(0, mainQty - rawQty);
+        backStockMap[adjProductId] = backQty + rawQty;
+      }
+      await logMovement(adjProductId, 1, 2, movQty, 'TRANSFER', 'Moved from Main Store to Back Godown');
 
     } else if (adjSelectedAction === 'stockin') {
-      await patchStock(adjProductId, 2, backQty + qty, now);
-      await logMovement(adjProductId, null, 2, qty, 'ADJUSTMENT_IN', 'Stock added to back godown');
-      backStockMap[adjProductId] = backQty + qty;
+      if (isBoxUnit) {
+        await patchBoxStock(adjProductId, 2, bxBack + rawQty, now);
+        backBoxMap[adjProductId] = bxBack + rawQty;
+      } else {
+        await patchStock(adjProductId, 2, backQty + rawQty, now);
+        backStockMap[adjProductId] = backQty + rawQty;
+      }
+      await logMovement(adjProductId, null, 2, movQty, 'ADJUSTMENT_IN', isBoxUnit ? 'Boxes added to back godown' : 'Stock added to back godown');
     }
 
+    const unitLabel = isBoxUnit ? `box${rawQty !== 1 ? 'es' : ''}` : `unit${rawQty !== 1 ? 's' : ''}`;
     const labels = { sold: 'Sold', tofront: 'Moved to front', frommain: 'Moved from main', stockin: 'Stock added' };
-    showToast(`✓ ${labels[adjSelectedAction]} — ${qty} unit${qty !== 1 ? 's' : ''}`, 'success');
+    showToast(`✓ ${labels[adjSelectedAction]} — ${rawQty} ${unitLabel}`, 'success');
     closeAdjModal();
     buildFilters();
     renderProducts();
@@ -490,6 +582,25 @@ async function confirmAdj() {
     showToast('Error: ' + e.message, 'error');
   } finally {
     btn.disabled = false; btn.textContent = 'Confirm';
+  }
+}
+
+async function patchBoxStock(productId, locationId, newBoxQty, now) {
+  const checkRes = await fetch(
+    `${SUPABASE_URL}/rest/v1/stock_by_location?product_id=eq.${productId}&location_id=eq.${locationId}&select=id`,
+    { headers: H }
+  );
+  const rows = await checkRes.json();
+  if (rows && rows.length > 0) {
+    await fetch(
+      `${SUPABASE_URL}/rest/v1/stock_by_location?product_id=eq.${productId}&location_id=eq.${locationId}`,
+      { method: 'PATCH', headers: H, body: JSON.stringify({ box_quantity: newBoxQty, updated_at: now }) }
+    );
+  } else {
+    await fetch(
+      `${SUPABASE_URL}/rest/v1/stock_by_location`,
+      { method: 'POST', headers: H, body: JSON.stringify({ product_id: productId, location_id: locationId, quantity: 0, box_quantity: newBoxQty, updated_at: now }) }
+    );
   }
 }
 
