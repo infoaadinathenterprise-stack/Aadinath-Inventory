@@ -221,6 +221,9 @@ main { padding: 14px; max-width: 900px; margin: 0 auto; padding-bottom: 76px; }
 .tab { padding: 6px 13px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface); color: var(--muted); font-size: 12px; font-weight: 500; cursor: pointer; white-space: nowrap; transition: all 0.15s; flex-shrink: 0; }
 .tab.active { background: linear-gradient(135deg, var(--accent), var(--accent-dim)); color: #fff; border-color: transparent; font-weight: 700; box-shadow: 0 2px 8px var(--accent-glow); }
 [data-theme="light"] .tab.active { color: #fff; }
+.inv-location-row { display: flex; gap: 6px; margin-bottom: 10px; }
+.inv-loctab { flex: 1; padding: 8px; text-align: center; font-size: 12px; font-weight: 700; border-radius: 8px; border: 1.5px solid var(--border); background: var(--surface); color: var(--muted); cursor: pointer; transition: all 0.15s; user-select: none; }
+.inv-loctab.active { border-color: var(--accent); background: var(--success-dim); color: var(--accent); }
 .tab:hover:not(.active) { border-color: var(--border2); color: var(--text2); background: var(--surface2); }
 .tabs-scroll-btn { display: none; }
 .tabs-scroll-btn.left { left: 0; }
@@ -595,6 +598,12 @@ main { padding: 14px; max-width: 900px; margin: 0 auto; padding-bottom: 76px; }
     <span class="icon">🔍</span>
     <input type="text" id="searchInput" placeholder="Search products..." oninput="renderProducts()">
   </div>
+</div>
+
+<div class="inv-location-row">
+  <div class="inv-loctab active" id="iltab-all"  onclick="setLocationFilter('all',this)">🏠 All</div>
+  <div class="inv-loctab"        id="iltab-back" onclick="setLocationFilter('back',this)">📦 Back Godown</div>
+  <div class="inv-loctab"        id="iltab-main" onclick="setLocationFilter('main',this)">🏪 Main Store</div>
 </div>
 
 <div class="filter-tabs-wrapper">
@@ -1069,7 +1078,7 @@ const USERS = {
   'akshat': { password: 'Akshat@2003',   name: 'Akshat', role: 'staff', db_id: 2 }
 };
 
-let currentUser = null, allProducts = [], locationStock = {}, boxStock = {}, pendingRequests = [], activeType = 'ALL', adjType = 'ADD', confirmCb = null, adjQtyMode = 'boxes';
+let currentUser = null, allProducts = [], locationStock = {}, boxStock = {}, pendingRequests = [], activeType = 'ALL', activeLocation = 'all', adjType = 'ADD', confirmCb = null, adjQtyMode = 'boxes';
 let allComponentMap = {};   // { parentProductId: [{component_id, component_product_id, quantity}] }
 let compSelectedProductId = null;
 // locationStock: { productId: { 1: looseQty, 2: looseQty } }
@@ -1469,7 +1478,14 @@ function renderTypeTabs() {
 
 function setTypeFilter(type, el) {
   activeType = type;
-  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('#filterTabs .tab').forEach(t => t.classList.remove('active'));
+  el.classList.add('active');
+  renderProducts();
+}
+
+function setLocationFilter(loc, el) {
+  activeLocation = loc;
+  document.querySelectorAll('.inv-loctab').forEach(t => t.classList.remove('active'));
   el.classList.add('active');
   renderProducts();
 }
@@ -1480,7 +1496,16 @@ function scrollTabs(amount) { document.getElementById('filterTabs').scrollBy({ l
 function renderProducts() {
   const q = document.getElementById('searchInput').value.toLowerCase().trim();
   let list = allProducts;
-  if (activeType === 'BOXES') list = list.filter(p => p.unit_type === 'box');
+
+  // Location filter
+  if (activeLocation === 'back') {
+    list = list.filter(p => ((locationStock[p.product_id] || {})[2] || 0) > 0 || ((boxStock[p.product_id] || {})[2] || 0) > 0);
+  } else if (activeLocation === 'main') {
+    list = list.filter(p => ((locationStock[p.product_id] || {})[1] || 0) > 0 || ((boxStock[p.product_id] || {})[1] || 0) > 0);
+  }
+
+  // Type / boxes filter
+  if (activeType === 'BOXES') list = list.filter(p => (p.unit_type || '').toLowerCase() === 'box');
   else if (activeType !== 'ALL') list = list.filter(p => p.type === activeType);
   if (q) list = list.filter(p =>
     (p.product_name||'').toLowerCase().includes(q) ||
