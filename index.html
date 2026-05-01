@@ -1507,8 +1507,9 @@ function renderProducts() {
   // Type / boxes filter
   if (activeType === 'BOXES') {
     list = list.filter(p => {
-      const ut = (p.unit_type || '').trim().toLowerCase();
-      return ut === 'box' || ut === 'boxes' || (p.pieces_per_box || 0) > 0;
+      const ut  = (p.unit_type        || '').trim().toLowerCase();
+      const uom = (p.unit_of_measure  || '').trim().toLowerCase();
+      return ut === 'box' || ut === 'boxes' || uom === 'box' || uom === 'boxes' || (p.pieces_per_box || 0) > 0;
     });
   } else if (activeType !== 'ALL') list = list.filter(p => p.type === activeType);
   if (q) list = list.filter(p =>
@@ -1539,8 +1540,9 @@ function renderProducts() {
     const cls     = total === 0 ? 'zero' : total <= (p.reorder_level || 2) ? 'low' : 'ok';
 
 
-    const _ut = (p.unit_type || '').trim().toLowerCase();
-    const isBoxType = _ut === 'box' || _ut === 'boxes' || (p.pieces_per_box || 0) > 0;
+    const _ut  = (p.unit_type       || '').trim().toLowerCase();
+    const _uom = (p.unit_of_measure || '').trim().toLowerCase();
+    const isBoxType = _ut === 'box' || _ut === 'boxes' || _uom === 'box' || _uom === 'boxes' || (p.pieces_per_box || 0) > 0;
     const ppb = p.pieces_per_box || 0;
     const bxBack = (boxStock[p.product_id] || {})[2] || 0;
     const bxMain = (boxStock[p.product_id] || {})[1] || 0;

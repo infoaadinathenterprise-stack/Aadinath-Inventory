@@ -337,7 +337,9 @@ function renderProducts() {
   el.innerHTML = list.map(p => {
     const qty    = sm[p.product_id] || 0;
     const bx     = bm[p.product_id] || 0;
-    const isBox  = p.unit_type === 'box' && p.pieces_per_box > 0;
+    const _ut  = (p.unit_type       || '').trim().toLowerCase();
+    const _uom = (p.unit_of_measure || '').trim().toLowerCase();
+    const isBox  = (_ut === 'box' || _ut === 'boxes' || _uom === 'box' || _uom === 'boxes') && p.pieces_per_box > 0;
     const ppb    = p.pieces_per_box || 1;
     const total  = qty + bx * ppb;
     const reorder = p.reorder_level || 2;
@@ -443,7 +445,9 @@ function openAdjModal(productId, direction) {
   const mainQty  = mainStockMap[productId] || 0;
   const bxBack   = backBoxMap[productId] || 0;
   const bxMain   = mainBoxMap[productId] || 0;
-  const isBox    = p.unit_type === 'box' && p.pieces_per_box > 0;
+  const _ut2  = (p.unit_type       || '').trim().toLowerCase();
+  const _uom2 = (p.unit_of_measure || '').trim().toLowerCase();
+  const isBox    = (_ut2 === 'box' || _ut2 === 'boxes' || _uom2 === 'box' || _uom2 === 'boxes') && p.pieces_per_box > 0;
   const ppb      = p.pieces_per_box || 1;
 
   document.getElementById('adjProdName').textContent = p.product_name;
