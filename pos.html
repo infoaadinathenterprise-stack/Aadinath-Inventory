@@ -70,6 +70,9 @@ header { background: var(--surface); border-bottom: 1px solid var(--border); pad
 .search-bar input:focus { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-glow); }
 .search-bar input::placeholder { color: var(--muted); }
 .search-icon { position: absolute; left: 22px; top: 50%; transform: translateY(-50%); color: var(--muted); font-size: 13px; pointer-events: none; }
+.location-row { display: flex; gap: 6px; padding: 8px 12px 6px; flex-shrink: 0; border-bottom: 1px solid var(--border); }
+.loctab { flex: 1; padding: 7px 8px; text-align: center; font-size: 12px; font-weight: 700; border-radius: 8px; border: 1.5px solid var(--border); background: var(--surface2); color: var(--muted); cursor: pointer; transition: all 0.15s; user-select: none; }
+.loctab.active { border-color: var(--accent); background: var(--success-dim); color: var(--accent); }
 .filter-row { display: flex; gap: 5px; padding: 7px 12px; border-bottom: 1px solid var(--border); overflow-x: auto; scrollbar-width: none; flex-shrink: 0; }
 .filter-row::-webkit-scrollbar { display: none; }
 .ftab { padding: 4px 12px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface2); color: var(--muted); font-size: 11px; font-weight: 600; cursor: pointer; white-space: nowrap; transition: all 0.15s; flex-shrink: 0; user-select: none; }
@@ -183,6 +186,10 @@ header { background: var(--surface); border-bottom: 1px solid var(--border); pad
       <span class="search-icon">🔍</span>
       <input type="text" id="searchInput" placeholder="Search by name, type, brand…" oninput="renderProducts()">
     </div>
+    <div class="location-row">
+      <div class="loctab active" id="ltab-back" onclick="setLocation('back',this)">📦 Back Godown</div>
+      <div class="loctab" id="ltab-main" onclick="setLocation('main',this)">🏪 Main Store</div>
+    </div>
     <div class="filter-row" id="filterRow"></div>
     <div class="product-list" id="productList">
       <div class="loader"><div class="spinner"></div> Loading…</div>
@@ -238,7 +245,7 @@ const _u = localStorage.getItem('ae_user') || 'admin';
 const isAdmin = _u === 'admin';
 const currentUserId = ({ admin: 1, akshat: 2 })[_u] || 1;
 
-let allProducts = [], backStockMap = {}, mainStockMap = {}, backBoxMap = {}, mainBoxMap = {}, activeFilter = 'ALL';
+let allProducts = [], backStockMap = {}, mainStockMap = {}, backBoxMap = {}, mainBoxMap = {}, activeFilter = 'ALL', activeLocation = 'back';
 let adjProductId = null, adjDirection = null, adjSelectedAction = null, adjUnit = 'piece';
 
 // ── INIT ──────────────────────────────────────────────────────────────
@@ -250,7 +257,7 @@ async function init() {
   try {
     const [prodsRes, stockRes] = await Promise.all([
       fetch(`${SUPABASE_URL}/rest/v1/products?select=*&active_status=eq.true&order=product_name.asc`, { headers: H }),
-      fetch(`${SUPABASE_URL}/rest/v1/stock_by_location?select=product_id,quantity,location_id`, { headers: H })
+      fetch(`${SUPABASE_URL}/rest/v1/stock_by_location?select=product_id,quantity,box_quantity,location_id`, { headers: H })
     ]);
     allProducts = prodsRes.ok ? await prodsRes.json() : [];
     const stockRows = stockRes.ok ? await stockRes.json() : [];
@@ -278,11 +285,22 @@ async function init() {
 }
 
 // ── FILTERS ───────────────────────────────────────────────────────────
+function setLocation(loc, el) {
+  activeLocation = loc;
+  document.querySelectorAll('.loctab').forEach(t => t.classList.remove('active'));
+  el.classList.add('active');
+  activeFilter = 'ALL';
+  buildFilters();
+  renderProducts();
+}
+
 function buildFilters() {
-  const visible = allProducts.filter(p => (backStockMap[p.product_id] || 0) > 0 || (backBoxMap[p.product_id] || 0) > 0);
+  const sm = activeLocation === 'back' ? backStockMap : mainStockMap;
+  const bm = activeLocation === 'back' ? backBoxMap   : mainBoxMap;
+  const visible = allProducts.filter(p => (sm[p.product_id] || 0) > 0 || (bm[p.product_id] || 0) > 0);
   const types = ['ALL', ...new Set(visible.map(p => p.type).filter(Boolean).sort())];
-  document.getElementById('filterRow').innerHTML = types.map((t, i) =>
-    `<div class="ftab${i === 0 ? ' active' : ''}" onclick="setFilter('${t.replace(/'/g, "\\'")}',this)">${t === 'ALL' ? 'All' : t}</div>`
+  document.getElementById('filterRow').innerHTML = types.map(t =>
+    `<div class="ftab${activeFilter === t ? ' active' : ''}" onclick="setFilter('${t.replace(/'/g, "\\'")}',this)">${t === 'ALL' ? 'All' : t}</div>`
   ).join('');
 }
 
@@ -295,8 +313,12 @@ function setFilter(type, el) {
 
 // ── RENDER ────────────────────────────────────────────────────────────
 function renderProducts() {
+  const sm  = activeLocation === 'back' ? backStockMap : mainStockMap;
+  const bm  = activeLocation === 'back' ? backBoxMap   : mainBoxMap;
+  const loc = activeLocation === 'back' ? 'back' : 'main';
+
   const q = (document.getElementById('searchInput').value || '').toLowerCase().trim();
-  let list = allProducts.filter(p => (backStockMap[p.product_id] || 0) > 0 || (backBoxMap[p.product_id] || 0) > 0);
+  let list = allProducts.filter(p => (sm[p.product_id] || 0) > 0 || (bm[p.product_id] || 0) > 0);
   if (activeFilter !== 'ALL') list = list.filter(p => p.type === activeFilter);
   if (q) list = list.filter(p =>
     (p.product_name || '').toLowerCase().includes(q) ||
@@ -308,21 +330,21 @@ function renderProducts() {
 
   const el = document.getElementById('productList');
   if (!list.length) {
-    el.innerHTML = `<div style="text-align:center;padding:40px 20px;color:var(--muted);font-size:13px;">No products with back godown stock</div>`;
+    el.innerHTML = `<div style="text-align:center;padding:40px 20px;color:var(--muted);font-size:13px;">No products with ${loc} godown stock</div>`;
     return;
   }
 
   el.innerHTML = list.map(p => {
-    const backQty  = backStockMap[p.product_id] || 0;
-    const bxBack   = backBoxMap[p.product_id] || 0;
-    const isBox    = p.unit_type === 'box' && p.pieces_per_box > 0;
-    const ppb      = p.pieces_per_box || 1;
-    const totalPcs = backQty + bxBack * ppb;
-    const reorder  = p.reorder_level || 2;
-    const stockCls = totalPcs <= reorder ? 'low' : 'ok';
+    const qty    = sm[p.product_id] || 0;
+    const bx     = bm[p.product_id] || 0;
+    const isBox  = p.unit_type === 'box' && p.pieces_per_box > 0;
+    const ppb    = p.pieces_per_box || 1;
+    const total  = qty + bx * ppb;
+    const reorder = p.reorder_level || 2;
+    const stockCls = total <= reorder ? 'low' : 'ok';
     const stockTxt = isBox
-      ? (bxBack > 0 ? `${bxBack} boxes + ${backQty} pcs` : `${backQty} pcs`)
-      : (backQty <= reorder ? `⚠ Low — ${backQty} left` : `${backQty} in back`);
+      ? (bx > 0 ? `${bx} boxes + ${qty} pcs` : `${qty} pcs`)
+      : (qty <= reorder ? `⚠ Low — ${qty} left` : `${qty} in ${loc}`);
     return `
       <div class="prod-card" onclick="openAdjModal(${p.product_id}, null)">
         <div class="prod-type">${p.type || '—'}</div>
@@ -333,7 +355,7 @@ function renderProducts() {
         </div>
         <div class="stock-count-wrap">
           <button class="minus-btn" onclick="event.stopPropagation();openAdjModal(${p.product_id},'minus')" title="Reduce stock">−</button>
-          <span class="back-qty-num">${isBox ? `${bxBack}bx` : totalPcs}</span>
+          <span class="back-qty-num">${isBox ? `${bx}bx` : total}</span>
           <button class="plus-btn"  onclick="event.stopPropagation();openAdjModal(${p.product_id},'plus')"  title="Add stock">+</button>
         </div>
       </div>`;
@@ -349,7 +371,9 @@ function onBarcodeKey(e) {
   const match = allProducts.find(p => (p.stock_keeping_unit || '').trim().toLowerCase() === code.toLowerCase())
              || allProducts.find(p => (p.product_name || '').toLowerCase().includes(code.toLowerCase()));
   if (!match) { showToast('No product found: ' + code, 'error'); return; }
-  if (!(backStockMap[match.product_id] > 0) && !(backBoxMap[match.product_id] > 0)) { showToast('Not in back godown: ' + match.product_name, 'error'); return; }
+  const _sm = activeLocation === 'back' ? backStockMap : mainStockMap;
+  const _bm = activeLocation === 'back' ? backBoxMap   : mainBoxMap;
+  if (!(_sm[match.product_id] > 0) && !(_bm[match.product_id] > 0)) { showToast(`Not in ${activeLocation === 'back' ? 'back' : 'main'} godown: ` + match.product_name, 'error'); return; }
   openAdjModal(match.product_id, 'minus');
 }
 
@@ -378,7 +402,7 @@ function scanFrame(vid) {
         const code  = codes[0].rawValue;
         const match = allProducts.find(p => (p.stock_keeping_unit || '').trim().toLowerCase() === code.toLowerCase())
                    || allProducts.find(p => (p.product_name || '').toLowerCase().includes(code.toLowerCase()));
-        if (match && (backStockMap[match.product_id] > 0 || backBoxMap[match.product_id] > 0)) openAdjModal(match.product_id, 'minus');
+        if (match && ((activeLocation === 'back' ? backStockMap : mainStockMap)[match.product_id] > 0 || (activeLocation === 'back' ? backBoxMap : mainBoxMap)[match.product_id] > 0)) openAdjModal(match.product_id, 'minus');
         else if (match) showToast('Not in back godown: ' + match.product_name, 'error');
         else showToast('No product found: ' + code, 'error');
         return;
