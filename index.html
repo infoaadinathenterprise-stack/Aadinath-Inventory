@@ -1505,8 +1505,12 @@ function renderProducts() {
   }
 
   // Type / boxes filter
-  if (activeType === 'BOXES') list = list.filter(p => (p.pieces_per_box || 0) > 0 || (p.unit_type || '').toLowerCase() === 'box');
-  else if (activeType !== 'ALL') list = list.filter(p => p.type === activeType);
+  if (activeType === 'BOXES') {
+    list = list.filter(p => {
+      const ut = (p.unit_type || '').trim().toLowerCase();
+      return ut === 'box' || ut === 'boxes' || (p.pieces_per_box || 0) > 0;
+    });
+  } else if (activeType !== 'ALL') list = list.filter(p => p.type === activeType);
   if (q) list = list.filter(p =>
     (p.product_name||'').toLowerCase().includes(q) ||
     (p.brand||'').toLowerCase().includes(q) ||
@@ -1535,13 +1539,14 @@ function renderProducts() {
     const cls     = total === 0 ? 'zero' : total <= (p.reorder_level || 2) ? 'low' : 'ok';
 
 
-    const isBoxType = (p.pieces_per_box || 0) > 0;
-    const ppb = p.pieces_per_box || 1;
+    const _ut = (p.unit_type || '').trim().toLowerCase();
+    const isBoxType = _ut === 'box' || _ut === 'boxes' || (p.pieces_per_box || 0) > 0;
+    const ppb = p.pieces_per_box || 0;
     const bxBack = (boxStock[p.product_id] || {})[2] || 0;
     const bxMain = (boxStock[p.product_id] || {})[1] || 0;
     const looseBack = backQty ?? 0;
     const looseMain = mainQty ?? 0;
-    const computedTotal = isBoxType ? looseBack + looseMain + (bxBack + bxMain) * ppb : total;
+    const computedTotal = isBoxType && ppb > 0 ? looseBack + looseMain + (bxBack + bxMain) * ppb : total;
 
     let locTagsHtml = '';
     if (backQty !== null || bxBack > 0) {
@@ -1558,8 +1563,12 @@ function renderProducts() {
     }
     if (hold !== 0) locTagsHtml += `<span class="loc-tag hold">${hold > 0 ? '+' : ''}${hold} hold</span>`;
     if (isBoxType) {
-      const priceStr = p.box_selling_price ? ` · ₹${p.box_selling_price}/bx` : ' · no box price';
-      locTagsHtml += `<span class="box-type-badge">📦 1bx=${ppb}pc${priceStr}</span>`;
+      if (ppb > 0) {
+        const priceStr = p.box_selling_price ? ` · ₹${p.box_selling_price}/bx` : ' · no box price';
+        locTagsHtml += `<span class="box-type-badge">📦 1bx=${ppb}pc${priceStr}</span>`;
+      } else {
+        locTagsHtml += `<span class="box-type-badge" style="border-color:var(--warn);color:var(--warn);">📦 box · ⚠ set pieces/box</span>`;
+      }
     }
 
     const stockNumHtml = isBoxType
