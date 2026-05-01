@@ -1505,7 +1505,7 @@ function renderProducts() {
   }
 
   // Type / boxes filter
-  if (activeType === 'BOXES') list = list.filter(p => (p.unit_type || '').toLowerCase() === 'box');
+  if (activeType === 'BOXES') list = list.filter(p => (p.pieces_per_box || 0) > 0 || (p.unit_type || '').toLowerCase() === 'box');
   else if (activeType !== 'ALL') list = list.filter(p => p.type === activeType);
   if (q) list = list.filter(p =>
     (p.product_name||'').toLowerCase().includes(q) ||
@@ -1535,7 +1535,7 @@ function renderProducts() {
     const cls     = total === 0 ? 'zero' : total <= (p.reorder_level || 2) ? 'low' : 'ok';
 
 
-    const isBoxType = p.unit_type === 'box' && p.pieces_per_box > 0;
+    const isBoxType = (p.pieces_per_box || 0) > 0;
     const ppb = p.pieces_per_box || 1;
     const bxBack = (boxStock[p.product_id] || {})[2] || 0;
     const bxMain = (boxStock[p.product_id] || {})[1] || 0;
