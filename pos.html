@@ -12,6 +12,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <title>Back Godown · Aadinath</title>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700;800&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://unpkg.com/@zxing/library@0.21.3/umd/index.min.js"></script>
 <style>
 :root { --radius: 10px; --radius-lg: 16px; --vh: 1vh; }
 :root, [data-theme="dark"] {
@@ -106,7 +107,7 @@ header { background: var(--surface); border-bottom: 1px solid var(--border); pad
 /* ── CAMERA OVERLAY ── */
 .cam-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.92); z-index: 600; flex-direction: column; align-items: center; justify-content: center; gap: 16px; }
 .cam-overlay.active { display: flex; }
-.cam-video { width: min(90vw,400px); height: min(60vh,300px); border-radius: 14px; object-fit: cover; border: 2px solid var(--accent); }
+.cam-video { width: min(90vw,400px); height: min(58vh,300px); border-radius: 14px; object-fit: cover; border: 2px solid var(--accent); display: block; background: #000; }
 .cam-guide { color: var(--text2); font-size: 13px; text-align: center; }
 .cam-close { background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; color: var(--text); padding: 10px 28px; font-size: 14px; font-weight: 700; cursor: pointer; font-family: 'DM Sans', sans-serif; transition: all 0.15s; }
 .cam-close:hover { border-color: var(--danger); color: var(--danger); }
@@ -169,7 +170,7 @@ header { background: var(--surface); border-bottom: 1px solid var(--border); pad
 
 <header>
   <a href="index.html" class="back-btn">← Back</a>
-  <div class="header-title">📦 Back Godown</div>
+  <div class="header-title" id="headerTitle">📦 Back Godown</div>
   <span class="role-chip" id="roleChip"></span>
 </header>
 
@@ -289,6 +290,7 @@ function setLocation(loc, el) {
   activeLocation = loc;
   document.querySelectorAll('.loctab').forEach(t => t.classList.remove('active'));
   el.classList.add('active');
+  document.getElementById('headerTitle').textContent = loc === 'back' ? '📦 Back Godown' : '🏪 Main Store';
   activeFilter = 'ALL';
   buildFilters();
   renderProducts();
@@ -380,58 +382,62 @@ function onBarcodeKey(e) {
 }
 
 // ── CAMERA ────────────────────────────────────────────────────────────
-let camStream = null, camDetector = null, camRaf = null;
+let zxingControls = null;
 
 async function openCam() {
-  if (!('BarcodeDetector' in window)) { showToast('Camera scan not supported on this browser', 'error'); return; }
+  document.getElementById('camOverlay').classList.add('active');
+  const vid = document.getElementById('camVideo');
   try {
-    camDetector = new BarcodeDetector({ formats: ['code_128','ean_13','ean_8','qr_code','upc_a','upc_e','code_39','itf'] });
-    camStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
-    const vid = document.getElementById('camVideo');
-    vid.srcObject = camStream;
-    document.getElementById('camOverlay').classList.add('active');
-    scanFrame(vid);
-  } catch(e) { showToast('Camera: ' + e.message, 'error'); }
-}
-
-function scanFrame(vid) {
-  camRaf = requestAnimationFrame(async () => {
-    if (!camStream) return;
-    try {
-      const codes = await camDetector.detect(vid);
-      if (codes.length) {
+    const reader = new ZXing.BrowserMultiFormatReader();
+    zxingControls = await reader.decodeFromConstraints(
+      { video: { facingMode: { ideal: 'environment' } } },
+      vid,
+      (result, err) => {
+        if (!result) return;
         closeCam();
-        const code  = codes[0].rawValue;
-        const match = allProducts.find(p => (p.stock_keeping_unit || '').trim().toLowerCase() === code.toLowerCase())
-                   || allProducts.find(p => (p.product_name || '').toLowerCase().includes(code.toLowerCase()));
-        if (match && ((activeLocation === 'back' ? backStockMap : mainStockMap)[match.product_id] > 0 || (activeLocation === 'back' ? backBoxMap : mainBoxMap)[match.product_id] > 0)) openAdjModal(match.product_id, 'minus');
-        else if (match) showToast('Not in back godown: ' + match.product_name, 'error');
-        else showToast('No product found: ' + code, 'error');
-        return;
+        handleBarcodeResult(result.getText());
       }
-    } catch(_) {}
-    scanFrame(vid);
-  });
+    );
+  } catch(e) {
+    document.getElementById('camOverlay').classList.remove('active');
+    const vid2 = document.getElementById('camVideo');
+    if (vid2 && vid2.srcObject) { vid2.srcObject.getTracks().forEach(t => t.stop()); vid2.srcObject = null; }
+    showToast('Camera: ' + e.message, 'error');
+  }
 }
 
 function closeCam() {
-  cancelAnimationFrame(camRaf);
-  if (camStream) { camStream.getTracks().forEach(t => t.stop()); camStream = null; }
   document.getElementById('camOverlay').classList.remove('active');
-  document.getElementById('camVideo').srcObject = null;
+  if (zxingControls) { try { zxingControls.stop(); } catch(_) {} zxingControls = null; }
+  const vid = document.getElementById('camVideo');
+  if (vid && vid.srcObject) { vid.srcObject.getTracks().forEach(t => t.stop()); vid.srcObject = null; }
+}
+
+function handleBarcodeResult(code) {
+  const match = allProducts.find(p => (p.stock_keeping_unit || '').trim().toLowerCase() === code.toLowerCase())
+             || allProducts.find(p => (p.product_name || '').toLowerCase().includes(code.toLowerCase()));
+  const _sm = activeLocation === 'back' ? backStockMap : mainStockMap;
+  const _bm = activeLocation === 'back' ? backBoxMap   : mainBoxMap;
+  if (match && (_sm[match.product_id] > 0 || _bm[match.product_id] > 0)) openAdjModal(match.product_id, 'minus');
+  else if (match) showToast(`Not in ${activeLocation === 'back' ? 'back godown' : 'main store'}: ` + match.product_name, 'error');
+  else showToast('No product found: ' + code, 'error');
 }
 
 // ── ADJUSTMENT MODAL ──────────────────────────────────────────────────
-const ACTIONS = {
-  minus: [
-    { key: 'sold',    icon: '💰', label: 'Sold' },
-    { key: 'tofront', icon: '🏪', label: 'Moved to Front' }
-  ],
-  plus: [
-    { key: 'frommain', icon: '🔄', label: 'From Main Store' },
-    { key: 'stockin',  icon: '📦', label: 'Stock Added' }
-  ]
-};
+function getActions(direction) {
+  if (activeLocation === 'main') {
+    return direction === 'minus'
+      ? [{ key: 'sold',      icon: '💰', label: 'Sold' },
+         { key: 'to_back',   icon: '📦', label: 'Moved to Back Store' }]
+      : [{ key: 'from_back', icon: '🔄', label: 'Moved to Front Store' },
+         { key: 'stockin',   icon: '✅', label: 'Stock Added' }];
+  }
+  return direction === 'minus'
+    ? [{ key: 'sold',      icon: '💰', label: 'Sold' },
+       { key: 'to_front',  icon: '🏪', label: 'Moved to Front Store' }]
+    : [{ key: 'from_main', icon: '🔄', label: 'Moved to Back Store' },
+       { key: 'stockin',   icon: '✅', label: 'Stock Added' }];
+}
 
 function openAdjModal(productId, direction) {
   const p = allProducts.find(x => x.product_id === productId);
@@ -484,7 +490,8 @@ function setAdjUnit(unit) {
 
 function renderAdjOptions() {
   const cls = adjDirection === 'minus' ? 'sel-minus' : 'sel-plus';
-  document.getElementById('adjOptions').innerHTML = ACTIONS[adjDirection].map(a => `
+  const actions = getActions(adjDirection);
+  document.getElementById('adjOptions').innerHTML = actions.map(a => `
     <button class="adj-opt-btn${adjSelectedAction === a.key ? ' ' + cls : ''}"
             onclick="selectAdjAction('${a.key}')">
       <span class="opt-icon">${a.icon}</span>${a.label}
@@ -522,87 +529,140 @@ async function confirmAdj() {
   const ppb = p ? (p.pieces_per_box || 1) : 1;
   const isBoxUnit = adjUnit === 'box';
 
-  const backQty  = backStockMap[adjProductId] || 0;
-  const mainQty  = mainStockMap[adjProductId] || 0;
-  const bxBack   = backBoxMap[adjProductId] || 0;
-  const bxMain   = mainBoxMap[adjProductId] || 0;
+  const backQty = backStockMap[adjProductId] || 0;
+  const mainQty = mainStockMap[adjProductId] || 0;
+  const bxBack  = backBoxMap[adjProductId] || 0;
+  const bxMain  = mainBoxMap[adjProductId] || 0;
+
+  const locId   = activeLocation === 'back' ? 2 : 1;
+  const otherId = activeLocation === 'back' ? 1 : 2;
+  const curQty  = locId === 2 ? backQty : mainQty;
+  const othQty  = locId === 2 ? mainQty : backQty;
+  const curBox  = locId === 2 ? bxBack  : bxMain;
+  const othBox  = locId === 2 ? bxMain  : bxBack;
+  const locName = locId === 2 ? 'Back Godown' : 'Main Store';
+  const othName = locId === 2 ? 'Main Store'  : 'Back Godown';
 
   // Validation
-  if (isBoxUnit) {
-    if ((adjSelectedAction === 'sold' || adjSelectedAction === 'tofront') && rawQty > bxBack) {
-      showToast(`Only ${bxBack} boxes in back godown`, 'error'); return;
-    }
-    if (adjSelectedAction === 'frommain' && rawQty > bxMain) {
-      showToast(`Only ${bxMain} boxes in main store`, 'error'); return;
-    }
-  } else {
-    if ((adjSelectedAction === 'sold' || adjSelectedAction === 'tofront') && rawQty > backQty) {
-      showToast(`Only ${backQty} pcs in back godown`, 'error'); return;
-    }
-    if (adjSelectedAction === 'frommain' && rawQty > mainQty) {
-      showToast(`Only ${mainQty} pcs in main store`, 'error'); return;
-    }
+  const removesFromCur  = adjSelectedAction === 'sold' || adjSelectedAction === 'to_front' || adjSelectedAction === 'to_back';
+  const removesFromOther = adjSelectedAction === 'from_main' || adjSelectedAction === 'from_back';
+  if (removesFromCur) {
+    if (isBoxUnit && rawQty > curBox) { showToast(`Only ${curBox} boxes in ${locName}`, 'error'); return; }
+    if (!isBoxUnit && rawQty > curQty) { showToast(`Only ${curQty} pcs in ${locName}`, 'error'); return; }
+  }
+  if (removesFromOther) {
+    if (isBoxUnit && rawQty > othBox) { showToast(`Only ${othBox} boxes in ${othName}`, 'error'); return; }
+    if (!isBoxUnit && rawQty > othQty) { showToast(`Only ${othQty} pcs in ${othName}`, 'error'); return; }
   }
 
   const btn = document.getElementById('adjConfirmBtn');
   btn.disabled = true; btn.textContent = 'Saving…';
 
   try {
-    const now = new Date().toISOString();
-    const movQty = isBoxUnit ? rawQty * ppb : rawQty; // pieces equivalent for movement log
+    const now    = new Date().toISOString();
+    const movQty = isBoxUnit ? rawQty * ppb : rawQty;
 
+    const noteMap = {
+      sold:      `Sold from ${locName}`,
+      to_front:  'Moved from Back Godown to Main Store',
+      to_back:   'Moved from Main Store to Back Godown',
+      from_back: 'Moved from Back Godown to Main Store',
+      from_main: 'Moved from Main Store to Back Godown',
+      stockin:   `Stock added to ${locName}`
+    };
+    const reqTypeMap = {
+      sold: 'SALE', to_front: 'TRANSFER', to_back: 'TRANSFER',
+      from_back: 'TRANSFER', from_main: 'TRANSFER', stockin: 'ADJUSTMENT_IN'
+    };
+    const note    = noteMap[adjSelectedAction];
+    const reqType = reqTypeMap[adjSelectedAction];
+
+    // ── STAFF PATH: submit pending request ──────────────────────────────
+    if (!isAdmin) {
+      const toLocForReq = (adjSelectedAction === 'to_front' || adjSelectedAction === 'from_back') ? 1
+                        : (adjSelectedAction === 'to_back'  || adjSelectedAction === 'from_main') ? 2
+                        : locId;
+      const r = await fetch(`${SUPABASE_URL}/rest/v1/stock_requests`, {
+        method: 'POST', headers: H,
+        body: JSON.stringify({
+          product_id:     adjProductId,
+          quantity:       movQty,
+          request_type:   reqType,
+          notes:          note,
+          requested_by:   currentUserId,
+          to_location_id: toLocForReq,
+          status:         'PENDING',
+          requested_at:   now
+        })
+      });
+      if (!r.ok) throw new Error(await r.text());
+      showToast('Request submitted for admin approval', 'info');
+      closeAdjModal();
+      return;
+    }
+
+    // ── ADMIN PATH: apply immediately ───────────────────────────────────
     if (adjSelectedAction === 'sold') {
       if (isBoxUnit) {
-        await patchBoxStock(adjProductId, 2, Math.max(0, bxBack - rawQty), now);
-        backBoxMap[adjProductId] = Math.max(0, bxBack - rawQty);
+        await patchBoxStock(adjProductId, locId, Math.max(0, curBox - rawQty), now);
+        if (locId === 2) backBoxMap[adjProductId] = Math.max(0, curBox - rawQty);
+        else mainBoxMap[adjProductId] = Math.max(0, curBox - rawQty);
       } else {
-        await patchStock(adjProductId, 2, Math.max(0, backQty - rawQty), now);
-        backStockMap[adjProductId] = Math.max(0, backQty - rawQty);
+        await patchStock(adjProductId, locId, Math.max(0, curQty - rawQty), now);
+        if (locId === 2) backStockMap[adjProductId] = Math.max(0, curQty - rawQty);
+        else mainStockMap[adjProductId] = Math.max(0, curQty - rawQty);
       }
-      await logMovement(adjProductId, 2, null, movQty, 'SALE', isBoxUnit ? 'Sold box from back godown' : 'Sold from back godown');
+      await logMovement(adjProductId, locId, null, movQty, 'SALE', note);
 
-    } else if (adjSelectedAction === 'tofront') {
+    } else if (adjSelectedAction === 'to_front' || adjSelectedAction === 'to_back') {
+      // Remove from current, add to other
       if (isBoxUnit) {
-        await patchBoxStock(adjProductId, 2, Math.max(0, bxBack - rawQty), now);
-        await patchBoxStock(adjProductId, 1, bxMain + rawQty, now);
-        backBoxMap[adjProductId] = Math.max(0, bxBack - rawQty);
-        mainBoxMap[adjProductId] = bxMain + rawQty;
+        await patchBoxStock(adjProductId, locId, Math.max(0, curBox - rawQty), now);
+        await patchBoxStock(adjProductId, otherId, othBox + rawQty, now);
+        if (locId === 2) { backBoxMap[adjProductId] = Math.max(0, curBox - rawQty); mainBoxMap[adjProductId] = othBox + rawQty; }
+        else { mainBoxMap[adjProductId] = Math.max(0, curBox - rawQty); backBoxMap[adjProductId] = othBox + rawQty; }
       } else {
-        await patchStock(adjProductId, 2, Math.max(0, backQty - rawQty), now);
-        await patchStock(adjProductId, 1, mainQty + rawQty, now);
-        backStockMap[adjProductId] = Math.max(0, backQty - rawQty);
-        mainStockMap[adjProductId] = mainQty + rawQty;
+        await patchStock(adjProductId, locId, Math.max(0, curQty - rawQty), now);
+        await patchStock(adjProductId, otherId, othQty + rawQty, now);
+        if (locId === 2) { backStockMap[adjProductId] = Math.max(0, curQty - rawQty); mainStockMap[adjProductId] = othQty + rawQty; }
+        else { mainStockMap[adjProductId] = Math.max(0, curQty - rawQty); backStockMap[adjProductId] = othQty + rawQty; }
       }
-      await logMovement(adjProductId, 2, 1, movQty, 'TRANSFER', 'Moved from Back Godown to Main Store');
+      await logMovement(adjProductId, locId, otherId, movQty, 'TRANSFER', note);
 
-    } else if (adjSelectedAction === 'frommain') {
+    } else if (adjSelectedAction === 'from_back' || adjSelectedAction === 'from_main') {
+      // Remove from other, add to current
       if (isBoxUnit) {
-        await patchBoxStock(adjProductId, 1, Math.max(0, bxMain - rawQty), now);
-        await patchBoxStock(adjProductId, 2, bxBack + rawQty, now);
-        mainBoxMap[adjProductId] = Math.max(0, bxMain - rawQty);
-        backBoxMap[adjProductId] = bxBack + rawQty;
+        await patchBoxStock(adjProductId, otherId, Math.max(0, othBox - rawQty), now);
+        await patchBoxStock(adjProductId, locId, curBox + rawQty, now);
+        if (locId === 2) { backBoxMap[adjProductId] = curBox + rawQty; mainBoxMap[adjProductId] = Math.max(0, othBox - rawQty); }
+        else { mainBoxMap[adjProductId] = curBox + rawQty; backBoxMap[adjProductId] = Math.max(0, othBox - rawQty); }
       } else {
-        await patchStock(adjProductId, 1, Math.max(0, mainQty - rawQty), now);
-        await patchStock(adjProductId, 2, backQty + rawQty, now);
-        mainStockMap[adjProductId] = Math.max(0, mainQty - rawQty);
-        backStockMap[adjProductId] = backQty + rawQty;
+        await patchStock(adjProductId, otherId, Math.max(0, othQty - rawQty), now);
+        await patchStock(adjProductId, locId, curQty + rawQty, now);
+        if (locId === 2) { backStockMap[adjProductId] = curQty + rawQty; mainStockMap[adjProductId] = Math.max(0, othQty - rawQty); }
+        else { mainStockMap[adjProductId] = curQty + rawQty; backStockMap[adjProductId] = Math.max(0, othQty - rawQty); }
       }
-      await logMovement(adjProductId, 1, 2, movQty, 'TRANSFER', 'Moved from Main Store to Back Godown');
+      await logMovement(adjProductId, otherId, locId, movQty, 'TRANSFER', note);
 
     } else if (adjSelectedAction === 'stockin') {
       if (isBoxUnit) {
-        await patchBoxStock(adjProductId, 2, bxBack + rawQty, now);
-        backBoxMap[adjProductId] = bxBack + rawQty;
+        await patchBoxStock(adjProductId, locId, curBox + rawQty, now);
+        if (locId === 2) backBoxMap[adjProductId] = curBox + rawQty;
+        else mainBoxMap[adjProductId] = curBox + rawQty;
       } else {
-        await patchStock(adjProductId, 2, backQty + rawQty, now);
-        backStockMap[adjProductId] = backQty + rawQty;
+        await patchStock(adjProductId, locId, curQty + rawQty, now);
+        if (locId === 2) backStockMap[adjProductId] = curQty + rawQty;
+        else mainStockMap[adjProductId] = curQty + rawQty;
       }
-      await logMovement(adjProductId, null, 2, movQty, 'ADJUSTMENT_IN', isBoxUnit ? 'Boxes added to back godown' : 'Stock added to back godown');
+      await logMovement(adjProductId, null, locId, movQty, 'ADJUSTMENT_IN', note);
     }
 
     const unitLabel = isBoxUnit ? `box${rawQty !== 1 ? 'es' : ''}` : `unit${rawQty !== 1 ? 's' : ''}`;
-    const labels = { sold: 'Sold', tofront: 'Moved to front', frommain: 'Moved from main', stockin: 'Stock added' };
-    showToast(`✓ ${labels[adjSelectedAction]} — ${rawQty} ${unitLabel}`, 'success');
+    const actionLabels = {
+      sold: 'Sold', to_front: 'Moved to front store', to_back: 'Moved to back store',
+      from_back: 'Moved from back store', from_main: 'Moved from main store', stockin: 'Stock added'
+    };
+    showToast(`✓ ${actionLabels[adjSelectedAction]} — ${rawQty} ${unitLabel}`, 'success');
     closeAdjModal();
     buildFilters();
     renderProducts();
