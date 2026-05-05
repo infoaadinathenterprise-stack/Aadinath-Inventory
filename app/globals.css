@@ -1,0 +1,124 @@
+@import "tailwindcss";
+
+@theme {
+  --color-navy:     #0a0f1e;
+  --color-surface:  #111827;
+  --color-surface2: #1a2438;
+  --color-teal:     #00d4ff;
+  --color-gold:     #f5a623;
+  --color-success:  #22c55e;
+  --color-danger:   #ef4444;
+  --color-muted:    #94a3b8;
+}
+
+html  { scroll-behavior: smooth; }
+body  { background: #0a0f1e; }
+
+::selection { background: rgba(0, 212, 255, 0.25); color: #f1f5f9; }
+
+::-webkit-scrollbar       { width: 5px; }
+::-webkit-scrollbar-track { background: #0a0f1e; }
+::-webkit-scrollbar-thumb { background: #1e3a5f; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #00d4ff33; }
+
+@keyframes float {
+  0%, 100% { transform: translateY(0px) scale(1); opacity: 0.6; }
+  50%       { transform: translateY(-20px) scale(1.05); opacity: 1; }
+}
+@keyframes pulse-glow {
+  0%, 100% { box-shadow: 0 0 20px rgba(0,212,255,0.3); }
+  50%       { box-shadow: 0 0 40px rgba(0,212,255,0.6), 0 0 60px rgba(0,212,255,0.2); }
+}
+@keyframes gradient-shift {
+  0%   { background-position: 0% 50%; }
+  50%  { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+/* ── Label Printer ─────────────────────────────────────────────── */
+.label-page {
+  background: white;
+  width: 210mm;
+  min-height: 297mm;
+  margin: 0 auto 20px;
+  padding: 10mm 5mm;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  grid-template-rows: repeat(6, 1fr);
+  gap: 0;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+  border-radius: 4px;
+}
+.label {
+  border: 0.5px dashed #ccc;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 6px;
+  height: calc((297mm - 20mm) / 6);
+  overflow: hidden;
+}
+.label svg { max-width: 100%; height: 40px; }
+.label-name {
+  font-size: 7px;
+  font-weight: 600;
+  color: #111;
+  text-align: center;
+  margin-top: 2px;
+  line-height: 1.2;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: 'DM Sans', sans-serif;
+}
+.label-price {
+  font-size: 8px;
+  font-weight: 700;
+  color: #000;
+  margin-top: 2px;
+}
+.label-nosku {
+  font-size: 8px;
+  color: #888;
+  font-family: monospace;
+}
+
+@media (max-width: 640px) {
+  .label-page {
+    width: 100%;
+    min-height: auto;
+    padding: 8px;
+    grid-template-columns: repeat(2, 1fr);
+    grid-template-rows: none;
+    margin-bottom: 12px;
+    box-shadow: none;
+    border-radius: 0;
+  }
+  .label { height: auto; min-height: 88px; padding: 6px 4px; }
+  .label svg { height: 46px; }
+  .label-name { font-size: 9px; }
+  .label-price { font-size: 11px; }
+}
+
+@media print {
+  .print-hide { display: none !important; }
+  .label-page {
+    box-shadow: none !important;
+    border-radius: 0 !important;
+    margin: 0 !important;
+    width: 210mm !important;
+    height: 297mm !important;
+    min-height: unset !important;
+    overflow: hidden !important;
+    page-break-after: always;
+    break-after: always;
+  }
+  .label-page:last-child {
+    page-break-after: auto;
+    break-after: auto;
+  }
+  .label { border-color: #ddd !important; }
+  @page { size: A4 portrait; margin: 0; }
+}
