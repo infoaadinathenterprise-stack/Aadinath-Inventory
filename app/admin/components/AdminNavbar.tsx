@@ -11,9 +11,12 @@ interface Props {
 
 const ADMIN_LINKS = [
   { emoji: '📦', label: 'Inventory', href: '/admin' },
+  { emoji: '📋', label: 'History',   href: '/admin/history' },
+  { emoji: '🧾', label: 'Purchases', href: '/admin/purchases' },
+  { emoji: '🏢', label: 'Suppliers', href: '/admin/suppliers' },
   { emoji: '💰', label: 'Pricing',   href: '/admin/pricing' },
   { emoji: '🏷️', label: 'Labels',    href: '/admin/labels' },
-  { emoji: '🏭', label: 'POS / Godown', href: '/admin/pos' },
+  { emoji: '🏭', label: 'POS',       href: '/admin/pos' },
 ];
 
 export default function AdminNavbar({ onLogout }: Props) {

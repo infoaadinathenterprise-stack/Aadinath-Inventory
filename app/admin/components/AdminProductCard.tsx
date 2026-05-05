@@ -13,12 +13,13 @@ interface Props {
   backBoxMap:   StockMap;
   mainBoxMap:   StockMap;
   onAdjust:     (product: Product, direction: 'plus' | 'minus', location: Location) => void;
+  onEdit?:      (product: Product) => void;
 }
 
 export default function AdminProductCard({
   product: p, index, location,
   backStockMap, mainStockMap, backBoxMap, mainBoxMap,
-  onAdjust,
+  onAdjust, onEdit,
 }: Props) {
   const sm  = location === 'back' ? backStockMap : mainStockMap;
   const bm  = location === 'back' ? backBoxMap   : mainBoxMap;
@@ -62,6 +63,15 @@ export default function AdminProductCard({
         </p>
         <p className={`text-[10px] font-semibold mt-1 ${stockClass}`}>{stockLabel}</p>
       </div>
+
+      {/* Edit button */}
+      {onEdit && (
+        <button
+          onClick={() => onEdit(p)}
+          className="w-8 h-8 rounded-lg bg-surface2 border border-white/8 text-muted hover:text-teal hover:border-teal/30 flex items-center justify-center text-sm transition-all shrink-0"
+          title="Edit product"
+        >✏️</button>
+      )}
 
       {/* Stock count + adjust buttons */}
       <div className="flex items-center gap-1.5 shrink-0">

@@ -12,10 +12,11 @@ interface Props {
   backBoxMap:   StockMap;
   mainBoxMap:   StockMap;
   onAdjust:     (product: Product, direction: 'plus' | 'minus', location: Location) => void;
+  onEdit?:      (product: Product) => void;
 }
 
 export default function ProductList({
-  products, backStockMap, mainStockMap, backBoxMap, mainBoxMap, onAdjust,
+  products, backStockMap, mainStockMap, backBoxMap, mainBoxMap, onAdjust, onEdit,
 }: Props) {
   const [location, setLocation]   = useState<Location>('main');
   const [category, setCategory]   = useState('All');
@@ -144,6 +145,7 @@ export default function ProductList({
                 backBoxMap={backBoxMap}
                 mainBoxMap={mainBoxMap}
                 onAdjust={onAdjust}
+                onEdit={onEdit}
               />
             ))
           )}
