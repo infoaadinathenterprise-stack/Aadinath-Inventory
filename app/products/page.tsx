@@ -1,43 +1,47 @@
-import { supabase }    from '@/lib/supabase';
+'use client';
+
+import { useState, useEffect } from 'react';
+import { supabase } from '@/lib/supabase';
 import { formatStock } from '@/lib/formatStock';
 import type { Product } from '@/lib/formatStock';
-import ProductGrid     from '../components/ProductGrid';
+import ProductGrid from '../components/ProductGrid';
 
 interface StockRow { quantity: number | null; box_quantity: number | null; }
 
-async function getProducts(): Promise<{ products: Product[]; categories: string[] }> {
-  const { data, error } = await supabase
-    .from('products')
-    .select('*, stock_by_location(quantity, box_quantity)')
-    .eq('active_status', true)
-    .order('product_name');
+export default function ProductsPage() {
+  const [products, setProducts] = useState<Product[]>([]);
+  const [categories, setCategories] = useState<string[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  if (error || !data) return { products: [], categories: [] };
+  useEffect(() => {
+    async function load() {
+      const { data, error } = await supabase
+        .from('products')
+        .select('*, stock_by_location(quantity, box_quantity)')
+        .eq('active_status', true)
+        .order('product_name');
 
-  const products: Product[] = data.map((row: Product & { stock_by_location?: StockRow[] }) => {
-    const ppb         = row.pieces_per_box ?? 0;
-    const total_stock = (row.stock_by_location || []).reduce((sum, s) =>
-      sum + (s.quantity || 0), 0
-    );
-    const { stock_by_location: _omit, ...rest } = row as Product & { stock_by_location?: StockRow[] };
-    return { ...rest, total_stock };
-  });
+      if (error || !data) { setLoading(false); return; }
 
-  const categories = [...new Set(
-    products.map(p => p.type).filter(Boolean) as string[]
-  )].sort();
+      const mapped: Product[] = data.map((row: Product & { stock_by_location?: StockRow[] }) => {
+        const total_stock = (row.stock_by_location || []).reduce((sum, s) =>
+          sum + (s.quantity || 0), 0
+        );
+        const { stock_by_location: _omit, ...rest } = row as Product & { stock_by_location?: StockRow[] };
+        return { ...rest, total_stock };
+      });
 
-  return { products, categories };
-}
-
-export default async function ProductsPage() {
-  const { products, categories } = await getProducts();
+      const cats = [...new Set(mapped.map(p => p.type).filter(Boolean) as string[])].sort();
+      setProducts(mapped);
+      setCategories(cats);
+      setLoading(false);
+    }
+    load();
+  }, []);
 
   return (
     <main className="min-h-screen pt-24 pb-20">
       <div className="max-w-7xl mx-auto px-6">
-
-        {/* Page header */}
         <div className="text-center mb-12">
           <span className="text-xs font-bold text-teal uppercase tracking-widest">Catalogue</span>
           <h1 className="text-4xl md:text-5xl font-bold text-slate-100 mt-3 mb-4">
@@ -49,8 +53,13 @@ export default async function ProductsPage() {
           </p>
         </div>
 
-        {/* Product grid with client-side filter + search */}
-        <ProductGrid products={products} categories={categories} />
+        {loading ? (
+          <div className="flex justify-center py-20">
+            <div className="w-8 h-8 rounded-full border-2 border-teal border-t-transparent animate-spin" />
+          </div>
+        ) : (
+          <ProductGrid products={products} categories={categories} />
+        )}
       </div>
     </main>
   );
