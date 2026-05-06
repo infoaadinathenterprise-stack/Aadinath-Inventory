@@ -325,23 +325,80 @@ function NewPurchaseModal({
     if (!imageB64) return;
     setScanning(true);
     try {
-      const prompt = `You are an inventory assistant reading a purchase bill/invoice.
-Extract ALL line items (products purchased). For each item output exactly one line in this format:
-PRODUCT_NAME|QUANTITY|UNIT_PRICE|TOTAL_PRICE
-Rules:
-- PRODUCT_NAME: the product name as written on the bill
-- QUANTITY: numeric only
-- UNIT_PRICE: numeric only (0 if not shown)
-- TOTAL_PRICE: numeric only (0 if not shown)
-- Skip header rows, totals, taxes, company names, dates
-- Only output the data lines, nothing else`;
+      const prompt = `You must respond with ONLY a valid JSON object. No markdown, no backticks, no explanation, no preamble.
+Start your response directly with { and end with }.
+The JSON must have this exact structure:
+{
+  "supplier_name": "string or null",
+  "bill_date": "YYYY-MM-DD or null",
+  "total_amount": number or null,
+  "items": [
+    {
+      "product_name": "string",
+      "quantity": number,
+      "unit_price": number or null,
+      "total_price": number or null,
+      "is_new": true
+    }
+  ]
+}
+Read the purchase bill/invoice image and extract: the supplier/vendor name, bill date, total amount, and all line items (products purchased). Skip header rows, taxes, and discount lines — only include actual product items.`;
+
       const raw = await callGemini(prompt, imageB64, imageMime);
       setOcrRaw(raw);
-      const parsed = parseGeminiItems(raw, products);
+
+      // Strip markdown code fences if present
+      let jsonText = raw.trim();
+      jsonText = jsonText.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```\s*$/i, '').trim();
+      // Find the first { and last } to extract just the JSON object
+      const start = jsonText.indexOf('{');
+      const end   = jsonText.lastIndexOf('}');
+      if (start === -1 || end === -1) throw new Error('No JSON object found in AI response');
+      jsonText = jsonText.slice(start, end + 1);
+      const result = JSON.parse(jsonText) as {
+        supplier_name: string | null;
+        bill_date:     string | null;
+        total_amount:  number | null;
+        items: { product_name: string; quantity: number; unit_price: number | null; total_price: number | null }[];
+      };
+
+      // Pre-fill supplier if a match is found
+      if (result.supplier_name) {
+        const sName = result.supplier_name.toLowerCase();
+        const matched = suppliers.find(s =>
+          s.supplier_name.toLowerCase().includes(sName) || sName.includes(s.supplier_name.toLowerCase())
+        );
+        if (matched) setSupplierId(String(matched.supplier_id));
+      }
+      // Pre-fill date and total
+      if (result.bill_date)      setDate(result.bill_date);
+      if (result.total_amount != null) setTotal(String(result.total_amount));
+
+      // Map items to ScannedItem[]
+      let counter = 0;
+      const parsed: ScannedItem[] = (result.items ?? []).map(it => {
+        const m = matchProduct(it.product_name, products);
+        return {
+          tempId:      ++counter,
+          nameRaw:     it.product_name,
+          productId:   m ? m.product_id   : null,
+          productName: m ? m.product_name : it.product_name,
+          qty:         it.quantity ?? 1,
+          unitPrice:   it.unit_price  ?? null,
+          totalPrice:  it.total_price ?? null,
+          locationId:  2,
+          isNew:       !m,
+        };
+      });
+
       setItems(parsed.length > 0 ? parsed : [newBlankItem()]);
       setStep(2);
     } catch (e) {
-      onError('AI scan failed: ' + (e instanceof Error ? e.message : 'Unknown error'));
+      const msg = e instanceof Error ? e.message : 'Unknown error';
+      const friendly = (msg.includes('did not match') || msg.toLowerCase().includes('json') || msg.includes('No JSON'))
+        ? 'AI could not parse the bill. Please add items manually.'
+        : 'AI scan failed: ' + msg;
+      onError(friendly);
     } finally {
       setScanning(false);
     }
