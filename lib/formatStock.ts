@@ -1,19 +1,4 @@
-export interface Product {
-  product_id:      number;
-  product_name:    string;
-  type:            string | null;
-  brand:           string | null;
-  model:           string | null;
-  stock_keeping_unit: string | null;
-  unit_type:       string | null;
-  unit_of_measure: string | null;
-  pieces_per_box:  number | null;
-  active_status:   boolean;
-  // stock_by_location is joined separately; we expose total only
-  total_stock?:    number;
-}
-
-export interface StockDisplay {
+interface StockDisplay {
   label:     string;   // "3 boxes" | "45 pcs" | "Out of Stock"
   inStock:   boolean;
   unitBadge: 'BOX' | 'PCS';

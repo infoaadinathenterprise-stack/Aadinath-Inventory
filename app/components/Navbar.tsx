@@ -26,7 +26,6 @@ export default function Navbar() {
 
   return (
     <>
-      {/* ── Navbar bar ── */}
       <motion.nav
         variants={{ visible: { y: 0 }, hidden: { y: '-100%' } }}
         animate={hidden && !open ? 'hidden' : 'visible'}
@@ -38,7 +37,6 @@ export default function Navbar() {
         }`}
       >
         <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
-          {/* Logo */}
           <Link href="/" className="flex items-center group">
             <span className="font-bold text-xl text-teal tracking-tight group-hover:opacity-80 transition-opacity">
               Aadinath
@@ -46,7 +44,6 @@ export default function Navbar() {
             <span className="text-gold font-bold text-xl">·</span>
           </Link>
 
-          {/* Hamburger */}
           <button
             onClick={() => setOpen(true)}
             aria-label="Open menu"
@@ -59,11 +56,9 @@ export default function Navbar() {
         </div>
       </motion.nav>
 
-      {/* ── Drawer + backdrop ── */}
       <AnimatePresence>
         {open && (
           <>
-            {/* Backdrop */}
             <motion.div
               key="backdrop"
               initial={{ opacity: 0 }}
@@ -74,7 +69,6 @@ export default function Navbar() {
               className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm"
             />
 
-            {/* Drawer */}
             <motion.div
               key="drawer"
               initial={{ x: '100%' }}
@@ -83,7 +77,6 @@ export default function Navbar() {
               transition={{ type: 'spring', damping: 25, stiffness: 200 }}
               className="fixed right-0 top-0 bottom-0 w-72 z-50 flex flex-col bg-surface border-l border-teal/10 shadow-2xl"
             >
-              {/* Drawer header */}
               <div className="flex items-center justify-between px-6 h-16 border-b border-white/5">
                 <span className="font-bold text-teal text-base tracking-tight">
                   Aadinath<span className="text-gold">·</span>
@@ -96,7 +89,6 @@ export default function Navbar() {
                 </button>
               </div>
 
-              {/* Nav links */}
               <nav className="flex-1 px-4 py-6 flex flex-col gap-1">
                 {NAV_LINKS.map(({ href, label, emoji }) => (
                   <Link
@@ -110,10 +102,8 @@ export default function Navbar() {
                   </Link>
                 ))}
 
-                {/* Divider */}
                 <div className="my-3 border-t border-white/8" />
 
-                {/* Admin Panel link — gold accent */}
                 <button
                   onClick={() => { setOpen(false); router.push('/admin'); }}
                   className="flex items-center gap-3 px-4 py-3 rounded-xl text-gold hover:bg-gold/8 border border-gold/20 hover:border-gold/40 transition-all duration-200 text-sm font-semibold w-full text-left"
@@ -124,7 +114,6 @@ export default function Navbar() {
                 </button>
               </nav>
 
-              {/* Drawer footer */}
               <div className="px-6 py-4 border-t border-white/5">
                 <p className="text-xs text-muted/50 text-center">
                   © {new Date().getFullYear()} Aadinath Enterprises

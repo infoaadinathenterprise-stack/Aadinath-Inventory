@@ -23,19 +23,19 @@ interface Props {
 
 type AdjUnit = 'piece' | 'box';
 
-function getActions(location: Location, direction: 'plus' | 'minus') {
+function getActions(location: Location, direction: 'plus' | 'minus'): { key: AdjAction; icon: string; label: string }[] {
   if (location === 'main') {
     return direction === 'minus'
-      ? [{ key: 'sold' as AdjAction,      icon: '💰', label: 'Sold' },
-         { key: 'to_back' as AdjAction,   icon: '📦', label: 'Moved to Back Store' }]
-      : [{ key: 'from_back' as AdjAction, icon: '🔄', label: 'Moved from Back Store' },
-         { key: 'stockin' as AdjAction,   icon: '✅', label: 'Stock Added' }];
+      ? [{ key: 'sold',      icon: '💰', label: 'Sold' },
+         { key: 'to_back',   icon: '📦', label: 'Moved to Back Store' }]
+      : [{ key: 'from_back', icon: '🔄', label: 'Moved from Back Store' },
+         { key: 'stockin',   icon: '✅', label: 'Stock Added' }];
   }
   return direction === 'minus'
-    ? [{ key: 'sold' as AdjAction,        icon: '💰', label: 'Sold' },
-       { key: 'to_front' as AdjAction,    icon: '🏪', label: 'Moved to Front Store' }]
-    : [{ key: 'from_main' as AdjAction,   icon: '🔄', label: 'Moved from Main Store' },
-       { key: 'stockin' as AdjAction,     icon: '✅', label: 'Stock Added' }];
+    ? [{ key: 'sold',        icon: '💰', label: 'Sold' },
+       { key: 'to_front',    icon: '🏪', label: 'Moved to Front Store' }]
+    : [{ key: 'from_main',   icon: '🔄', label: 'Moved from Main Store' },
+       { key: 'stockin',     icon: '✅', label: 'Stock Added' }];
 }
 
 
@@ -153,16 +153,13 @@ export default function AdjustStockModal({
           className="w-full max-w-sm bg-surface border border-white/8 rounded-t-3xl sm:rounded-2xl p-5 pb-8 sm:pb-5 shadow-2xl"
           onClick={(e) => e.stopPropagation()}
         >
-          {/* Handle */}
           <div className="w-9 h-1 bg-white/15 rounded-full mx-auto mb-4 sm:hidden" />
 
-          {/* Product name + stock info */}
           <h3 className="font-bold text-slate-100 text-base mb-1 truncate">{product.product_name}</h3>
           <p className="text-xs text-muted font-mono mb-4">
             Back: {backFmt.label} · Main: {mainFmt.label}
           </p>
 
-          {/* Unit toggle for box products */}
           {isBox && (
             <div className="flex gap-2 mb-4">
               {(['piece', 'box'] as AdjUnit[]).map((u) => (
@@ -183,12 +180,10 @@ export default function AdjustStockModal({
             </div>
           )}
 
-          {/* Action label */}
           <p className="text-[10px] font-bold text-muted uppercase tracking-widest mb-2">
             {direction === 'minus' ? 'What happened?' : 'Where is it from?'}
           </p>
 
-          {/* Action buttons */}
           <div className="flex gap-2 mb-4">
             {actions.map((a) => (
               <button
@@ -208,12 +203,10 @@ export default function AdjustStockModal({
             ))}
           </div>
 
-          {/* Qty label */}
           <p className="text-[10px] font-bold text-muted uppercase tracking-widest mb-2">
             {unit === 'box' ? `Quantity (boxes · 1 box = ${ppb} pcs)` : 'Quantity'}
           </p>
 
-          {/* Qty input */}
           <div className="flex items-center gap-3 mb-5">
             <button
               onClick={() => setQty(q => Math.max(1, q - 1))}
@@ -230,7 +223,6 @@ export default function AdjustStockModal({
             >+</button>
           </div>
 
-          {/* Footer buttons */}
           <div className="flex gap-3">
             <button
               onClick={onClose}

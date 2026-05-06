@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import { formatStock } from '@/lib/formatStock';
-import type { Product } from '@/lib/formatStock';
+import type { Product } from '@/lib/types';
 import ProductGrid from '../components/ProductGrid';
 
 interface StockRow { quantity: number | null; box_quantity: number | null; }

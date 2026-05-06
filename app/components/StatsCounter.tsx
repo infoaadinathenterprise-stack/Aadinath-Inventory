@@ -45,7 +45,6 @@ export default function StatsCounter() {
             transition={{ delay: i * 0.15, duration: 0.6 }}
             className="relative flex flex-col items-center text-center p-6 rounded-2xl bg-surface border border-teal/10 hover:border-teal/30 transition-all duration-300 group"
           >
-            {/* Glow on hover */}
             <div className="absolute inset-0 rounded-2xl bg-teal/0 group-hover:bg-teal/3 transition-all duration-300" />
 
             <span className="text-3xl mb-3">{stat.icon}</span>

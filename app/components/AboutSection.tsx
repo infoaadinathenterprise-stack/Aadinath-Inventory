@@ -40,7 +40,6 @@ export default function AboutSection() {
     <section id="about" className="py-24 px-6 border-t border-teal/10">
       <div className="max-w-5xl mx-auto">
 
-        {/* Heading */}
         <FadeIn>
           <div className="text-center mb-16">
             <span className="text-xs font-bold text-teal uppercase tracking-widest">About Us</span>
@@ -55,7 +54,6 @@ export default function AboutSection() {
           </div>
         </FadeIn>
 
-        {/* Location cards */}
         <div className="grid md:grid-cols-2 gap-6 mb-16">
           {LOCATIONS.map((loc, i) => (
             <FadeIn key={loc.name} delay={i * 0.15}>
@@ -82,7 +80,6 @@ export default function AboutSection() {
           ))}
         </div>
 
-        {/* Contact */}
         <FadeIn delay={0.3}>
           <div className="relative p-8 rounded-2xl bg-surface border border-gold/20 overflow-hidden text-center">
             <div className="absolute inset-0 bg-gradient-to-br from-gold/5 to-transparent" />
@@ -110,7 +107,6 @@ export default function AboutSection() {
           </div>
         </FadeIn>
 
-        {/* Footer note */}
         <FadeIn delay={0.4}>
           <p className="text-center text-muted text-xs mt-12">
             © {new Date().getFullYear()} Aadinath Enterprises. All rights reserved.

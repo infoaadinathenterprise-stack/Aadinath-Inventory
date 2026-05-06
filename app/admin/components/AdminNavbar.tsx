@@ -27,7 +27,6 @@ export default function AdminNavbar({ onLogout }: Props) {
     <>
       <nav className="fixed top-0 inset-x-0 z-50 bg-navy/90 backdrop-blur-md border-b border-teal/10 shadow-lg">
         <div className="max-w-7xl mx-auto px-4 h-14 flex items-center justify-between gap-3">
-          {/* Logo + badge */}
           <div className="flex items-center gap-2.5">
             <span className="font-bold text-base text-teal tracking-tight leading-none">
               Aadinath<span className="text-gold">·</span>
@@ -37,7 +36,6 @@ export default function AdminNavbar({ onLogout }: Props) {
             </span>
           </div>
 
-          {/* Desktop quick-links */}
           <div className="hidden md:flex items-center gap-1">
             {ADMIN_LINKS.map(({ emoji, label, href }) => {
               const active = pathname === href;
@@ -58,7 +56,6 @@ export default function AdminNavbar({ onLogout }: Props) {
             })}
           </div>
 
-          {/* Right side */}
           <div className="flex items-center gap-2">
             <button
               onClick={onLogout}
@@ -79,7 +76,6 @@ export default function AdminNavbar({ onLogout }: Props) {
         </div>
       </nav>
 
-      {/* Mobile Drawer */}
       <AnimatePresence>
         {open && (
           <>
@@ -96,7 +92,6 @@ export default function AdminNavbar({ onLogout }: Props) {
               transition={{ type: 'spring', damping: 25, stiffness: 200 }}
               className="fixed right-0 top-0 bottom-0 w-68 z-50 flex flex-col bg-surface border-l border-teal/10 shadow-2xl"
             >
-              {/* Header */}
               <div className="flex items-center justify-between px-5 h-14 border-b border-white/5">
                 <div className="flex items-center gap-2">
                   <span className="font-bold text-teal text-sm">Aadinath<span className="text-gold">·</span></span>
@@ -105,7 +100,6 @@ export default function AdminNavbar({ onLogout }: Props) {
                 <button onClick={() => setOpen(false)} className="w-7 h-7 flex items-center justify-center rounded-lg bg-surface2 text-muted hover:text-slate-100 transition-colors text-lg">×</button>
               </div>
 
-              {/* Links */}
               <nav className="flex-1 px-3 py-5 flex flex-col gap-1">
                 {ADMIN_LINKS.map(({ emoji, label, href }) => {
                   const active = pathname === href;

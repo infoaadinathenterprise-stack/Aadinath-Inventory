@@ -1,14 +1,14 @@
 'use client';
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useProducts } from '@/lib/hooks/useProducts';
 import { upsertStock, logMovement } from '@/lib/stockActions';
 import type { Product } from '@/lib/types';
+import { SESSION_KEY } from '@/lib/types';
 
-const SESSION_KEY = 'aad_admin_auth';
 const BACK_LOC    = 2;
 const LABELS_PER_PAGE = 24;
 
@@ -164,7 +164,6 @@ function LabelsDashboard() {
 
   return (
     <div className="h-screen bg-navy flex flex-col overflow-hidden">
-      {/* Header */}
       <header className="print-hide shrink-0 bg-surface border-b border-white/8 px-4 flex items-center gap-3 h-14">
         <Link href="/admin" className="text-muted hover:text-slate-100 text-sm px-3 py-1.5 rounded-lg bg-surface2 border border-white/8 transition-colors print-hide">
           ← Back
@@ -182,7 +181,6 @@ function LabelsDashboard() {
         </button>
       </header>
 
-      {/* Mobile tab bar */}
       <div className="sm:hidden print-hide shrink-0 flex bg-surface border-b border-white/8">
         {(['products', 'preview'] as const).map(tab => (
           <button
@@ -202,9 +200,7 @@ function LabelsDashboard() {
       </div>
 
       <div className="flex flex-1 overflow-hidden">
-        {/* Sidebar */}
         <aside className={`${mobileTab === 'preview' ? 'hidden' : 'flex'} sm:flex print-hide w-full sm:w-72 lg:w-80 shrink-0 bg-surface border-r border-white/8 flex-col`}>
-          {/* Search + actions */}
           <div className="p-3 border-b border-white/8 shrink-0">
             <div className="relative mb-2">
               <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted text-sm pointer-events-none">🔍</span>
@@ -223,7 +219,6 @@ function LabelsDashboard() {
             </div>
           </div>
 
-          {/* Product list */}
           <div className="flex-1 overflow-y-auto p-2 flex flex-col gap-0.5">
             {filtered.length === 0 && (
               <p className="text-center text-muted text-xs py-8">No products in back godown</p>
@@ -241,20 +236,17 @@ function LabelsDashboard() {
                     isSel ? 'bg-teal/5 border-teal/20' : 'border-transparent hover:bg-surface2'
                   }`}
                 >
-                  {/* Check */}
                   <div className={`w-4 h-4 rounded shrink-0 flex items-center justify-center border transition-all ${
                     isSel ? 'bg-teal border-teal text-navy' : 'border-white/20'
                   }`}>
                     {isSel && <span className="text-[9px] font-black">✓</span>}
                   </div>
 
-                  {/* Info */}
                   <div className="flex-1 min-w-0">
                     <p className="text-xs font-semibold text-slate-100 truncate">{p.product_name}</p>
                     <p className="text-[10px] text-muted font-mono">{p.stock_keeping_unit || 'No SKU'}</p>
                   </div>
 
-                  {/* Copies or stock badge */}
                   {isSel ? (
                     <div className="shrink-0 flex flex-col items-center gap-0.5" onClick={e => e.stopPropagation()}>
                       <input
@@ -291,7 +283,6 @@ function LabelsDashboard() {
           </div>
         </aside>
 
-        {/* Preview area */}
         <main className={`${mobileTab === 'products' ? 'hidden' : 'flex'} sm:flex flex-1 overflow-y-auto p-5 bg-navy/60`}>
           {pages.length === 0 ? (
             <div className="flex flex-col items-center justify-center flex-1 text-center text-muted">
@@ -312,7 +303,6 @@ function LabelsDashboard() {
         </main>
       </div>
 
-      {/* Stock modal (add or remove) */}
       <AnimatePresence>
         {stockModal && (
           <>
@@ -376,7 +366,6 @@ function LabelsDashboard() {
         )}
       </AnimatePresence>
 
-      {/* Toast */}
       <AnimatePresence>
         {toast && (
           <motion.div

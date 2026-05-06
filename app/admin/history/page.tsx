@@ -5,10 +5,9 @@ import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import { supabase } from '@/lib/supabase';
 import type { StockMovement, Product } from '@/lib/types';
+import { SESSION_KEY } from '@/lib/types';
 import AdminNavbar from '../components/AdminNavbar';
 import Toast, { type ToastState } from '../components/Toast';
-
-const SESSION_KEY = 'aad_admin_auth';
 
 const MOVEMENT_TYPES = ['ALL', 'TRANSFER', 'ADJUSTMENT_IN', 'ADJUSTMENT_OUT', 'PURCHASE_IN', 'DAMAGED', 'SALE'];
 
@@ -43,12 +42,16 @@ function HistoryDashboard() {
 
   const load = useCallback(async () => {
     setLoading(true);
-    const [{ data: mv }, { data: pr }] = await Promise.all([
+    const [{ data: mv, error: mvErr }, { data: pr, error: prErr }] = await Promise.all([
       supabase.from('stock_movements').select('*').order('created_at', { ascending: false }).limit(200),
       supabase.from('products').select('product_id, product_name').eq('active_status', true),
     ]);
-    setMovements((mv ?? []) as StockMovement[]);
-    setProducts((pr ?? []) as Product[]);
+    if (mvErr || prErr) {
+      setToast({ msg: 'Failed to load history: ' + (mvErr ?? prErr)!.message, type: 'error', id: ++toastId.current });
+    } else {
+      setMovements((mv ?? []) as StockMovement[]);
+      setProducts((pr ?? []) as Product[]);
+    }
     setLoading(false);
   }, []);
 
@@ -82,7 +85,6 @@ function HistoryDashboard() {
           <p className="text-xs text-muted mt-0.5">{filtered.length} records</p>
         </div>
 
-        {/* Search */}
         <div className="relative mb-3">
           <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted text-sm">🔍</span>
           <input
@@ -93,7 +95,6 @@ function HistoryDashboard() {
           />
         </div>
 
-        {/* Type filter chips */}
         <div className="flex gap-2 overflow-x-auto pb-2 mb-4 scrollbar-none">
           {MOVEMENT_TYPES.map(t => (
             <button

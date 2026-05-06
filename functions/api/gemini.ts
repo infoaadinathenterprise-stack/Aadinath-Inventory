@@ -29,7 +29,11 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   if (!prompt) return new Response(JSON.stringify({ error: 'Missing prompt' }), { status: 400, headers: corsHeaders });
   if (!context.env.GEMINI_KEY) return new Response(JSON.stringify({ error: 'GEMINI_KEY not set' }), { status: 500, headers: corsHeaders });
 
-  const parts: unknown[] = [];
+  type GeminiPart =
+    | { inline_data: { mime_type: string; data: string } }
+    | { text: string };
+
+  const parts: GeminiPart[] = [];
   if (imageBase64 && mimeType) {
     parts.push({ inline_data: { mime_type: mimeType, data: imageBase64 } });
   }

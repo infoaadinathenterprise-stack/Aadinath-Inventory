@@ -5,10 +5,10 @@ import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import { supabase } from '@/lib/supabase';
 import type { Purchase, PurchaseItem, Supplier, Product } from '@/lib/types';
+import { SESSION_KEY } from '@/lib/types';
 import AdminNavbar from '../components/AdminNavbar';
 import Toast, { type ToastState } from '../components/Toast';
 
-const SESSION_KEY = 'aad_admin_auth';
 const GEMINI_URL  = '/api/gemini';
 
 function fmtDate(iso: string) {
@@ -100,14 +100,18 @@ function PurchasesDashboard() {
 
   const load = useCallback(async () => {
     setLoading(true);
-    const [{ data: purch }, { data: sup }, { data: prod }] = await Promise.all([
+    const [{ data: purch, error: purchErr }, { data: sup, error: supErr }, { data: prod, error: prodErr }] = await Promise.all([
       supabase.from('purchases').select('*').order('created_at', { ascending: false }),
       supabase.from('suppliers').select('*').eq('active_status', true).order('supplier_name'),
       supabase.from('products').select('*').eq('active_status', true).order('product_name'),
     ]);
-    setPurchases((purch ?? []) as Purchase[]);
-    setSuppliers((sup   ?? []) as Supplier[]);
-    setProducts( (prod  ?? []) as Product[]);
+    if (purchErr || supErr || prodErr) {
+      setToast({ msg: 'Failed to load purchases: ' + (purchErr ?? supErr ?? prodErr)!.message, type: 'error', id: ++toastId.current });
+    } else {
+      setPurchases((purch ?? []) as Purchase[]);
+      setSuppliers((sup   ?? []) as Supplier[]);
+      setProducts( (prod  ?? []) as Product[]);
+    }
     setLoading(false);
   }, []);
 
@@ -195,7 +199,6 @@ function PurchasesDashboard() {
         )}
       </main>
 
-      {/* New Purchase Modal */}
       <AnimatePresence>
         {newModal && (
           <NewPurchaseModal
@@ -208,7 +211,6 @@ function PurchasesDashboard() {
         )}
       </AnimatePresence>
 
-      {/* Purchase Detail Modal */}
       <AnimatePresence>
         {detailId !== null && detailData && (
           <>

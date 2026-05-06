@@ -33,7 +33,6 @@ export default function HeroSection() {
   return (
     <section className="relative min-h-screen flex items-center justify-center overflow-hidden">
 
-      {/* Animated gradient background */}
       <div
         className="absolute inset-0"
         style={{
@@ -43,7 +42,6 @@ export default function HeroSection() {
         }}
       />
 
-      {/* Radial glow */}
       <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
         <div
           className="w-150 h-150 rounded-full"
@@ -53,7 +51,6 @@ export default function HeroSection() {
         />
       </div>
 
-      {/* Floating particles */}
       {PARTICLES.map((p) => (
         <motion.div
           key={p.id}
@@ -69,7 +66,6 @@ export default function HeroSection() {
         />
       ))}
 
-      {/* Grid overlay */}
       <div
         className="absolute inset-0 opacity-[0.03] pointer-events-none"
         style={{
@@ -79,10 +75,8 @@ export default function HeroSection() {
         }}
       />
 
-      {/* Content */}
       <div className="relative z-10 text-center px-6 max-w-5xl mx-auto">
 
-        {/* Badge */}
         <motion.div
           initial={{ opacity: 0, y: -20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -93,7 +87,6 @@ export default function HeroSection() {
           Trusted Auto Parts Distributor
         </motion.div>
 
-        {/* Headline — word-by-word reveal */}
         <h1 className="text-5xl md:text-7xl font-bold leading-tight mb-4">
           {'Aadinath Enterprises'.split(' ').map((word, i) => (
             <motion.span
@@ -108,7 +101,6 @@ export default function HeroSection() {
           ))}
         </h1>
 
-        {/* Subheading */}
         <motion.p
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -118,7 +110,6 @@ export default function HeroSection() {
           Your one-stop distributor for premium automotive products.
         </motion.p>
 
-        {/* Cycling category words */}
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
@@ -138,7 +129,6 @@ export default function HeroSection() {
           ))}
         </motion.div>
 
-        {/* CTA */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -166,7 +156,6 @@ export default function HeroSection() {
           </Link>
         </motion.div>
 
-        {/* Scroll indicator */}
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}

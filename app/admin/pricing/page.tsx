@@ -12,9 +12,9 @@ import {
 } from 'framer-motion';
 import { supabase } from '@/lib/supabase';
 import { useProducts } from '@/lib/hooks/useProducts';
-import type { Product } from '@/lib/types';
+import type { Product, StockMap } from '@/lib/types';
+import { SESSION_KEY } from '@/lib/types';
 
-const SESSION_KEY         = 'aad_admin_auth';
 const PRICING_SKIPPED_KEY = 'aad_pricing_skipped';
 
 // ── Auth guard wrapper ─────────────────────────────────────────────────────────
@@ -56,7 +56,6 @@ function PricingDashboard() {
   const [toast,       setToast]       = useState<{ msg: string; type: string } | null>(null);
   const toastRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
-  // Initialise queue once products load
   useEffect(() => {
     if (!products.length) return;
     setLocalProds(products);
@@ -72,7 +71,6 @@ function PricingDashboard() {
     setSkipped(s);
   }, [products]);
 
-  // Persist skipped list to sessionStorage
   useEffect(() => {
     sessionStorage.setItem(
       PRICING_SKIPPED_KEY,
@@ -116,8 +114,7 @@ function PricingDashboard() {
 
   return (
     <div className="h-screen bg-navy flex flex-col overflow-hidden">
-      {/* Header */}
-      <header className="print-hide flex-shrink-0 bg-surface border-b border-white/8 px-4 flex items-center gap-3 h-14">
+      <header className="print-hide shrink-0 bg-surface border-b border-white/8 px-4 flex items-center gap-3 h-14">
         <Link
           href="/admin"
           className="text-muted hover:text-slate-100 text-sm px-3 py-1.5 rounded-lg bg-surface2 border border-white/8 transition-colors"
@@ -138,8 +135,7 @@ function PricingDashboard() {
         )}
       </header>
 
-      {/* Progress bar */}
-      <div className="flex-shrink-0 h-0.5 bg-surface2">
+      <div className="shrink-0 h-0.5 bg-surface2">
         <motion.div
           className="h-full bg-teal"
           animate={{ width: `${pct}%` }}
@@ -147,7 +143,6 @@ function PricingDashboard() {
         />
       </div>
 
-      {/* Card area */}
       <main className="flex-1 overflow-hidden flex flex-col items-center justify-center px-4 py-6">
         <AnimatePresence mode="wait">
           {queue.length === 0 ? (
@@ -234,7 +229,6 @@ function PricingDashboard() {
         </AnimatePresence>
       </main>
 
-      {/* Search overlay */}
       <AnimatePresence>
         {searchOpen && (
           <SearchOverlay
@@ -268,7 +262,6 @@ function PricingDashboard() {
         )}
       </AnimatePresence>
 
-      {/* Toast */}
       <AnimatePresence>
         {toast && (
           <motion.div
@@ -277,7 +270,7 @@ function PricingDashboard() {
             animate={{ y: 0, opacity: 1 }}
             exit={{ y: 60, opacity: 0 }}
             transition={{ type: 'spring', damping: 20, stiffness: 300 }}
-            className={`fixed bottom-6 left-1/2 -translate-x-1/2 z-[300] px-5 py-2.5 rounded-xl border text-sm font-semibold shadow-2xl whitespace-nowrap pointer-events-none ${
+            className={`fixed bottom-6 left-1/2 -translate-x-1/2 z-300 px-5 py-2.5 rounded-xl border text-sm font-semibold shadow-2xl whitespace-nowrap pointer-events-none ${
               toast.type === 'error' ? 'bg-danger/15 border-danger/40 text-danger'
               : toast.type === 'info' ? 'bg-teal/15 border-teal/40 text-teal'
               : 'bg-success/15 border-success/40 text-success'
@@ -295,8 +288,8 @@ function PricingDashboard() {
 
 interface DeckProps {
   queue:        Product[];
-  backStockMap: Record<number, number>;
-  mainStockMap: Record<number, number>;
+  backStockMap: StockMap;
+  mainStockMap: StockMap;
   saveHistory:  SaveEntry[];
   onSave:       (sell: number | null, buy: number | null) => Promise<boolean>;
   onSkip:       () => void;
@@ -316,7 +309,6 @@ function PricingDeck({ queue, backStockMap, mainStockMap, saveHistory, onSave, o
   const buyRef  = useRef<HTMLInputElement>(null);
   const saving  = useRef(false);
 
-  // Keyboard shortcuts
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.target instanceof HTMLInputElement) return;
@@ -350,19 +342,15 @@ function PricingDeck({ queue, backStockMap, mainStockMap, saveHistory, onSave, o
   const ppb   = p.pieces_per_box || 0;
   const mainQ = mainStockMap[p.product_id] || 0;
   const backQ = backStockMap[p.product_id] || 0;
-  const holdQ = 0;
   const isBox = (p.unit_type?.toLowerCase() === 'box') && ppb > 0;
 
   return (
     <div className="w-full max-w-sm flex flex-col items-center gap-6">
-      {/* Card stack */}
-      <div className="relative w-full h-[420px] sm:h-[440px]">
-        {/* Background card */}
+      <div className="relative w-full h-105 sm:h-110">
         {next && (
           <div className="absolute inset-0 bg-surface border border-white/8 rounded-2xl scale-95 opacity-50 translate-y-2 pointer-events-none" />
         )}
 
-        {/* Active card */}
         <motion.div
           key={p.product_id}
           style={{ x, rotate: rot }}
@@ -376,7 +364,6 @@ function PricingDeck({ queue, backStockMap, mainStockMap, saveHistory, onSave, o
           }}
           className="absolute inset-0 bg-surface border border-white/10 rounded-2xl p-5 shadow-2xl cursor-grab active:cursor-grabbing overflow-hidden select-none"
         >
-          {/* Swipe indicators */}
           <motion.div
             style={{ opacity: saveOpacity }}
             className="absolute top-5 left-5 text-teal border-2 border-teal rounded-lg px-2.5 py-1 text-xs font-black tracking-widest -rotate-12 pointer-events-none"
@@ -390,7 +377,6 @@ function PricingDeck({ queue, backStockMap, mainStockMap, saveHistory, onSave, o
             SKIP
           </motion.div>
 
-          {/* Content */}
           <div className="text-[9px] font-bold tracking-widest text-muted uppercase bg-surface2 border border-white/8 rounded px-2 py-0.5 inline-block mb-3">
             {[p.type, p.brand].filter(Boolean).join(' · ') || 'Product'}
           </div>
@@ -404,14 +390,11 @@ function PricingDeck({ queue, backStockMap, mainStockMap, saveHistory, onSave, o
             </div>
           )}
 
-          {/* Stock chips */}
           <div className="flex gap-2 mb-4">
             <StockChip color="teal" label={isBox ? `Main (${Math.floor(mainQ / ppb)}bx)` : 'Main'} value={mainQ} />
             <StockChip color="gold" label={isBox ? `Back (${Math.floor(backQ / ppb)}bx)` : 'Back'} value={backQ} />
-            {holdQ > 0 && <StockChip color="purple" label="Hold" value={holdQ} />}
           </div>
 
-          {/* Current prices */}
           {(p.selling_price != null || p.buying_price != null) && (
             <div className="flex gap-2 mb-4 flex-wrap">
               {p.selling_price != null && (
@@ -427,7 +410,6 @@ function PricingDeck({ queue, backStockMap, mainStockMap, saveHistory, onSave, o
             </div>
           )}
 
-          {/* Price inputs */}
           <div className="grid grid-cols-2 gap-3" onClick={e => e.stopPropagation()}>
             <PriceField
               label={isBox ? 'Selling ₹/pc' : 'Selling Price ₹'}
@@ -443,14 +425,12 @@ function PricingDeck({ queue, backStockMap, mainStockMap, saveHistory, onSave, o
         </motion.div>
       </div>
 
-      {/* Action bar */}
       <div className="flex items-center gap-6">
         <ActionBtn onClick={triggerSkip} color="danger" size="lg" title="Skip (←)">✕</ActionBtn>
         <ActionBtn onClick={onUndo} color="muted" size="sm" title="Undo (Z)" disabled={saveHistory.length === 0}>↩</ActionBtn>
         <ActionBtn onClick={triggerSave} color="teal" size="lg" title="Save (→)">✓</ActionBtn>
       </div>
 
-      {/* Keyboard hint */}
       <p className="hidden sm:block text-[10px] text-muted/50 text-center font-mono">
         ← Skip · → Save · Z Undo
       </p>
@@ -466,7 +446,7 @@ function StockChip({ color, label, value }: { color: string; label: string; valu
     color === 'gold'   ? 'bg-gold/10   border-gold/20   text-gold'   :
                          'bg-purple-500/10 border-purple-500/20 text-purple-400';
   return (
-    <div className={`flex flex-col items-center px-3 py-1.5 rounded-lg border min-w-[54px] ${cls}`}>
+    <div className={`flex flex-col items-center px-3 py-1.5 rounded-lg border min-w-13.5 ${cls}`}>
       <span className="text-lg font-bold leading-none tabular-nums">{value}</span>
       <span className="text-[8px] font-bold mt-0.5 uppercase tracking-wide">{label}</span>
     </div>
@@ -618,8 +598,8 @@ function SearchOverlay({
   products:     Product[];
   queue:        Product[];
   skipped:      Product[];
-  backStockMap: Record<number, number>;
-  mainStockMap: Record<number, number>;
+  backStockMap: StockMap;
+  mainStockMap: StockMap;
   searchQ:      string;
   onSearchQ:    (q: string) => void;
   onJump:       (id: number) => void;
@@ -642,17 +622,17 @@ function SearchOverlay({
   return (
     <>
       <motion.div
-        className="fixed inset-0 z-[100] bg-black/70 backdrop-blur-sm"
+        className="fixed inset-0 z-100 bg-black/70 backdrop-blur-sm"
         initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
         onClick={onClose}
       />
       <motion.div
-        className="fixed bottom-0 left-0 right-0 z-[110] flex flex-col bg-surface border-t border-white/10 rounded-t-3xl max-h-[85vh] max-w-xl mx-auto"
+        className="fixed bottom-0 left-0 right-0 z-110 flex flex-col bg-surface border-t border-white/10 rounded-t-3xl max-h-[85vh] max-w-xl mx-auto"
         initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }}
         transition={{ type: 'spring', damping: 25, stiffness: 200 }}
       >
-        <div className="w-9 h-1 bg-white/15 rounded-full mx-auto mt-3 mb-1 flex-shrink-0" />
-        <div className="px-5 py-3 flex-shrink-0">
+        <div className="w-9 h-1 bg-white/15 rounded-full mx-auto mt-3 mb-1 shrink-0" />
+        <div className="px-5 py-3 shrink-0">
           <h3 className="text-base font-bold text-slate-100 mb-3">Search Product</h3>
           <div className="relative">
             <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted text-sm pointer-events-none">🔍</span>

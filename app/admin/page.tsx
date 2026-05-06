@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { supabase } from '@/lib/supabase';
 import type { Product, StockMap, Location } from '@/lib/types';
+import { SESSION_KEY } from '@/lib/types';
 import AdminNavbar      from './components/AdminNavbar';
 import StatsBar         from './components/StatsBar';
 import ProductList      from './components/ProductList';
@@ -11,7 +12,6 @@ import AdjustStockModal from './components/AdjustStockModal';
 import Toast, { type ToastState } from './components/Toast';
 
 const PASS = process.env.NEXT_PUBLIC_ADMIN_PASSWORD ?? 'admin123';
-const SESSION_KEY = 'aad_admin_auth';
 
 interface ModalState {
   product:   Product;
@@ -60,10 +60,12 @@ async function loadData(): Promise<{
   backBoxMap:   StockMap;
   mainBoxMap:   StockMap;
 }> {
-  const [{ data: prods }, { data: stock }] = await Promise.all([
+  const [{ data: prods, error: pErr }, { data: stock, error: sErr }] = await Promise.all([
     supabase.from('products').select('*').eq('active_status', true).order('product_name'),
     supabase.from('stock_by_location').select('product_id, quantity, box_quantity, location_id'),
   ]);
+
+  if (pErr || sErr) throw new Error((pErr ?? sErr)!.message);
 
   const products: Product[] = prods ?? [];
   const backStockMap: StockMap = {};
@@ -163,7 +165,6 @@ function ProductModal({
     if (!editing) return EMPTY_FORM;
     const backQ = backStockMap[editing.product_id] ?? 0;
     const mainQ = mainStockMap[editing.product_id] ?? 0;
-    const hasBoth = backQ !== undefined && mainQ !== undefined && (backStockMap[editing.product_id] !== undefined || mainStockMap[editing.product_id] !== undefined);
     const hasBack = backStockMap[editing.product_id] !== undefined;
     const hasMain = mainStockMap[editing.product_id] !== undefined;
     return {
@@ -275,7 +276,6 @@ function ProductModal({
         <h3 className="text-base font-bold text-slate-100 mb-4">{editing ? 'Edit Product' : 'Add Product'}</h3>
 
         <div className="flex flex-col gap-3">
-          {/* Name + Type */}
           <div className="grid grid-cols-2 gap-3">
             <FormField label="Product Name *">
               <input value={form.product_name} onChange={e => set('product_name', e.target.value)}
@@ -288,7 +288,6 @@ function ProductModal({
             </FormField>
           </div>
 
-          {/* Brand + Model */}
           <div className="grid grid-cols-2 gap-3">
             <FormField label="Brand">
               <input value={form.brand} onChange={e => set('brand', e.target.value)} list="ac-brands"
@@ -300,7 +299,6 @@ function ProductModal({
             </FormField>
           </div>
 
-          {/* SKU + Unit */}
           <div className="grid grid-cols-2 gap-3">
             <FormField label="SKU (auto)">
               <input value={form.stock_keeping_unit} onChange={e => set('stock_keeping_unit', e.target.value)}
@@ -313,7 +311,6 @@ function ProductModal({
             </FormField>
           </div>
 
-          {/* Unit type */}
           <FormField label="Unit Type">
             <select value={form.unit_type} onChange={e => set('unit_type', e.target.value as 'piece' | 'box')} className={inputCls}>
               <option value="piece">Piece (individual items)</option>
@@ -332,12 +329,10 @@ function ProductModal({
             </div>
           )}
 
-          {/* Reorder level */}
           <FormField label="Reorder Level">
             <input type="number" value={form.reorder_level} onChange={e => set('reorder_level', e.target.value)} placeholder="0" min="0" className={inputCls} />
           </FormField>
 
-          {/* Location */}
           <FormField label="Location *">
             <select value={form.location} onChange={e => set('location', e.target.value as ProductForm['location'])} className={inputCls}>
               <option value="">— Select location —</option>
@@ -424,6 +419,8 @@ function Dashboard() {
       setMainStockMap(d.mainStockMap);
       setBackBoxMap(d.backBoxMap);
       setMainBoxMap(d.mainBoxMap);
+    } catch (e) {
+      setToast({ msg: 'Failed to load inventory: ' + (e instanceof Error ? e.message : 'Network error'), type: 'error', id: ++toastId.current });
     } finally {
       setLoading(false);
     }

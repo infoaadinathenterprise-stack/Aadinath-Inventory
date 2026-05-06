@@ -17,6 +17,8 @@ export interface Product {
   current_stock:      number | null;
   parent_product_id:  number | null;
   split_type:         string | null;
+  // Computed join field: sum of stock_by_location quantities across all locations
+  total_stock?:       number;
 }
 
 export type StockMap = Record<number, number>;
@@ -32,7 +34,8 @@ export type AdjAction =
 export type Location = 'back' | 'main';
 
 export const LOC_ID: Record<Location, number> = { back: 2, main: 1 };
-export const OTHER_LOC: Record<Location, Location> = { back: 'main', main: 'back' };
+
+export const SESSION_KEY = 'aad_admin_auth';
 
 export interface Supplier {
   supplier_id:   number;

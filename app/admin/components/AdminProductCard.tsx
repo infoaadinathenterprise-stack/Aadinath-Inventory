@@ -48,12 +48,10 @@ export default function AdminProductCard({
       layout
       className="flex items-center gap-3 px-3 py-3 rounded-xl bg-surface border border-white/5 hover:border-teal/20 transition-all duration-200 group"
     >
-      {/* Category badge */}
       <span className="shrink-0 self-start mt-0.5 text-[9px] font-bold px-2 py-0.5 rounded-md bg-surface2 border border-white/8 text-muted uppercase tracking-wider whitespace-nowrap">
         {p.type || '—'}
       </span>
 
-      {/* Info */}
       <div className="flex-1 min-w-0">
         <p className="text-sm font-bold text-slate-100 truncate group-hover:text-teal transition-colors duration-200">
           {p.product_name}
@@ -64,7 +62,6 @@ export default function AdminProductCard({
         <p className={`text-[10px] font-semibold mt-1 ${stockClass}`}>{stockLabel}</p>
       </div>
 
-      {/* Edit button */}
       {onEdit && (
         <button
           onClick={() => onEdit(p)}
@@ -73,14 +70,13 @@ export default function AdminProductCard({
         >✏️</button>
       )}
 
-      {/* Stock count + adjust buttons */}
       <div className="flex items-center gap-1.5 shrink-0">
         <button
           onClick={() => onAdjust(p, 'minus', location)}
           className="w-8 h-8 rounded-lg bg-danger/10 border border-danger/30 text-danger text-lg font-bold flex items-center justify-center hover:bg-danger hover:text-white transition-all duration-150 active:scale-90"
         >−</button>
 
-        <div className="flex flex-col items-center min-w-[36px]">
+        <div className="flex flex-col items-center min-w-9">
           <span className="text-lg font-bold text-slate-200 tabular-nums leading-none">
             {fmt.unitBadge === 'BOX' && ppb > 0
               ? Math.floor(total / ppb)

@@ -2,7 +2,7 @@
 
 import { useState, useMemo } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import type { Product } from '@/lib/formatStock';
+import type { Product } from '@/lib/types';
 import ProductCard from './ProductCard';
 
 interface Props {
@@ -31,7 +31,6 @@ export default function ProductGrid({ products, categories }: Props) {
 
   return (
     <div>
-      {/* Search */}
       <div className="relative mb-6">
         <span className="absolute left-4 top-1/2 -translate-y-1/2 text-muted text-sm">🔍</span>
         <input
@@ -52,7 +51,6 @@ export default function ProductGrid({ products, categories }: Props) {
         )}
       </div>
 
-      {/* Filter tabs */}
       <div className="flex flex-wrap gap-2 mb-8">
         {['All', ...categories].map(cat => (
           <motion.button
@@ -70,13 +68,11 @@ export default function ProductGrid({ products, categories }: Props) {
         ))}
       </div>
 
-      {/* Result count */}
       <p className="text-xs text-muted mb-6">
         Showing <span className="text-teal font-semibold">{filtered.length}</span> of {products.length} products
         {activeFilter !== 'All' && <span> in <span className="text-gold">{activeFilter}</span></span>}
       </p>
 
-      {/* Grid */}
       <AnimatePresence mode="popLayout">
         {filtered.length === 0 ? (
           <motion.div

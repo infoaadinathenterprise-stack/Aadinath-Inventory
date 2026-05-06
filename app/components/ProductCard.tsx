@@ -1,7 +1,7 @@
 'use client';
 
 import { motion } from 'framer-motion';
-import type { Product } from '@/lib/formatStock';
+import type { Product } from '@/lib/types';
 import { formatStock } from '@/lib/formatStock';
 
 interface Props {
@@ -22,10 +22,8 @@ export default function ProductCard({ product: p, index }: Props) {
                  hover:border-teal/30 hover:shadow-[0_0_20px_rgba(0,212,255,0.12)]
                  transition-all duration-300 group overflow-hidden"
     >
-      {/* Background glow on hover */}
       <div className="absolute inset-0 rounded-2xl bg-teal/0 group-hover:bg-teal/3 transition-all duration-300 pointer-events-none" />
 
-      {/* Top row — category badge + unit badge */}
       <div className="flex items-start justify-between gap-2 mb-3">
         <span className="text-[10px] font-bold px-2.5 py-1 rounded-full bg-surface2 border border-white/8 text-muted uppercase tracking-wider truncate max-w-35">
           {p.type || 'General'}
@@ -41,29 +39,24 @@ export default function ProductCard({ product: p, index }: Props) {
         </span>
       </div>
 
-      {/* Product name */}
       <h3 className="font-bold text-slate-100 text-base leading-snug mb-1 group-hover:text-teal transition-colors duration-200">
         {p.product_name}
       </h3>
 
-      {/* Brand / Model */}
       {(p.brand || p.model) && (
         <p className="text-xs text-muted mb-3">
           {[p.brand, p.model].filter(Boolean).join(' · ')}
         </p>
       )}
 
-      {/* SKU */}
       {p.stock_keeping_unit && (
         <p className="text-[10px] text-muted/60 font-mono mb-4">
           SKU: {p.stock_keeping_unit}
         </p>
       )}
 
-      {/* Spacer */}
       <div className="flex-1" />
 
-      {/* Stock status */}
       <div
         className={`flex items-center gap-2 px-3 py-2 rounded-xl border text-xs font-semibold ${
           stock.inStock

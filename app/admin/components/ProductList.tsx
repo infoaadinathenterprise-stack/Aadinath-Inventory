@@ -55,7 +55,6 @@ export default function ProductList({
 
   return (
     <div className="px-4 pb-8">
-      {/* Location tabs */}
       <div className="flex gap-2 mb-4">
         {(['main', 'back'] as Location[]).map((loc) => (
           <button
@@ -72,7 +71,6 @@ export default function ProductList({
         ))}
       </div>
 
-      {/* Search bar */}
       <div className="relative mb-3">
         <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted text-sm">🔍</span>
         <input
@@ -90,7 +88,6 @@ export default function ProductList({
         )}
       </div>
 
-      {/* Category filter chips */}
       <div className="flex gap-2 overflow-x-auto pb-1 mb-4 scrollbar-none">
         {categories.map(cat => (
           <button
@@ -107,7 +104,6 @@ export default function ProductList({
         ))}
       </div>
 
-      {/* Result count */}
       <p className="text-[11px] text-muted mb-3 font-medium">
         {visible.length} product{visible.length !== 1 ? 's' : ''}
         {outCount > 0 && (
@@ -115,7 +111,6 @@ export default function ProductList({
         )}
       </p>
 
-      {/* Product list */}
       <div className="flex flex-col gap-2">
         <AnimatePresence mode="popLayout">
           {visible.length === 0 ? (

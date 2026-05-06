@@ -5,10 +5,9 @@ import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import { supabase } from '@/lib/supabase';
 import type { Supplier } from '@/lib/types';
+import { SESSION_KEY } from '@/lib/types';
 import AdminNavbar from '../components/AdminNavbar';
 import Toast, { type ToastState } from '../components/Toast';
-
-const SESSION_KEY = 'aad_admin_auth';
 
 interface SupplierForm {
   supplier_name: string;
@@ -37,8 +36,12 @@ function SuppliersDashboard() {
 
   const load = useCallback(async () => {
     setLoading(true);
-    const { data } = await supabase.from('suppliers').select('*').eq('active_status', true).order('supplier_name');
-    setSuppliers((data ?? []) as Supplier[]);
+    const { data, error } = await supabase.from('suppliers').select('*').eq('active_status', true).order('supplier_name');
+    if (error) {
+      setToast({ msg: 'Failed to load suppliers: ' + error.message, type: 'error', id: ++toastId.current });
+    } else {
+      setSuppliers((data ?? []) as Supplier[]);
+    }
     setLoading(false);
   }, []);
 
@@ -167,7 +170,6 @@ function SuppliersDashboard() {
         )}
       </main>
 
-      {/* Add/Edit Modal */}
       <AnimatePresence>
         {modal && (
           <>
@@ -206,7 +208,6 @@ function SuppliersDashboard() {
         )}
       </AnimatePresence>
 
-      {/* Delete confirm */}
       <AnimatePresence>
         {deleteTarget && (
           <>

@@ -10,8 +10,7 @@ import AdjustStockModal from '@/app/admin/components/AdjustStockModal';
 import BarcodeScanner   from '@/app/admin/components/BarcodeScanner';
 import Toast, { type ToastState } from '@/app/admin/components/Toast';
 import type { Product, Location } from '@/lib/types';
-
-const SESSION_KEY = 'aad_admin_auth';
+import { SESSION_KEY } from '@/lib/types';
 
 // ── Auth guard ─────────────────────────────────────────────────────────────────
 
@@ -31,8 +30,6 @@ export default function PosPage() {
   return <PosDashboard />;
 }
 
-// ── Session cart entry ─────────────────────────────────────────────────────────
-
 interface CartEntry {
   product:   Product;
   direction: 'plus' | 'minus';
@@ -40,15 +37,11 @@ interface CartEntry {
   action:    string;
 }
 
-// ── Modal state ────────────────────────────────────────────────────────────────
-
 interface ModalState {
   product:   Product;
   direction: 'plus' | 'minus';
   location:  Location;
 }
-
-// ── Main dashboard ─────────────────────────────────────────────────────────────
 
 function PosDashboard() {
   const {
@@ -99,8 +92,8 @@ function PosDashboard() {
 
   function handleBarcodeKey(e: React.KeyboardEvent<HTMLInputElement>) {
     if (e.key !== 'Enter') return;
-    const code = (e.target as HTMLInputElement).value.trim();
-    (e.target as HTMLInputElement).value = '';
+    const code = e.currentTarget.value.trim();
+    e.currentTarget.value = '';
     if (!code) return;
     const match =
       products.find(p => (p.stock_keeping_unit ?? '').toLowerCase() === code.toLowerCase()) ??
@@ -149,16 +142,14 @@ function PosDashboard() {
 
   return (
     <div className="h-screen bg-navy flex flex-col overflow-hidden">
-      {/* Header */}
-      <header className="flex-shrink-0 bg-surface border-b border-white/8 px-3 flex items-center gap-2 h-14">
-        <Link href="/admin" className="text-muted hover:text-slate-100 text-sm px-3 py-1.5 rounded-lg bg-surface2 border border-white/8 transition-colors flex-shrink-0">
+      <header className="shrink-0 bg-surface border-b border-white/8 px-3 flex items-center gap-2 h-14">
+        <Link href="/admin" className="text-muted hover:text-slate-100 text-sm px-3 py-1.5 rounded-lg bg-surface2 border border-white/8 transition-colors shrink-0">
           ← Back
         </Link>
-        <h1 className="text-sm font-bold text-slate-100 flex-shrink-0">
+        <h1 className="text-sm font-bold text-slate-100 shrink-0">
           {location === 'back' ? '📦 Back Godown' : '🏪 Main Store'}
         </h1>
 
-        {/* Barcode text input */}
         <div className="flex-1 relative min-w-0 max-w-xs">
           <span className="absolute left-3 top-1/2 -translate-y-1/2 text-teal text-sm pointer-events-none">⌨</span>
           <input
@@ -173,19 +164,17 @@ function PosDashboard() {
           />
         </div>
 
-        {/* Camera button */}
         <button
           onClick={() => setScannerOpen(true)}
           title="Camera scan"
-          className="p-2 rounded-xl bg-surface2 border border-white/8 text-muted hover:text-teal hover:border-teal/30 transition-all text-lg flex-shrink-0"
+          className="p-2 rounded-xl bg-surface2 border border-white/8 text-muted hover:text-teal hover:border-teal/30 transition-all text-lg shrink-0"
         >
           📷
         </button>
 
-        {/* Cart button */}
         <button
           onClick={() => setCartOpen(o => !o)}
-          className="relative p-2 rounded-xl bg-surface2 border border-white/8 text-muted hover:text-teal hover:border-teal/30 transition-all text-lg flex-shrink-0"
+          className="relative p-2 rounded-xl bg-surface2 border border-white/8 text-muted hover:text-teal hover:border-teal/30 transition-all text-lg shrink-0"
         >
           🛒
           {cart.length > 0 && (
@@ -196,8 +185,7 @@ function PosDashboard() {
         </button>
       </header>
 
-      {/* Location tabs */}
-      <div className="flex-shrink-0 flex gap-2 px-3 pt-2.5 pb-2 border-b border-white/8 bg-surface">
+      <div className="shrink-0 flex gap-2 px-3 pt-2.5 pb-2 border-b border-white/8 bg-surface">
         {(['back', 'main'] as Location[]).map(loc => (
           <button
             key={loc}
@@ -213,8 +201,7 @@ function PosDashboard() {
         ))}
       </div>
 
-      {/* Category filter chips */}
-      <div className="flex-shrink-0 flex gap-2 px-3 py-2 overflow-x-auto border-b border-white/5 bg-surface">
+      <div className="shrink-0 flex gap-2 px-3 py-2 overflow-x-auto border-b border-white/5 bg-surface">
         {categories.map(cat => (
           <button
             key={cat}
@@ -230,8 +217,7 @@ function PosDashboard() {
         ))}
       </div>
 
-      {/* Search bar */}
-      <div className="flex-shrink-0 px-3 py-2 border-b border-white/5 bg-surface">
+      <div className="shrink-0 px-3 py-2 border-b border-white/5 bg-surface">
         <div className="relative">
           <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted text-sm pointer-events-none">🔍</span>
           <input
@@ -247,7 +233,6 @@ function PosDashboard() {
         </div>
       </div>
 
-      {/* Product list */}
       <main className="flex-1 overflow-y-auto px-3 py-3 flex flex-col gap-2">
         {visible.length === 0 && (
           <p className="text-center text-muted text-sm py-12">No products with {location} stock</p>
@@ -267,21 +252,20 @@ function PosDashboard() {
         </AnimatePresence>
       </main>
 
-      {/* Cart drawer */}
       <AnimatePresence>
         {cartOpen && (
           <>
             <motion.div
-              className="fixed inset-0 z-[80] bg-black/60"
+              className="fixed inset-0 z-80 bg-black/60"
               initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
               onClick={() => setCartOpen(false)}
             />
             <motion.div
-              className="fixed right-0 top-0 bottom-0 w-72 z-[90] bg-surface border-l border-white/8 flex flex-col shadow-2xl"
+              className="fixed right-0 top-0 bottom-0 w-72 z-90 bg-surface border-l border-white/8 flex flex-col shadow-2xl"
               initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }}
               transition={{ type: 'spring', damping: 25, stiffness: 200 }}
             >
-              <div className="flex items-center justify-between px-4 h-14 border-b border-white/8 flex-shrink-0">
+              <div className="flex items-center justify-between px-4 h-14 border-b border-white/8 shrink-0">
                 <h3 className="text-sm font-bold text-slate-100">🛒 Session Log</h3>
                 <div className="flex items-center gap-2">
                   {cart.length > 0 && (
@@ -315,7 +299,6 @@ function PosDashboard() {
         )}
       </AnimatePresence>
 
-      {/* Camera scanner overlay */}
       <AnimatePresence>
         {scannerOpen && (
           <BarcodeScanner
@@ -325,7 +308,6 @@ function PosDashboard() {
         )}
       </AnimatePresence>
 
-      {/* Adjust stock modal */}
       <AnimatePresence>
         {modal && (
           <AdjustStockModal
@@ -357,8 +339,6 @@ function PosDashboard() {
     </div>
   );
 }
-
-// ── Product card ───────────────────────────────────────────────────────────────
 
 interface CardProps {
   product:  Product;
@@ -398,12 +378,10 @@ function PosProductCard({ product: p, index, location, stockMap, boxMap, onAdjus
       onClick={() => onAdjust(p, 'minus')}
       className="flex items-center gap-3 px-3 py-3 rounded-xl bg-surface border border-white/5 hover:border-teal/20 cursor-pointer transition-all group"
     >
-      {/* Category */}
       <span className="shrink-0 self-start mt-0.5 text-[9px] font-bold px-2 py-0.5 rounded-md bg-surface2 border border-white/8 text-muted uppercase tracking-wider whitespace-nowrap">
         {p.type || '—'}
       </span>
 
-      {/* Info */}
       <div className="flex-1 min-w-0">
         <p className="text-sm font-bold text-slate-100 truncate group-hover:text-teal transition-colors">
           {p.product_name}
@@ -414,14 +392,13 @@ function PosProductCard({ product: p, index, location, stockMap, boxMap, onAdjus
         <p className={`text-[10px] font-semibold mt-1 ${stockCls}`}>{stockTxt}</p>
       </div>
 
-      {/* Stock + adjust buttons */}
       <div className="flex items-center gap-1.5 shrink-0" onClick={e => e.stopPropagation()}>
         <button
           onClick={() => onAdjust(p, 'minus')}
           className="w-8 h-8 rounded-lg bg-danger/10 border border-danger/30 text-danger text-xl font-bold flex items-center justify-center hover:bg-danger hover:text-white transition-all active:scale-90"
         >−</button>
 
-        <div className="flex flex-col items-center min-w-[34px]">
+        <div className="flex flex-col items-center min-w-8.5">
           <span className="text-lg font-bold text-slate-200 tabular-nums leading-none">{bigNum}</span>
           {fmt.unitBadge === 'BOX' && ppb > 0 && (
             <span className="text-[8px] text-muted leading-none">{`${bigNum}bx+${total % ppb}pc`}</span>

@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
 import type { Product, StockMap } from '@/lib/types';
 
-export interface ProductsData {
+interface ProductsData {
   products:     Product[];
   backStockMap: StockMap;
   mainStockMap: StockMap;
