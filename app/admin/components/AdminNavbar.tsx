@@ -66,11 +66,11 @@ export default function AdminNavbar({ onLogout }: Props) {
             <button
               onClick={() => setOpen(true)}
               aria-label="Open menu"
-              className="flex flex-col justify-center items-center gap-1.5 w-9 h-9 rounded-lg bg-surface2 border border-white/8 hover:border-teal/30 transition-all md:hidden"
+              className="w-9 h-9 rounded-lg bg-surface2 border border-white/8 hover:border-teal/30 transition-all md:hidden flex flex-col justify-center items-center gap-1"
             >
-              <span className="w-4 h-px bg-slate-300 block" />
-              <span className="w-4 h-px bg-slate-300 block" />
-              <span className="w-3 h-px bg-slate-300 block self-start ml-0.5" />
+              <span className="w-4 h-0.5 bg-slate-300 rounded-full" />
+              <span className="w-4 h-0.5 bg-slate-300 rounded-full" />
+              <span className="w-3 h-0.5 bg-slate-300 rounded-full" />
             </button>
           </div>
         </div>
