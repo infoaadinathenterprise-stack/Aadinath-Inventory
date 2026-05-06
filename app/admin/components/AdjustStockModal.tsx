@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { formatStock } from '@/lib/formatStock';
 import { upsertStock, logMovement } from '@/lib/stockActions';
-import type { Product, StockMap, AdjAction, Location } from '@/lib/types';
+import type { Product, StockMap, AdjAction, Location, ComponentMap } from '@/lib/types';
 import { LOC_ID } from '@/lib/types';
 
 interface Props {
@@ -15,6 +15,8 @@ interface Props {
   mainStockMap: StockMap;
   backBoxMap:   StockMap;
   mainBoxMap:   StockMap;
+  componentMap?: ComponentMap;
+  allProducts?:  Product[];
   onClose:      () => void;
   onSuccess:    (msg: string) => void;
   onError:      (msg: string) => void;
@@ -42,6 +44,7 @@ function getActions(location: Location, direction: 'plus' | 'minus'): { key: Adj
 export default function AdjustStockModal({
   product, location, direction,
   backStockMap, mainStockMap, backBoxMap, mainBoxMap,
+  componentMap = {}, allProducts = [],
   onClose, onSuccess, onError, onDone,
 }: Props) {
   const [selectedAction, setSelectedAction] = useState<AdjAction | null>(null);
@@ -124,6 +127,31 @@ export default function AdjustStockModal({
         await logMovement(product.product_id, null, locId, movQty, TYPE_MAP[selectedAction], NOTE_MAP[selectedAction]);
       }
 
+      // Deduct components for outbound actions
+      if (['sold', 'to_front', 'to_back'].includes(selectedAction)) {
+        const components = componentMap[product.product_id] ?? [];
+        for (const comp of components) {
+          const compCurQty = location === 'back'
+            ? (backStockMap[comp.component_product_id] || 0)
+            : (mainStockMap[comp.component_product_id] || 0);
+          const deductQty = movQty * comp.quantity;
+          await upsertStock(
+            comp.component_product_id,
+            locId,
+            'quantity',
+            Math.max(0, compCurQty - deductQty),
+          );
+          await logMovement(
+            comp.component_product_id,
+            locId,
+            null,
+            deductQty,
+            TYPE_MAP[selectedAction],
+            'Auto: component of ' + product.product_name,
+          );
+        }
+      }
+
       const unitLabel = isBoxUnit ? `box${qty !== 1 ? 'es' : ''}` : `unit${qty !== 1 ? 's' : ''}`;
       const actionLabel: Record<AdjAction, string> = {
         sold: 'Sold', to_front: 'Moved to front', to_back: 'Moved to back',
@@ -142,7 +170,7 @@ export default function AdjustStockModal({
   return (
     <AnimatePresence>
       <motion.div
-        className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center bg-black/65 backdrop-blur-sm"
+        className="fixed inset-0 z-100 flex items-end sm:items-center justify-center bg-black/65 backdrop-blur-sm"
         initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
         onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
       >
@@ -202,6 +230,26 @@ export default function AdjustStockModal({
               </button>
             ))}
           </div>
+
+          {selectedAction && ['sold', 'to_front', 'to_back'].includes(selectedAction) &&
+            (componentMap[product.product_id]?.length ?? 0) > 0 && (
+            <div className="mb-4 rounded-xl bg-surface2 border border-white/8 px-3 py-2.5">
+              <p className="text-[10px] font-bold text-muted uppercase tracking-widest mb-1.5">
+                🔧 Components also deducted:
+              </p>
+              <ul className="flex flex-col gap-0.5">
+                {componentMap[product.product_id].map(c => {
+                  const name = allProducts.find(p => p.product_id === c.component_product_id)?.product_name
+                    ?? `#${c.component_product_id}`;
+                  return (
+                    <li key={c.component_product_id} className="text-xs text-slate-300">
+                      • {name} × {c.quantity} per unit
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          )}
 
           <p className="text-[10px] font-bold text-muted uppercase tracking-widest mb-2">
             {unit === 'box' ? `Quantity (boxes · 1 box = ${ppb} pcs)` : 'Quantity'}

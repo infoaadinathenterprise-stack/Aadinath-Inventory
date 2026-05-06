@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { supabase } from '@/lib/supabase';
 import type { Product, StockMap, Location } from '@/lib/types';
 import { SESSION_KEY } from '@/lib/types';
+import { useProductComponents } from '@/lib/hooks/useProductComponents';
 import AdminNavbar      from './components/AdminNavbar';
 import StatsBar         from './components/StatsBar';
 import ProductList      from './components/ProductList';
@@ -409,7 +410,8 @@ function Dashboard() {
   const [modal,        setModal]        = useState<ModalState | null>(null);
   const [productModal, setProductModal] = useState<{ editing: Product | null } | null>(null);
   const [toast,        setToast]        = useState<ToastState | null>(null);
-  const toastId = useRef(0);
+  const toastId      = useRef(0);
+  const componentMap = useProductComponents();
 
   const refresh = useCallback(async () => {
     try {
@@ -492,6 +494,8 @@ function Dashboard() {
             mainStockMap={mainStockMap}
             backBoxMap={backBoxMap}
             mainBoxMap={mainBoxMap}
+            componentMap={componentMap}
+            allProducts={products}
             onClose={() => setModal(null)}
             onSuccess={msg => showToast(msg, 'success')}
             onError={msg   => showToast(msg, 'error')}

@@ -69,6 +69,15 @@ export interface PurchaseItem {
   location_id:      number | null;
 }
 
+export interface ProductComponent {
+  component_id:         number;
+  product_id:           number;
+  component_product_id: number;
+  quantity:             number;
+}
+
+export type ComponentMap = Record<number, { component_product_id: number; quantity: number }[]>;
+
 export interface StockMovement {
   id:               number;
   product_id:       number;

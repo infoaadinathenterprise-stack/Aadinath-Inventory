@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useProducts } from '@/lib/hooks/useProducts';
+import { useProductComponents } from '@/lib/hooks/useProductComponents';
 import { formatStock } from '@/lib/formatStock';
 import AdjustStockModal from '@/app/admin/components/AdjustStockModal';
 import BarcodeScanner   from '@/app/admin/components/BarcodeScanner';
@@ -48,6 +49,7 @@ function PosDashboard() {
     products, backStockMap, mainStockMap, backBoxMap, mainBoxMap,
     loading, error, refresh,
   } = useProducts();
+  const componentMap = useProductComponents();
 
   const [location,     setLocation]     = useState<Location>('back');
   const [category,     setCategory]     = useState('All');
@@ -319,6 +321,8 @@ function PosDashboard() {
             mainStockMap={mainStockMap}
             backBoxMap={backBoxMap}
             mainBoxMap={mainBoxMap}
+            componentMap={componentMap}
+            allProducts={products}
             onClose={() => setModal(null)}
             onSuccess={(msg) => {
               showToast(msg, 'success');
