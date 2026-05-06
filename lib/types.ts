@@ -86,5 +86,6 @@ export interface StockMovement {
   quantity:         number;
   movement_type:    string;
   reason:           string | null;
-  created_at:       string;
+  created_at?:      string;
+  movement_date?:   string;
 }

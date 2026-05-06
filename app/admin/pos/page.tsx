@@ -20,7 +20,7 @@ export default function PosPage() {
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    if (sessionStorage.getItem(SESSION_KEY) !== '1') {
+    if (typeof window === 'undefined' || localStorage.getItem(SESSION_KEY) !== '1') {
       router.replace('/admin');
     } else {
       setReady(true);

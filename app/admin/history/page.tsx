@@ -37,7 +37,7 @@ function HistoryDashboard() {
   const router = useRouter();
 
   useEffect(() => {
-    if (sessionStorage.getItem(SESSION_KEY) !== '1') router.replace('/admin');
+    if (typeof window === 'undefined' || localStorage.getItem(SESSION_KEY) !== '1') router.replace('/admin');
   }, [router]);
 
   const load = useCallback(async () => {
@@ -62,7 +62,7 @@ function HistoryDashboard() {
   }
 
   function handleLogout() {
-    sessionStorage.removeItem(SESSION_KEY);
+    localStorage.removeItem(SESSION_KEY);
     window.location.href = '/admin';
   }
 
@@ -147,7 +147,9 @@ function HistoryDashboard() {
                           : `← ${LOC_NAME[m.from_location_id ?? 0] ?? 'Unknown'}`}
                       {m.reason ? ` · ${m.reason}` : ''}
                     </div>
-                    <div className="text-[10px] text-muted/60 mt-1">{formatDate(m.created_at)}</div>
+                    {(m.movement_date ?? m.created_at) && (
+                      <div className="text-[10px] text-muted/60 mt-1">{formatDate((m.movement_date ?? m.created_at)!)}</div>
+                    )}
                   </div>
                   <div className={`text-lg font-bold shrink-0 ${isIn ? 'text-success' : isTransfer ? 'text-blue-400' : 'text-danger'}`}>
                     {isIn ? '+' : isTransfer ? '↔' : '−'}{m.quantity}
@@ -167,7 +169,7 @@ export default function HistoryPage() {
   const [authed, setAuthed] = useState<boolean | null>(null);
   const router = useRouter();
   useEffect(() => {
-    const ok = sessionStorage.getItem(SESSION_KEY) === '1';
+    const ok = typeof window !== 'undefined' && localStorage.getItem(SESSION_KEY) === '1';
     if (!ok) router.replace('/admin');
     else setAuthed(true);
   }, [router]);

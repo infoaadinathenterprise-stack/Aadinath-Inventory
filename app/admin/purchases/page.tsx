@@ -37,9 +37,8 @@ async function callGemini(prompt: string, imageBase64?: string, mimeType?: strin
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   });
-  if (!res.ok) throw new Error('Gemini request failed');
-  const data = await res.json() as { result?: string; error?: string };
-  if (data.error) throw new Error(data.error);
+  const data = await res.json() as { result?: string; error?: string; detail?: string };
+  if (!res.ok || data.error) throw new Error(data.error ?? data.detail ?? `HTTP ${res.status}`);
   return data.result ?? '';
 }
 
@@ -95,7 +94,7 @@ function PurchasesDashboard() {
   const router  = useRouter();
 
   useEffect(() => {
-    if (sessionStorage.getItem(SESSION_KEY) !== '1') router.replace('/admin');
+    if (typeof window === 'undefined' || localStorage.getItem(SESSION_KEY) !== '1') router.replace('/admin');
   }, [router]);
 
   const load = useCallback(async () => {
@@ -131,7 +130,7 @@ function PurchasesDashboard() {
   }
 
   function handleLogout() {
-    sessionStorage.removeItem(SESSION_KEY);
+    localStorage.removeItem(SESSION_KEY);
     window.location.href = '/admin';
   }
 
@@ -615,7 +614,7 @@ export default function PurchasesPage() {
   const [authed, setAuthed] = useState<boolean | null>(null);
   const router = useRouter();
   useEffect(() => {
-    const ok = sessionStorage.getItem(SESSION_KEY) === '1';
+    const ok = typeof window !== 'undefined' && localStorage.getItem(SESSION_KEY) === '1';
     if (!ok) router.replace('/admin');
     else setAuthed(true);
   }, [router]);

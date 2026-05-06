@@ -11,7 +11,8 @@ export function useProductComponents(): ComponentMap {
     supabase
       .from('product_components')
       .select('product_id, component_product_id, quantity')
-      .then(({ data }) => {
+      .then(({ data, error }) => {
+        if (error) { console.error('product_components fetch error:', error.message); return; }
         if (!data) return;
         const m: ComponentMap = {};
         for (const row of data) {

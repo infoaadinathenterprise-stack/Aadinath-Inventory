@@ -100,7 +100,7 @@ function LoginForm({ onSuccess }: { onSuccess: () => void }) {
   function submit(e: React.FormEvent) {
     e.preventDefault();
     if (pw === PASS) {
-      sessionStorage.setItem(SESSION_KEY, '1');
+      localStorage.setItem(SESSION_KEY, '1');
       onSuccess();
     } else {
       setErr('Incorrect password');
@@ -162,6 +162,8 @@ function ProductModal({
   onSaved:  (msg: string) => void;
   onError:  (msg: string) => void;
 }) {
+  type CompEntry = { component_id: number; component_product_id: number; quantity: number; name: string };
+
   const [form,   setForm]   = useState<ProductForm>(() => {
     if (!editing) return EMPTY_FORM;
     const backQ = backStockMap[editing.product_id] ?? 0;
@@ -185,7 +187,12 @@ function ProductModal({
       stock_main:        String(mainQ),
     };
   });
-  const [saving, setSaving] = useState(false);
+  const [saving,       setSaving]       = useState(false);
+  const [compList,     setCompList]     = useState<CompEntry[]>([]);
+  const [compSearch,   setCompSearch]   = useState('');
+  const [compOpen,     setCompOpen]     = useState(false);
+  const [selectedComp, setSelectedComp] = useState<Product | null>(null);
+  const [compQty,      setCompQty]      = useState(1);
 
   const isBox = form.unit_type === 'box';
   const ppb   = parseInt(form.pieces_per_box) || 0;
@@ -201,6 +208,56 @@ function ProductModal({
       if (key === 'type' || key === 'brand') next.stock_keeping_unit = autoSKU({ ...next, [key]: value });
       return next;
     });
+  }
+
+  useEffect(() => {
+    if (!editing) return;
+    supabase
+      .from('product_components')
+      .select('component_id, component_product_id, quantity')
+      .eq('product_id', editing.product_id)
+      .then(({ data, error }) => {
+        if (error) { console.error('components fetch error:', error.message); return; }
+        setCompList((data ?? []).map(c => ({
+          component_id: c.component_id,
+          component_product_id: c.component_product_id,
+          quantity: c.quantity,
+          name: products.find(p => p.product_id === c.component_product_id)?.product_name ?? `#${c.component_product_id}`,
+        })));
+      });
+  }, [editing, products]);
+
+  async function refreshComps(productId: number) {
+    const { data } = await supabase
+      .from('product_components')
+      .select('component_id, component_product_id, quantity')
+      .eq('product_id', productId);
+    setCompList((data ?? []).map(c => ({
+      component_id: c.component_id,
+      component_product_id: c.component_product_id,
+      quantity: c.quantity,
+      name: products.find(p => p.product_id === c.component_product_id)?.product_name ?? `#${c.component_product_id}`,
+    })));
+  }
+
+  async function addComponent() {
+    if (!selectedComp || !editing) return;
+    const { error } = await supabase.from('product_components').insert({
+      product_id: editing.product_id,
+      component_product_id: selectedComp.product_id,
+      quantity: compQty,
+    });
+    if (error) { onError('Failed to add component: ' + error.message); return; }
+    await refreshComps(editing.product_id);
+    setSelectedComp(null);
+    setCompSearch('');
+    setCompQty(1);
+  }
+
+  async function deleteComponent(componentId: number) {
+    const { error } = await supabase.from('product_components').delete().eq('component_id', componentId);
+    if (error) { onError('Failed to remove component: ' + error.message); return; }
+    setCompList(prev => prev.filter(c => c.component_id !== componentId));
   }
 
   async function save() {
@@ -375,6 +432,67 @@ function ProductModal({
             </FormField>
           )}
 
+          {editing && (
+            <div className="border-t border-white/8 pt-4">
+              <p className="text-[10px] font-bold text-muted uppercase tracking-widest mb-2">🔧 Machine Components</p>
+              {compList.length > 0 && (
+                <div className="flex flex-col gap-0.5 mb-3 rounded-xl bg-surface2 border border-white/8 px-3 py-2">
+                  {compList.map(c => (
+                    <div key={c.component_id} className="flex items-center justify-between py-1">
+                      <span className="text-xs text-slate-300">{c.name} <span className="text-muted">× {c.quantity}/unit</span></span>
+                      <button onClick={() => deleteComponent(c.component_id)} className="text-danger text-xs hover:opacity-70 ml-2 shrink-0">✕</button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <div className="relative">
+                <input
+                  value={compSearch}
+                  onChange={e => { setCompSearch(e.target.value); setCompOpen(true); setSelectedComp(null); }}
+                  onFocus={() => setCompOpen(true)}
+                  onBlur={() => setTimeout(() => setCompOpen(false), 150)}
+                  placeholder="Search product to add as component..."
+                  className={inputCls}
+                />
+                {compOpen && compSearch.length > 1 && (
+                  <div className="absolute z-50 top-full left-0 right-0 bg-surface border border-white/10 rounded-xl shadow-xl max-h-40 overflow-y-auto mt-1">
+                    {products
+                      .filter(p => p.product_name.toLowerCase().includes(compSearch.toLowerCase()) && p.product_id !== editing.product_id)
+                      .slice(0, 8)
+                      .map(p => (
+                        <div
+                          key={p.product_id}
+                          onMouseDown={() => { setSelectedComp(p); setCompSearch(p.product_name); setCompOpen(false); }}
+                          className="px-3 py-2 text-xs text-slate-300 hover:bg-surface2 cursor-pointer border-b border-white/5 last:border-0"
+                        >
+                          {p.product_name}
+                        </div>
+                      ))}
+                  </div>
+                )}
+              </div>
+              {selectedComp && (
+                <div className="flex items-center gap-2 mt-2">
+                  <div className="flex items-center gap-1 shrink-0">
+                    <button onClick={() => setCompQty(q => Math.max(1, q - 1))} className="w-8 h-8 rounded-lg bg-surface2 border border-white/10 text-slate-100 font-bold text-sm flex items-center justify-center">−</button>
+                    <input
+                      type="number" min={1} value={compQty}
+                      onChange={e => setCompQty(Math.max(1, parseInt(e.target.value) || 1))}
+                      className="w-14 text-center px-1 py-1.5 rounded-lg bg-surface2 border border-white/8 text-slate-100 text-sm outline-none focus:border-teal/40"
+                    />
+                    <button onClick={() => setCompQty(q => q + 1)} className="w-8 h-8 rounded-lg bg-surface2 border border-white/10 text-slate-100 font-bold text-sm flex items-center justify-center">+</button>
+                  </div>
+                  <button
+                    onClick={addComponent}
+                    className="flex-1 py-2 rounded-xl bg-teal/15 border border-teal/30 text-teal text-xs font-bold hover:bg-teal/25 transition-colors"
+                  >
+                    + Add Component
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
           <div className="flex gap-3 mt-2">
             <button onClick={onClose} className="flex-1 py-2.5 rounded-xl bg-surface2 border border-white/8 text-muted text-sm font-semibold hover:text-slate-100 transition-colors">Cancel</button>
             <button onClick={save} disabled={saving} className="flex-1 py-2.5 rounded-xl bg-teal/15 border border-teal/30 text-teal text-sm font-bold hover:bg-teal/25 transition-colors disabled:opacity-50">
@@ -439,7 +557,7 @@ function Dashboard() {
   }
 
   function handleLogout() {
-    sessionStorage.removeItem(SESSION_KEY);
+    localStorage.removeItem(SESSION_KEY);
     window.location.reload();
   }
 
@@ -530,7 +648,7 @@ export default function AdminPage() {
   const [authed, setAuthed] = useState<boolean | null>(null);
 
   useEffect(() => {
-    setAuthed(sessionStorage.getItem(SESSION_KEY) === '1');
+    setAuthed(typeof window !== 'undefined' && localStorage.getItem(SESSION_KEY) === '1');
   }, []);
 
   if (authed === null) return <div className="min-h-screen bg-navy" />;

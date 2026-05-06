@@ -31,7 +31,7 @@ function SuppliersDashboard() {
   const router = useRouter();
 
   useEffect(() => {
-    if (sessionStorage.getItem(SESSION_KEY) !== '1') router.replace('/admin');
+    if (typeof window === 'undefined' || localStorage.getItem(SESSION_KEY) !== '1') router.replace('/admin');
   }, [router]);
 
   const load = useCallback(async () => {
@@ -96,7 +96,7 @@ function SuppliersDashboard() {
   }
 
   function handleLogout() {
-    sessionStorage.removeItem(SESSION_KEY);
+    localStorage.removeItem(SESSION_KEY);
     window.location.href = '/admin';
   }
 
@@ -239,7 +239,7 @@ export default function SuppliersPage() {
   const [authed, setAuthed] = useState<boolean | null>(null);
   const router = useRouter();
   useEffect(() => {
-    const ok = sessionStorage.getItem(SESSION_KEY) === '1';
+    const ok = typeof window !== 'undefined' && localStorage.getItem(SESSION_KEY) === '1';
     if (!ok) router.replace('/admin');
     else setAuthed(true);
   }, [router]);
