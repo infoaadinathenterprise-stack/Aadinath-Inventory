@@ -12,7 +12,7 @@ import Toast, { type ToastState } from '../components/Toast';
 const GEMINI_URL  = '/api/gemini';
 
 function fmtDate(iso: string) {
-  return new Date(iso).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+  return new Date(iso).toLocaleDateString('en-KE', { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
 interface ScannedItem {
@@ -185,7 +185,7 @@ function PurchasesDashboard() {
               >
                 <div className="flex items-center justify-between">
                   <div className="font-semibold text-sm text-slate-100">{supplierName(p.supplier_id)}</div>
-                  <div className="text-sm font-bold text-teal">{p.total_amount ? `₹${Number(p.total_amount).toLocaleString('en-IN')}` : '—'}</div>
+                  <div className="text-sm font-bold text-teal">{p.total_amount ? `Ksh ${Number(p.total_amount).toLocaleString('en-KE')}` : '—'}</div>
                 </div>
                 <div className="flex items-center justify-between mt-1">
                   <div className="text-xs text-muted">{p.purchase_date ? fmtDate(p.purchase_date) : '—'}{p.notes ? ' · ' + p.notes : ''}</div>
@@ -231,15 +231,15 @@ function PurchasesDashboard() {
                 <div key={item.id} className="flex justify-between py-2.5 border-b border-white/5 text-sm">
                   <div>
                     <div className="font-semibold text-slate-100">{productName(item.product_id, item.product_name_raw)}</div>
-                    <div className="text-xs text-muted">Qty: {item.quantity}{item.unit_price ? ` · ₹${item.unit_price}/unit` : ''}</div>
+                    <div className="text-xs text-muted">Qty: {item.quantity}{item.unit_price ? ` · Ksh ${item.unit_price}/unit` : ''}</div>
                   </div>
-                  {item.total_price && <div className="font-bold text-teal">₹{Number(item.total_price).toLocaleString('en-IN')}</div>}
+                  {item.total_price && <div className="font-bold text-teal">Ksh {Number(item.total_price).toLocaleString('en-KE')}</div>}
                 </div>
               ))}
               {detailData.purchase.total_amount && (
                 <div className="flex justify-between pt-3 font-bold text-base">
                   <span className="text-slate-100">Total</span>
-                  <span className="text-teal">₹{Number(detailData.purchase.total_amount).toLocaleString('en-IN')}</span>
+                  <span className="text-teal">Ksh {Number(detailData.purchase.total_amount).toLocaleString('en-KE')}</span>
                 </div>
               )}
               {detailData.purchase.bill_image_url && (
@@ -512,7 +512,7 @@ Rules:
             ))}
 
             <div>
-              <label className="text-[10px] font-bold text-muted uppercase tracking-widest block mb-1">Total Amount (₹)</label>
+              <label className="text-[10px] font-bold text-muted uppercase tracking-widest block mb-1">Total Amount (Ksh)</label>
               <input type="number" value={total} onChange={e => setTotal(e.target.value)} placeholder="0.00"
                 className="w-full px-3 py-2.5 rounded-xl bg-surface2 border border-white/8 text-slate-100 text-sm outline-none focus:border-teal/40" />
             </div>
@@ -588,7 +588,7 @@ function ScannedItemRow({
         {(['qty', 'unitPrice', 'totalPrice'] as const).map(field => (
           <div key={field}>
             <label className="text-[9px] font-bold text-muted uppercase block mb-0.5">
-              {field === 'qty' ? 'Qty' : field === 'unitPrice' ? 'Unit ₹' : 'Total ₹'}
+              {field === 'qty' ? 'Qty' : field === 'unitPrice' ? 'Unit Ksh' : 'Total Ksh'}
             </label>
             <input
               type="number"

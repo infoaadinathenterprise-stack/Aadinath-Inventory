@@ -399,12 +399,12 @@ function PricingDeck({ queue, backStockMap, mainStockMap, saveHistory, onSave, o
             <div className="flex gap-2 mb-4 flex-wrap">
               {p.selling_price != null && (
                 <span className="text-[11px] bg-surface2 border border-white/8 rounded px-2.5 py-1 text-muted">
-                  Sell: <b className="text-slate-300">₹{p.selling_price}</b>
+                  Sell: <b className="text-slate-300">Ksh {p.selling_price}</b>
                 </span>
               )}
               {p.buying_price != null && (
                 <span className="text-[11px] bg-surface2 border border-white/8 rounded px-2.5 py-1 text-muted">
-                  Buy: <b className="text-slate-300">₹{p.buying_price}</b>
+                  Buy: <b className="text-slate-300">Ksh {p.buying_price}</b>
                 </span>
               )}
             </div>
@@ -412,12 +412,12 @@ function PricingDeck({ queue, backStockMap, mainStockMap, saveHistory, onSave, o
 
           <div className="grid grid-cols-2 gap-3" onClick={e => e.stopPropagation()}>
             <PriceField
-              label={isBox ? 'Selling ₹/pc' : 'Selling Price ₹'}
+              label={isBox ? 'Selling Ksh/pc' : 'Selling Price Ksh'}
               defaultValue={p.selling_price ?? undefined}
               ref={sellRef}
             />
             <PriceField
-              label={isBox ? 'Buying ₹/pc' : 'Buying Price ₹'}
+              label={isBox ? 'Buying Ksh/pc' : 'Buying Price Ksh'}
               defaultValue={p.buying_price ?? undefined}
               ref={buyRef}
             />
@@ -655,7 +655,7 @@ function SearchOverlay({
             let badgeCls = '';
             if (qSet.has(p.product_id))      { badge = 'In Queue'; badgeCls = 'bg-teal/10 border-teal/20 text-teal'; }
             else if (sSet.has(p.product_id)) { badge = 'Skipped';  badgeCls = 'bg-gold/10 border-gold/20 text-gold'; }
-            else if (p.selling_price != null){ badge = `₹${p.selling_price}`; badgeCls = 'bg-success/10 border-success/20 text-success'; }
+            else if (p.selling_price != null){ badge = `Ksh ${p.selling_price}`; badgeCls = 'bg-success/10 border-success/20 text-success'; }
             else                             { badge = 'No price'; badgeCls = 'bg-danger/10 border-danger/20 text-danger'; }
 
             return (

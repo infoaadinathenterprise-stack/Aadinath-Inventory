@@ -23,7 +23,7 @@ const TYPE_META: Record<string, { label: string; emoji: string; color: string }>
 const LOC_NAME: Record<number, string> = { 1: 'Main Store', 2: 'Back Godown' };
 
 function formatDate(iso: string) {
-  return new Date(iso).toLocaleString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+  return new Date(iso).toLocaleString('en-KE', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
 
 function HistoryDashboard() {
@@ -43,7 +43,7 @@ function HistoryDashboard() {
   const load = useCallback(async () => {
     setLoading(true);
     const [{ data: mv, error: mvErr }, { data: pr, error: prErr }] = await Promise.all([
-      supabase.from('stock_movements').select('*').order('created_at', { ascending: false }).limit(200),
+      supabase.from('stock_movements').select('*').order('id', { ascending: false }).limit(200),
       supabase.from('products').select('product_id, product_name').eq('active_status', true),
     ]);
     if (mvErr || prErr) {

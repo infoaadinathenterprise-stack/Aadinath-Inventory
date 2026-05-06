@@ -324,7 +324,7 @@ function ProductModal({
               <FormField label="Pieces per Box">
                 <input type="number" value={form.pieces_per_box} onChange={e => set('pieces_per_box', e.target.value)} placeholder="e.g. 12" min="1" className={inputCls} />
               </FormField>
-              <FormField label="Box Selling Price (₹)">
+              <FormField label="Box Selling Price (Ksh)">
                 <input type="number" value={form.box_selling_price} onChange={e => set('box_selling_price', e.target.value)} placeholder="e.g. 480" min="0" className={inputCls} />
               </FormField>
             </div>

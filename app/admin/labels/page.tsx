@@ -426,7 +426,7 @@ function BarcodeLabel({ product }: { product: Product }) {
       )}
       <div className="label-name">{product.product_name}</div>
       {product.selling_price != null && (
-        <div className="label-price">₹{product.selling_price}</div>
+        <div className="label-price">Ksh {product.selling_price}</div>
       )}
     </div>
   );
