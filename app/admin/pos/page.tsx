@@ -62,9 +62,24 @@ function PosDashboard() {
   const toastId    = useRef(0);
   const barcodeRef = useRef<HTMLInputElement>(null);
 
-  // Auto-focus barcode input on page load
+  // Auto-focus barcode input on page load (delayed to survive loading state transition)
   useEffect(() => {
-    barcodeRef.current?.focus();
+    const t = setTimeout(() => barcodeRef.current?.focus(), 300);
+    return () => clearTimeout(t);
+  }, []);
+
+  // Global keydown redirect — USB scanner types then sends Enter; if focus
+  // has drifted to a non-input element, snap it back to the barcode field
+  useEffect(() => {
+    function handleGlobalKey(e: KeyboardEvent) {
+      const active = document.activeElement;
+      const isInput = active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement;
+      if (!isInput && barcodeRef.current) {
+        barcodeRef.current.focus();
+      }
+    }
+    window.addEventListener('keydown', handleGlobalKey);
+    return () => window.removeEventListener('keydown', handleGlobalKey);
   }, []);
 
   function showToast(msg: string, type: ToastState['type']) {
@@ -164,6 +179,7 @@ function PosDashboard() {
       setCart([]);
       setCartOpen(false);
       refresh();
+      setTimeout(() => barcodeRef.current?.focus(), 100);
     } catch (e) {
       showToast(e instanceof Error ? e.message : 'Error processing cart', 'error');
     } finally {
@@ -239,7 +255,7 @@ function PosDashboard() {
             autoComplete="off"
             autoCorrect="off"
             spellCheck={false}
-            className="w-full pl-8 pr-3 py-2 rounded-xl bg-surface2 border border-teal/50 text-sm text-slate-100 placeholder:text-muted/50 font-mono outline-none focus:border-teal transition-colors"
+            className="w-full pl-8 pr-3 py-2 rounded-xl bg-surface2 border border-teal text-sm text-slate-100 placeholder:text-muted/50 font-mono outline-none shadow-[0_0_0_2px_rgba(0,212,255,0.15)] transition-colors"
           />
         </div>
 
@@ -338,7 +354,7 @@ function PosDashboard() {
             <motion.div
               className="fixed inset-0 z-80 bg-black/60"
               initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              onClick={() => setCartOpen(false)}
+              onClick={() => { setCartOpen(false); setTimeout(() => barcodeRef.current?.focus(), 100); }}
             />
             <motion.div
               className="fixed right-0 top-0 bottom-0 w-72 z-90 bg-surface border-l border-white/8 flex flex-col shadow-2xl"
@@ -355,7 +371,7 @@ function PosDashboard() {
                     >Clear</button>
                   )}
                   <button
-                    onClick={() => setCartOpen(false)}
+                    onClick={() => { setCartOpen(false); setTimeout(() => barcodeRef.current?.focus(), 100); }}
                     className="w-6 h-6 flex items-center justify-center text-muted hover:text-slate-100 text-lg"
                   >×</button>
                 </div>
@@ -461,7 +477,7 @@ function PosDashboard() {
             mainBoxMap={mainBoxMap}
             componentMap={componentMap}
             allProducts={products}
-            onClose={() => setModal(null)}
+            onClose={() => { setModal(null); setTimeout(() => barcodeRef.current?.focus(), 100); }}
             onSuccess={(msg) => showToast(msg, 'success')}
             onError={(msg) => showToast(msg, 'error')}
             onDone={refresh}
