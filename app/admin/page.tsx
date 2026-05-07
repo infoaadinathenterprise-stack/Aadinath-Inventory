@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
+import Link from 'next/link';
 import { motion, AnimatePresence } from 'framer-motion';
 import { supabase } from '@/lib/supabase';
 import type { Product, StockMap, Location } from '@/lib/types';
@@ -582,12 +583,20 @@ function Dashboard() {
             <h2 className="text-base font-bold text-slate-100">Inventory</h2>
             <p className="text-xs text-muted mt-0.5">{products.length} active products</p>
           </div>
-          <button
-            onClick={() => setProductModal({ editing: null })}
-            className="px-4 py-2 rounded-xl bg-teal/10 border border-teal/30 text-teal text-xs font-bold hover:bg-teal/20 transition-all"
-          >
-            + Add Product
-          </button>
+          <div className="flex gap-2">
+            <Link
+              href="/admin/history"
+              className="px-4 py-2 rounded-xl bg-surface2 border border-white/10 text-slate-100 text-xs font-bold hover:border-teal/30 hover:text-teal transition-all"
+            >
+              📋 History
+            </Link>
+            <button
+              onClick={() => setProductModal({ editing: null })}
+              className="px-4 py-2 rounded-xl bg-teal/10 border border-teal/30 text-teal text-xs font-bold hover:bg-teal/20 transition-all"
+            >
+              + Add Product
+            </button>
+          </div>
         </div>
 
         <ProductList
