@@ -7,6 +7,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useProducts } from '@/lib/hooks/useProducts';
 import { useProductComponents } from '@/lib/hooks/useProductComponents';
 import { formatStock } from '@/lib/formatStock';
+import { upsertStock, logMovement } from '@/lib/stockActions';
 import AdjustStockModal from '@/app/admin/components/AdjustStockModal';
 import BarcodeScanner   from '@/app/admin/components/BarcodeScanner';
 import Toast, { type ToastState } from '@/app/admin/components/Toast';
@@ -31,11 +32,9 @@ export default function PosPage() {
   return <PosDashboard />;
 }
 
-interface CartEntry {
-  product:   Product;
-  direction: 'plus' | 'minus';
-  qty:       number;
-  action:    string;
+interface CartItem {
+  product: Product;
+  qty:     number;
 }
 
 interface ModalState {
@@ -51,16 +50,22 @@ function PosDashboard() {
   } = useProducts();
   const componentMap = useProductComponents();
 
-  const [location,     setLocation]     = useState<Location>('back');
-  const [category,     setCategory]     = useState('All');
-  const [search,       setSearch]       = useState('');
-  const [modal,        setModal]        = useState<ModalState | null>(null);
-  const [scannerOpen,  setScannerOpen]  = useState(false);
-  const [cart,         setCart]         = useState<CartEntry[]>([]);
-  const [cartOpen,     setCartOpen]     = useState(false);
-  const [toast,        setToast]        = useState<ToastState | null>(null);
+  const [location,    setLocation]    = useState<Location>('back');
+  const [category,    setCategory]    = useState('All');
+  const [search,      setSearch]      = useState('');
+  const [modal,       setModal]       = useState<ModalState | null>(null);
+  const [scannerOpen, setScannerOpen] = useState(false);
+  const [cart,        setCart]        = useState<CartItem[]>([]);
+  const [cartOpen,    setCartOpen]    = useState(false);
+  const [processing,  setProcessing]  = useState(false);
+  const [toast,       setToast]       = useState<ToastState | null>(null);
   const toastId    = useRef(0);
   const barcodeRef = useRef<HTMLInputElement>(null);
+
+  // Auto-focus barcode input on page load
+  useEffect(() => {
+    barcodeRef.current?.focus();
+  }, []);
 
   function showToast(msg: string, type: ToastState['type']) {
     setToast({ msg, type, id: ++toastId.current });
@@ -92,6 +97,21 @@ function PosDashboard() {
     });
   }, [inStock, category, search]);
 
+  function addToCart(product: Product) {
+    setCart(prev => {
+      const existing = prev.find(c => c.product.product_id === product.product_id);
+      if (existing) {
+        return prev.map(c =>
+          c.product.product_id === product.product_id ? { ...c, qty: c.qty + 1 } : c
+        );
+      }
+      return [...prev, { product, qty: 1 }];
+    });
+    barcodeRef.current?.focus();
+    showToast(`Added: ${product.product_name}`, 'success');
+    setCartOpen(true);
+  }
+
   function handleBarcodeKey(e: React.KeyboardEvent<HTMLInputElement>) {
     if (e.key !== 'Enter') return;
     const code = e.currentTarget.value.trim();
@@ -103,22 +123,79 @@ function PosDashboard() {
     if (!match) { showToast('No product found: ' + code, 'error'); return; }
     const hasStock = (sm[match.product_id] || 0) > 0 || (bm[match.product_id] || 0) > 0;
     if (!hasStock) { showToast(`Not in ${location === 'back' ? 'Back Godown' : 'Main Store'}: ${match.product_name}`, 'error'); return; }
-    setModal({ product: match, direction: 'minus', location });
+    addToCart(match);
   }
 
   function handleScan(code: string) {
-    setScannerOpen(false);
     const match =
       products.find(p => (p.stock_keeping_unit ?? '').toLowerCase() === code.toLowerCase()) ??
       products.find(p => p.product_name.toLowerCase().includes(code.toLowerCase()));
     if (!match) { showToast('No product found: ' + code, 'error'); return; }
     const hasStock = (sm[match.product_id] || 0) > 0 || (bm[match.product_id] || 0) > 0;
     if (!hasStock) { showToast(`Not in ${location === 'back' ? 'Back Godown' : 'Main Store'}: ${match.product_name}`, 'error'); return; }
-    setModal({ product: match, direction: 'minus', location });
+    addToCart(match);
   }
 
   function openModal(product: Product, direction: 'plus' | 'minus') {
     setModal({ product, direction, location });
+  }
+
+  async function processCart(action: 'sold' | 'to_main') {
+    if (cart.length === 0) return;
+    setProcessing(true);
+    const locId  = location === 'back' ? 2 : 1;
+    const mainId = 1;
+    try {
+      for (const item of cart) {
+        const pid    = item.product.product_id;
+        const curQty = (location === 'back' ? backStockMap : mainStockMap)[pid] || 0;
+        const deduct = Math.min(item.qty, curQty);
+        if (action === 'sold') {
+          await upsertStock(pid, locId, 'quantity', Math.max(0, curQty - deduct));
+          await logMovement(pid, locId, null, deduct, 'SALE', `Sold from ${location === 'back' ? 'Back Godown' : 'Main Store'}`);
+        } else {
+          await upsertStock(pid, locId, 'quantity', Math.max(0, curQty - deduct));
+          const mainQty = mainStockMap[pid] || 0;
+          await upsertStock(pid, mainId, 'quantity', mainQty + deduct);
+          await logMovement(pid, locId, mainId, deduct, 'TRANSFER', 'Moved from Back Godown to Main Store');
+        }
+      }
+      showToast(`${action === 'sold' ? 'Sold' : 'Moved'} ${cart.length} item(s) ✓`, 'success');
+      setCart([]);
+      setCartOpen(false);
+      refresh();
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : 'Error processing cart', 'error');
+    } finally {
+      setProcessing(false);
+    }
+  }
+
+  async function processItem(item: CartItem, action: 'sold' | 'to_main') {
+    setProcessing(true);
+    const locId  = location === 'back' ? 2 : 1;
+    const mainId = 1;
+    try {
+      const pid    = item.product.product_id;
+      const curQty = (location === 'back' ? backStockMap : mainStockMap)[pid] || 0;
+      const deduct = Math.min(item.qty, curQty);
+      if (action === 'sold') {
+        await upsertStock(pid, locId, 'quantity', Math.max(0, curQty - deduct));
+        await logMovement(pid, locId, null, deduct, 'SALE', `Sold from ${location === 'back' ? 'Back Godown' : 'Main Store'}`);
+      } else {
+        await upsertStock(pid, locId, 'quantity', Math.max(0, curQty - deduct));
+        const mainQty = mainStockMap[pid] || 0;
+        await upsertStock(pid, mainId, 'quantity', mainQty + deduct);
+        await logMovement(pid, locId, mainId, deduct, 'TRANSFER', 'Moved from Back Godown to Main Store');
+      }
+      setCart(c => c.filter(i => i.product.product_id !== item.product.product_id));
+      showToast(`${action === 'sold' ? 'Sold' : 'Moved'}: ${item.product.product_name} ✓`, 'success');
+      refresh();
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : 'Error', 'error');
+    } finally {
+      setProcessing(false);
+    }
   }
 
   if (loading) {
@@ -254,6 +331,7 @@ function PosDashboard() {
         </AnimatePresence>
       </main>
 
+      {/* ── Cart panel ──────────────────────────────────────────────────────── */}
       <AnimatePresence>
         {cartOpen && (
           <>
@@ -268,7 +346,7 @@ function PosDashboard() {
               transition={{ type: 'spring', damping: 25, stiffness: 200 }}
             >
               <div className="flex items-center justify-between px-4 h-14 border-b border-white/8 shrink-0">
-                <h3 className="text-sm font-bold text-slate-100">🛒 Session Log</h3>
+                <h3 className="text-sm font-bold text-slate-100">🛒 Cart ({cart.length})</h3>
                 <div className="flex items-center gap-2">
                   {cart.length > 0 && (
                     <button
@@ -282,20 +360,79 @@ function PosDashboard() {
                   >×</button>
                 </div>
               </div>
+
               <div className="flex-1 overflow-y-auto p-3 flex flex-col gap-2">
                 {cart.length === 0 && (
-                  <p className="text-center text-muted text-xs py-8">No adjustments yet</p>
+                  <p className="text-center text-muted text-xs py-8">Scan items to add to cart</p>
                 )}
-                {cart.map((entry, i) => (
-                  <div key={i} className="bg-surface2 rounded-xl px-3 py-2.5 border border-white/5">
-                    <p className="text-xs font-semibold text-slate-100 truncate">{entry.product.product_name}</p>
-                    <p className="text-[10px] text-muted mt-0.5">{entry.action}</p>
-                    <p className={`text-sm font-bold mt-1 tabular-nums ${entry.direction === 'minus' ? 'text-danger' : 'text-teal'}`}>
-                      {entry.direction === 'minus' ? '−' : '+'}{entry.qty}
-                    </p>
+                {cart.map(item => (
+                  <div key={item.product.product_id} className="bg-surface2 rounded-xl px-3 py-2.5 border border-white/5">
+                    <div className="flex items-start justify-between mb-2">
+                      <p className="text-xs font-semibold text-slate-100 truncate flex-1 mr-2">{item.product.product_name}</p>
+                      <button
+                        onClick={() => setCart(c => c.filter(i => i.product.product_id !== item.product.product_id))}
+                        className="text-muted hover:text-danger text-sm shrink-0 transition-colors"
+                      >×</button>
+                    </div>
+                    <div className="flex items-center gap-2 mb-2">
+                      <button
+                        onClick={() => setCart(c => c.map(i =>
+                          i.product.product_id === item.product.product_id
+                            ? { ...i, qty: Math.max(1, i.qty - 1) }
+                            : i
+                        ))}
+                        className="w-6 h-6 rounded bg-surface border border-white/10 text-slate-300 text-sm flex items-center justify-center hover:bg-danger/20 hover:text-danger transition-all"
+                      >−</button>
+                      <span className="text-sm font-bold text-slate-100 w-6 text-center tabular-nums">{item.qty}</span>
+                      <button
+                        onClick={() => setCart(c => c.map(i =>
+                          i.product.product_id === item.product.product_id
+                            ? { ...i, qty: i.qty + 1 }
+                            : i
+                        ))}
+                        className="w-6 h-6 rounded bg-surface border border-white/10 text-slate-300 text-sm flex items-center justify-center hover:bg-teal/20 hover:text-teal transition-all"
+                      >+</button>
+                    </div>
+                    <div className="flex gap-1.5">
+                      <button
+                        onClick={() => processItem(item, 'sold')}
+                        disabled={processing}
+                        className="flex-1 py-1 rounded-lg bg-danger/10 border border-danger/20 text-danger text-[10px] font-bold hover:bg-danger/20 disabled:opacity-50 transition-all"
+                      >Sold</button>
+                      {location === 'back' && (
+                        <button
+                          onClick={() => processItem(item, 'to_main')}
+                          disabled={processing}
+                          className="flex-1 py-1 rounded-lg bg-teal/10 border border-teal/20 text-teal text-[10px] font-bold hover:bg-teal/20 disabled:opacity-50 transition-all"
+                        >→ Main</button>
+                      )}
+                    </div>
                   </div>
                 ))}
               </div>
+
+              {cart.length > 0 && (
+                <div className="p-3 border-t border-white/8 flex flex-col gap-2 shrink-0">
+                  <button
+                    onClick={() => processCart('sold')}
+                    disabled={processing}
+                    className="w-full py-2.5 rounded-xl bg-danger/15 border border-danger/30 text-danger text-sm font-bold disabled:opacity-50 flex items-center justify-center gap-2 hover:bg-danger/25 transition-all"
+                  >
+                    {processing && <div className="w-3.5 h-3.5 rounded-full border-2 border-danger border-t-transparent animate-spin" />}
+                    ✅ Confirm All Sold
+                  </button>
+                  {location === 'back' && (
+                    <button
+                      onClick={() => processCart('to_main')}
+                      disabled={processing}
+                      className="w-full py-2.5 rounded-xl bg-teal/15 border border-teal/30 text-teal text-sm font-bold disabled:opacity-50 flex items-center justify-center gap-2 hover:bg-teal/25 transition-all"
+                    >
+                      {processing && <div className="w-3.5 h-3.5 rounded-full border-2 border-teal border-t-transparent animate-spin" />}
+                      📦 Move All to Main Store
+                    </button>
+                  )}
+                </div>
+              )}
             </motion.div>
           </>
         )}
@@ -306,6 +443,7 @@ function PosDashboard() {
           <BarcodeScanner
             onScan={handleScan}
             onClose={() => setScannerOpen(false)}
+            keepOpen
           />
         )}
       </AnimatePresence>
@@ -324,15 +462,7 @@ function PosDashboard() {
             componentMap={componentMap}
             allProducts={products}
             onClose={() => setModal(null)}
-            onSuccess={(msg) => {
-              showToast(msg, 'success');
-              setCart(c => [...c, {
-                product:   modal.product,
-                direction: modal.direction,
-                qty:       1,
-                action:    msg,
-              }]);
-            }}
+            onSuccess={(msg) => showToast(msg, 'success')}
             onError={(msg) => showToast(msg, 'error')}
             onDone={refresh}
           />

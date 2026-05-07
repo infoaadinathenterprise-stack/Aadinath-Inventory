@@ -4,13 +4,15 @@ import { useEffect, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 
 interface Props {
-  onScan:  (code: string) => void;
-  onClose: () => void;
+  onScan:    (code: string) => void;
+  onClose:   () => void;
+  keepOpen?: boolean;
 }
 
-export default function BarcodeScanner({ onScan, onClose }: Props) {
-  const videoRef    = useRef<HTMLVideoElement>(null);
-  const [err, setErr]           = useState<string | null>(null);
+export default function BarcodeScanner({ onScan, onClose, keepOpen = false }: Props) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const firedRef = useRef(false);
+  const [err, setErr]               = useState<string | null>(null);
   const [showManual, setShowManual] = useState(false);
   const [manualCode, setManualCode] = useState('');
 
@@ -18,12 +20,12 @@ export default function BarcodeScanner({ onScan, onClose }: Props) {
     let stopped = false;
     let controls: { stop: () => void } | null = null;
     let fallbackTimer: ReturnType<typeof setTimeout> | null = null;
+    firedRef.current = false;
 
     async function start() {
       try {
         const { BrowserMultiFormatReader } = await import('@zxing/browser');
         const reader = new BrowserMultiFormatReader();
-        let fired = false;
 
         const devices = await BrowserMultiFormatReader.listVideoInputDevices();
         const backCamera = devices.find(d =>
@@ -36,16 +38,23 @@ export default function BarcodeScanner({ onScan, onClose }: Props) {
           backCamera?.deviceId ?? undefined,
           videoRef.current!,
           (result, _err) => {
-            if (!result || fired || stopped) return;
-            fired = true;
-            controls?.stop();
-            onScan(result.getText());
+            if (!result || stopped) return;
+            if (keepOpen) {
+              if (firedRef.current) return;
+              firedRef.current = true;
+              onScan(result.getText());
+              setTimeout(() => { if (!stopped) firedRef.current = false; }, 1500);
+            } else {
+              if (firedRef.current) return;
+              firedRef.current = true;
+              controls?.stop();
+              onScan(result.getText());
+            }
           },
         );
 
-        // Show manual entry fallback after 8 s with no scan
         fallbackTimer = setTimeout(() => {
-          if (!fired && !stopped) setShowManual(true);
+          if (!firedRef.current && !stopped) setShowManual(true);
         }, 8000);
       } catch (e) {
         if (!stopped) setErr(e instanceof Error ? e.message : 'Camera unavailable');
@@ -64,11 +73,14 @@ export default function BarcodeScanner({ onScan, onClose }: Props) {
         v.srcObject = null;
       }
     };
-  }, [onScan]);
+  }, [onScan, keepOpen]);
 
   function submitManual() {
     const code = manualCode.trim();
-    if (code) onScan(code);
+    if (!code) return;
+    onScan(code);
+    setManualCode('');
+    if (!keepOpen) onClose();
   }
 
   return (
@@ -90,7 +102,9 @@ export default function BarcodeScanner({ onScan, onClose }: Props) {
         />
       )}
       <p className="text-slate-400 text-sm text-center px-6">
-        Point camera at barcode — detected automatically
+        {keepOpen
+          ? 'Point camera at barcode — keep scanning'
+          : 'Point camera at barcode — detected automatically'}
       </p>
       {showManual && (
         <div className="flex flex-col items-center gap-2 w-full px-8 max-w-sm">
@@ -115,9 +129,12 @@ export default function BarcodeScanner({ onScan, onClose }: Props) {
       )}
       <button
         onClick={onClose}
-        className="px-8 py-2.5 rounded-xl bg-surface2 border border-white/10 text-slate-100 text-sm font-bold hover:border-danger/40 hover:text-danger transition-all"
+        className={keepOpen
+          ? 'px-8 py-2.5 rounded-xl bg-teal/20 border border-teal/30 text-teal text-sm font-bold hover:bg-teal/30 transition-all'
+          : 'px-8 py-2.5 rounded-xl bg-surface2 border border-white/10 text-slate-100 text-sm font-bold hover:border-danger/40 hover:text-danger transition-all'
+        }
       >
-        Close
+        {keepOpen ? '✓ Done Scanning' : 'Close'}
       </button>
     </motion.div>
   );
