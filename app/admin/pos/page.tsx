@@ -214,6 +214,12 @@ function PosDashboard() {
     }
   }
 
+  const [showVersionFlash, setShowVersionFlash] = useState(true);
+  useEffect(() => {
+    const t = setTimeout(() => setShowVersionFlash(false), 2500);
+    return () => clearTimeout(t);
+  }, []);
+
   if (loading) {
     return (
       <div className="min-h-screen bg-navy flex items-center justify-center">
@@ -237,6 +243,11 @@ function PosDashboard() {
 
   return (
     <div className="h-screen bg-navy flex flex-col overflow-hidden">
+      {showVersionFlash && (
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-999 bg-teal text-navy text-xs font-black px-4 py-2 rounded-full shadow-lg animate-bounce">
+          ✓ POS v2 — Barcode Cart Mode Active
+        </div>
+      )}
       <header className="shrink-0 bg-surface border-b border-white/8 px-3 flex items-center gap-2 h-14">
         <Link href="/admin" className="text-muted hover:text-slate-100 text-sm px-3 py-1.5 rounded-lg bg-surface2 border border-white/8 transition-colors shrink-0">
           ← Back
