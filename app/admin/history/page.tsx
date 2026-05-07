@@ -12,12 +12,14 @@ import Toast, { type ToastState } from '../components/Toast';
 const MOVEMENT_TYPES = ['ALL', 'TRANSFER', 'ADJUSTMENT_IN', 'ADJUSTMENT_OUT', 'PURCHASE_IN', 'DAMAGED', 'SALE'];
 
 const TYPE_META: Record<string, { label: string; emoji: string; color: string }> = {
-  TRANSFER:       { label: 'Transfer',    emoji: '↔️',  color: 'text-blue-400 bg-blue-400/10 border-blue-400/20' },
-  ADJUSTMENT_IN:  { label: 'Stock In',    emoji: '➕',  color: 'text-success bg-success/10 border-success/20' },
-  ADJUSTMENT_OUT: { label: 'Stock Out',   emoji: '➖',  color: 'text-danger bg-danger/10 border-danger/20' },
-  PURCHASE_IN:    { label: 'Purchase',    emoji: '🧾',  color: 'text-teal bg-teal/10 border-teal/20' },
-  DAMAGED:        { label: 'Damaged',     emoji: '⚠️',  color: 'text-yellow-400 bg-yellow-400/10 border-yellow-400/20' },
-  SALE:           { label: 'Sale',        emoji: '🛒',  color: 'text-gold bg-gold/10 border-gold/20' },
+  TRANSFER:         { label: 'Transfer',    emoji: '↔️',  color: 'text-blue-400 bg-blue-400/10 border-blue-400/20' },
+  TRANSFER_TO_MAIN: { label: 'Transfer',    emoji: '↔️',  color: 'text-blue-400 bg-blue-400/10 border-blue-400/20' },
+  TRANSFER_TO_BACK: { label: 'Transfer',    emoji: '↔️',  color: 'text-blue-400 bg-blue-400/10 border-blue-400/20' },
+  ADJUSTMENT_IN:    { label: 'Stock In',    emoji: '➕',  color: 'text-success bg-success/10 border-success/20' },
+  ADJUSTMENT_OUT:   { label: 'Stock Out',   emoji: '➖',  color: 'text-danger bg-danger/10 border-danger/20' },
+  PURCHASE_IN:      { label: 'Purchase',    emoji: '🧾',  color: 'text-teal bg-teal/10 border-teal/20' },
+  DAMAGED:          { label: 'Damaged',     emoji: '⚠️',  color: 'text-yellow-400 bg-yellow-400/10 border-yellow-400/20' },
+  SALE:             { label: 'Sale',        emoji: '🛒',  color: 'text-gold bg-gold/10 border-gold/20' },
 };
 
 const LOC_NAME: Record<number, string> = { 1: 'Main Store', 2: 'Back Godown' };
@@ -30,6 +32,7 @@ function HistoryDashboard() {
   const [movements, setMovements] = useState<StockMovement[]>([]);
   const [products,  setProducts]  = useState<Product[]>([]);
   const [loading,   setLoading]   = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [typeFilter, setTypeFilter] = useState('ALL');
   const [search,    setSearch]    = useState('');
   const [toast,     setToast]     = useState<ToastState | null>(null);
@@ -42,15 +45,42 @@ function HistoryDashboard() {
 
   const load = useCallback(async () => {
     setLoading(true);
-    const [{ data: mv, error: mvErr }, { data: pr, error: prErr }] = await Promise.all([
+    setLoadError(null);
+    const [movRes, reqRes, prodRes] = await Promise.all([
       supabase.from('stock_movements').select('*').order('id', { ascending: false }).limit(200),
+      supabase.from('stock_requests').select('*').order('request_id', { ascending: false }).limit(200),
       supabase.from('products').select('product_id, product_name').eq('active_status', true),
     ]);
-    if (mvErr || prErr) {
-      setToast({ msg: 'Failed to load history: ' + (mvErr ?? prErr)!.message, type: 'error', id: ++toastId.current });
-    } else {
-      setMovements((mv ?? []) as StockMovement[]);
-      setProducts((pr ?? []) as Product[]);
+
+    const fromMovements: StockMovement[] = (movRes.data ?? []) as StockMovement[];
+    const fromRequests: StockMovement[] = (reqRes.data ?? []).map(r => ({
+      id:               r.request_id as number,
+      product_id:       r.product_id as number,
+      from_location_id: (r.from_location_id ?? null) as number | null,
+      to_location_id:   (r.to_location_id ?? null) as number | null,
+      quantity:         r.quantity as number,
+      movement_type:    r.request_type as string,
+      reason:           (r.notes ?? null) as string | null,
+      created_at:       r.requested_at as string,
+    }));
+    const merged = [...fromMovements, ...fromRequests].sort((a, b) => {
+      const ad = a.created_at ?? a.movement_date ?? '';
+      const bd = b.created_at ?? b.movement_date ?? '';
+      return bd.localeCompare(ad);
+    });
+
+    setMovements(merged);
+    setProducts((prodRes.data ?? []) as Product[]);
+
+    // Surface error only if BOTH movement sources fail; an empty result
+    // from one is fine (table may not exist in this deployment).
+    if (movRes.error && reqRes.error) {
+      const msg = movRes.error.message + (reqRes.error ? ' / ' + reqRes.error.message : '');
+      setLoadError(msg);
+      setToast({ msg: 'Failed to load history: ' + msg, type: 'error', id: ++toastId.current });
+    } else if (prodRes.error) {
+      setLoadError(prodRes.error.message);
+      setToast({ msg: 'Failed to load products: ' + prodRes.error.message, type: 'error', id: ++toastId.current });
     }
     setLoading(false);
   }, []);
@@ -119,6 +149,9 @@ function HistoryDashboard() {
           <div className="text-center py-20 text-muted">
             <div className="text-4xl mb-3">📋</div>
             <p className="text-sm">No movements found</p>
+            {loadError && (
+              <p className="mt-3 text-xs text-danger/80 break-words px-4">{loadError}</p>
+            )}
           </div>
         ) : (
           <div className="flex flex-col gap-2">
