@@ -166,12 +166,12 @@ function PosDashboard() {
         const curQty = (location === 'back' ? backStockMap : mainStockMap)[pid] || 0;
         const deduct = Math.min(item.qty, curQty);
         if (action === 'sold') {
-          await upsertStock(pid, locId, 'quantity', Math.max(0, curQty - deduct));
+          await upsertStock(pid, locId, { quantity: Math.max(0, curQty - deduct) });
           await logMovement(pid, locId, null, deduct, 'SALE', `Sold from ${location === 'back' ? 'Back Godown' : 'Main Store'}`);
         } else {
-          await upsertStock(pid, locId, 'quantity', Math.max(0, curQty - deduct));
+          await upsertStock(pid, locId, { quantity: Math.max(0, curQty - deduct) });
           const mainQty = mainStockMap[pid] || 0;
-          await upsertStock(pid, mainId, 'quantity', mainQty + deduct);
+          await upsertStock(pid, mainId, { quantity: mainQty + deduct });
           await logMovement(pid, locId, mainId, deduct, 'TRANSFER', 'Moved from Back Godown to Main Store');
         }
       }
@@ -196,12 +196,12 @@ function PosDashboard() {
       const curQty = (location === 'back' ? backStockMap : mainStockMap)[pid] || 0;
       const deduct = Math.min(item.qty, curQty);
       if (action === 'sold') {
-        await upsertStock(pid, locId, 'quantity', Math.max(0, curQty - deduct));
+        await upsertStock(pid, locId, { quantity: Math.max(0, curQty - deduct) });
         await logMovement(pid, locId, null, deduct, 'SALE', `Sold from ${location === 'back' ? 'Back Godown' : 'Main Store'}`);
       } else {
-        await upsertStock(pid, locId, 'quantity', Math.max(0, curQty - deduct));
+        await upsertStock(pid, locId, { quantity: Math.max(0, curQty - deduct) });
         const mainQty = mainStockMap[pid] || 0;
-        await upsertStock(pid, mainId, 'quantity', mainQty + deduct);
+        await upsertStock(pid, mainId, { quantity: mainQty + deduct });
         await logMovement(pid, locId, mainId, deduct, 'TRANSFER', 'Moved from Back Godown to Main Store');
       }
       setCart(c => c.filter(i => i.product.product_id !== item.product.product_id));

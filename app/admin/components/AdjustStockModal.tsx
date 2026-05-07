@@ -92,42 +92,70 @@ export default function AdjustStockModal({
   async function confirm() {
     if (!product || !selectedAction || qty < 1) return;
     const isBoxUnit = unit === 'box';
-    const movQty    = isBoxUnit ? qty * ppb : qty;
+    const movQty    = isBoxUnit ? qty * ppb : qty;  // always in pieces
+
+    const curPool = curQty + curBox * ppb;
+    const othPool = othQty + othBox * ppb;
+
     const removesFromCur   = ['sold', 'to_front', 'to_back'].includes(selectedAction);
     const removesFromOther = ['from_main', 'from_back'].includes(selectedAction);
 
-    if (removesFromCur) {
-      if (isBoxUnit && qty > curBox)  { onError(`Only ${curBox} boxes in ${locName}`);  return; }
-      if (!isBoxUnit && qty > curQty) { onError(`Only ${curQty} pcs in ${locName}`);    return; }
+    if (removesFromCur && movQty > curPool) {
+      onError(`Not enough stock in ${locName}`);
+      return;
     }
-    if (removesFromOther) {
-      if (isBoxUnit && qty > othBox)  { onError(`Only ${othBox} boxes in ${othName}`);  return; }
-      if (!isBoxUnit && qty > othQty) { onError(`Only ${othQty} pcs in ${othName}`);    return; }
+    if (removesFromOther && movQty > othPool) {
+      onError(`Not enough stock in ${othName}`);
+      return;
+    }
+
+    // Deduct movQty pieces from a location, preferring to consume whole boxes
+    // before dipping into loose pieces (box-mode), or loose pieces before
+    // breaking boxes (piece-mode).
+    function deductFrom(pcs: number, bx: number): { quantity: number; box_quantity: number } {
+      if (isBoxUnit) {
+        const boxesToDeduct = Math.min(qty, bx);
+        const newBox = bx - boxesToDeduct;
+        const newQty = pcs - (qty - boxesToDeduct) * ppb;
+        return { quantity: newQty, box_quantity: newBox };
+      }
+      const fromLoose     = Math.min(qty, pcs);
+      const fromBoxPieces = qty - fromLoose;
+      const boxesToBreak  = ppb > 0 ? Math.ceil(fromBoxPieces / ppb) : 0;
+      return {
+        quantity:     pcs - fromLoose + boxesToBreak * ppb - fromBoxPieces,
+        box_quantity: bx - boxesToBreak,
+      };
+    }
+
+    function addTo(pcs: number, bx: number): { quantity: number; box_quantity: number } {
+      return isBoxUnit
+        ? { quantity: pcs, box_quantity: bx + qty }
+        : { quantity: pcs + qty, box_quantity: bx };
     }
 
     setSaving(true);
     try {
-      const field: 'quantity' | 'box_quantity' = isBoxUnit ? 'box_quantity' : 'quantity';
       if (selectedAction === 'sold') {
-        await upsertStock(product.product_id, locId,   field, Math.max(0, (isBoxUnit ? curBox : curQty) - qty));
+        await upsertStock(product.product_id, locId, deductFrom(curQty, curBox));
         await logMovement(product.product_id, locId, null, movQty, TYPE_MAP[selectedAction], NOTE_MAP[selectedAction]);
 
       } else if (selectedAction === 'to_front' || selectedAction === 'to_back') {
-        await upsertStock(product.product_id, locId,   field, Math.max(0, (isBoxUnit ? curBox : curQty) - qty));
-        await upsertStock(product.product_id, otherId, field, (isBoxUnit ? othBox : othQty) + qty);
+        await upsertStock(product.product_id, locId,   deductFrom(curQty, curBox));
+        await upsertStock(product.product_id, otherId, addTo(othQty, othBox));
         await logMovement(product.product_id, locId, otherId, movQty, TYPE_MAP[selectedAction], NOTE_MAP[selectedAction]);
 
       } else if (selectedAction === 'from_back' || selectedAction === 'from_main') {
-        await upsertStock(product.product_id, otherId, field, Math.max(0, (isBoxUnit ? othBox : othQty) - qty));
-        await upsertStock(product.product_id, locId,   field, (isBoxUnit ? curBox : curQty) + qty);
+        await upsertStock(product.product_id, otherId, deductFrom(othQty, othBox));
+        await upsertStock(product.product_id, locId,   addTo(curQty, curBox));
         await logMovement(product.product_id, otherId, locId, movQty, TYPE_MAP[selectedAction], NOTE_MAP[selectedAction]);
 
       } else if (selectedAction === 'stockin') {
-        await upsertStock(product.product_id, locId, field, (isBoxUnit ? curBox : curQty) + qty);
+        await upsertStock(product.product_id, locId, addTo(curQty, curBox));
         await logMovement(product.product_id, null, locId, movQty, TYPE_MAP[selectedAction], NOTE_MAP[selectedAction]);
       }
 
-      // Deduct components for outbound actions
+      // Deduct components for outbound actions (movQty is already in pieces)
       if (['sold', 'to_front', 'to_back'].includes(selectedAction)) {
         const components = componentMap[product.product_id] ?? [];
         for (const comp of components) {
@@ -138,8 +166,7 @@ export default function AdjustStockModal({
           await upsertStock(
             comp.component_product_id,
             locId,
-            'quantity',
-            Math.max(0, compCurQty - deductQty),
+            { quantity: Math.max(0, compCurQty - deductQty) },
           );
           await logMovement(
             comp.component_product_id,

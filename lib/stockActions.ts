@@ -3,8 +3,7 @@ import { supabase } from '@/lib/supabase';
 export async function upsertStock(
   productId: number,
   locationId: number,
-  field: 'quantity' | 'box_quantity',
-  value: number,
+  fields: Partial<{ quantity: number; box_quantity: number }>,
 ): Promise<void> {
   const { data } = await supabase
     .from('stock_by_location')
@@ -16,7 +15,7 @@ export async function upsertStock(
   if (data && data.length > 0) {
     await supabase
       .from('stock_by_location')
-      .update({ [field]: value, updated_at: now })
+      .update({ ...fields, updated_at: now })
       .eq('product_id', productId)
       .eq('location_id', locationId);
   } else {
@@ -27,7 +26,7 @@ export async function upsertStock(
         location_id:  locationId,
         quantity:     0,
         box_quantity: 0,
-        [field]:      value,
+        ...fields,
         updated_at:   now,
       });
   }

@@ -122,7 +122,7 @@ function LabelsDashboard() {
     setStockSaving(true);
     try {
       const newQty = mode === 'add' ? cur + qty : Math.max(0, cur - qty);
-      await upsertStock(product.product_id, BACK_LOC, 'quantity', newQty);
+      await upsertStock(product.product_id, BACK_LOC, { quantity: newQty });
       await logMovement(
         product.product_id,
         mode === 'add' ? null : BACK_LOC,
