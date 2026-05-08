@@ -16,6 +16,22 @@ function fmtDate(iso: string) {
   return new Date(iso).toLocaleDateString('en-KE', { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
+// Parse the bill_image_url field, which now stores either a JSON-stringified
+// array of (data) URLs (new format) or a single URL string (old format).
+function parseBillUrls(s: string | null): string[] {
+  if (!s) return [];
+  const t = s.trim();
+  if (t.startsWith('[')) {
+    try {
+      const parsed = JSON.parse(t);
+      return Array.isArray(parsed) ? parsed.filter((u): u is string => typeof u === 'string' && u.length > 0) : [s];
+    } catch {
+      return [s];
+    }
+  }
+  return [s];
+}
+
 interface ScannedItem {
   tempId:      number;
   nameRaw:     string;
@@ -242,13 +258,23 @@ function PurchasesDashboard() {
                   <span className="text-teal">Ksh {Number(detailData.purchase.total_amount).toLocaleString('en-KE')}</span>
                 </div>
               )}
-              {detailData.purchase.bill_image_url && (
-                <div className="mt-4">
-                  <div className="text-[10px] font-bold text-muted uppercase tracking-widest mb-2">Bill Image</div>
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={detailData.purchase.bill_image_url} alt="Bill" className="w-full rounded-xl border border-white/8" />
-                </div>
-              )}
+              {(() => {
+                const urls = parseBillUrls(detailData.purchase.bill_image_url);
+                if (urls.length === 0) return null;
+                return (
+                  <div className="mt-4">
+                    <div className="text-[10px] font-bold text-muted uppercase tracking-widest mb-2">
+                      Bill Image{urls.length > 1 ? `s (${urls.length})` : ''}
+                    </div>
+                    <div className="flex flex-col gap-2">
+                      {urls.map((url, i) => (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img key={i} src={url} alt={`Bill ${i + 1}`} className="w-full rounded-xl border border-white/8" />
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
               <button
                 onClick={() => { setDetailId(null); setDetailData(null); }}
                 className="w-full mt-5 py-2.5 rounded-xl bg-surface2 border border-white/8 text-muted text-sm font-semibold hover:text-slate-100 transition-colors"
@@ -276,25 +302,26 @@ function NewPurchaseModal({
   onSaved: () => void;
   onError: (msg: string) => void;
 }) {
+  interface BillImage { b64: string; mime: string; thumb: string }
+
   const [step,       setStep]       = useState<1 | 2>(1);
   const [supplierId, setSupplierId] = useState('');
   const [date,       setDate]       = useState(new Date().toISOString().split('T')[0]);
   const [total,      setTotal]      = useState('');
   const [notes,      setNotes]      = useState('');
-  const [imageB64,   setImageB64]   = useState<string | null>(null);
-  const [imageMime,  setImageMime]  = useState('image/jpeg');
-  const [imageThumb, setImageThumb] = useState<string | null>(null);
+  const [images,     setImages]     = useState<BillImage[]>([]);
   const [scanning,   setScanning]   = useState(false);
+  const [scanError,  setScanError]  = useState<string | null>(null);
   const [items,      setItems]      = useState<ScannedItem[]>([]);
   const [saving,     setSaving]     = useState(false);
   const [ocrRaw,     setOcrRaw]     = useState('');
   const [showRaw,    setShowRaw]    = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
-  let tempCounter = useRef(100);
+  const tempCounter = useRef(100);
 
   function processFile(file: File) {
     if (file.size > 10 * 1024 * 1024) { onError('File too large. Max 10MB'); return; }
-    setImageMime(file.type.startsWith('image/') ? 'image/jpeg' : file.type);
+    const mime = file.type.startsWith('image/') ? 'image/jpeg' : file.type;
     const reader = new FileReader();
     reader.onload = (e) => {
       const dataUrl = e.target?.result as string;
@@ -310,21 +337,25 @@ function NewPurchaseModal({
           let q = 0.8;
           let du = canvas.toDataURL('image/jpeg', q);
           if (du.split(',')[1].length * 0.75 > 3_000_000) { q = 0.6; du = canvas.toDataURL('image/jpeg', q); }
-          setImageB64(du.split(',')[1]);
-          setImageThumb(du);
+          setImages(prev => [...prev, { b64: du.split(',')[1], mime, thumb: du }]);
         };
         img.src = dataUrl;
       } else {
-        setImageB64(dataUrl.split(',')[1]);
-        setImageThumb(null);
+        // PDF or other — keep raw data URL for display fallback
+        setImages(prev => [...prev, { b64: dataUrl.split(',')[1], mime, thumb: dataUrl }]);
       }
     };
     reader.readAsDataURL(file);
   }
 
+  function removeImage(idx: number) {
+    setImages(prev => prev.filter((_, i) => i !== idx));
+  }
+
   async function scanBill() {
-    if (!imageB64) return;
+    if (images.length === 0) return;
     setScanning(true);
+    setScanError(null);
     try {
       const prompt = `You must respond with ONLY a valid JSON object. No markdown, no backticks, no explanation, no preamble.
 Start your response directly with { and end with }.
@@ -345,7 +376,7 @@ The JSON must have this exact structure:
 }
 Read the purchase bill/invoice image and extract: the supplier/vendor name, bill date, total amount, and all line items (products purchased). Skip header rows, taxes, and discount lines — only include actual product items.`;
 
-      const raw = await callGemini(prompt, imageB64, imageMime);
+      const raw = await callGemini(prompt, images[0].b64, images[0].mime);
       setOcrRaw(raw);
 
       // Strip markdown code fences if present
@@ -396,10 +427,8 @@ Read the purchase bill/invoice image and extract: the supplier/vendor name, bill
       setStep(2);
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Unknown error';
-      const friendly = (msg.includes('did not match') || msg.toLowerCase().includes('json') || msg.includes('No JSON'))
-        ? 'AI could not parse the bill. Please add items manually.'
-        : 'AI scan failed: ' + msg;
-      onError(friendly);
+      setScanError(msg);
+      onError('AI scan failed: ' + msg);
     } finally {
       setScanning(false);
     }
@@ -421,12 +450,16 @@ Read the purchase bill/invoice image and extract: the supplier/vendor name, bill
     if (items.length === 0) { onError('Add at least one item'); return; }
     setSaving(true);
     try {
+      const billUrlsField = images.length > 0
+        ? JSON.stringify(images.map(i => i.thumb))
+        : null;
       const { data: pArr, error: pErr } = await supabase.from('purchases').insert({
-        supplier_id:  supplierId ? parseInt(supplierId) : null,
-        purchase_date: date || null,
-        total_amount:  total ? parseFloat(total) : null,
-        notes:         notes || null,
-        status:        'CONFIRMED',
+        supplier_id:    supplierId ? parseInt(supplierId) : null,
+        purchase_date:  date || null,
+        total_amount:   total ? parseFloat(total) : null,
+        notes:          notes || null,
+        status:         'CONFIRMED',
+        bill_image_url: billUrlsField,
       }).select();
       if (pErr || !pArr?.[0]) throw new Error(pErr?.message ?? 'Failed to save purchase');
       const purchaseId = (pArr[0] as Purchase).purchase_id;
@@ -492,28 +525,49 @@ Read the purchase bill/invoice image and extract: the supplier/vendor name, bill
             </div>
 
             <div>
-              <label className="text-[10px] font-bold text-muted uppercase tracking-widest block mb-1">Upload Bill Photo (optional)</label>
-              {imageThumb ? (
-                <div className="flex items-center gap-3 bg-surface2 border border-white/8 rounded-xl p-3">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={imageThumb} alt="bill" className="w-14 h-14 object-cover rounded-lg border border-white/8 shrink-0" />
-                  <div className="flex-1 min-w-0">
-                    <div className="text-xs font-semibold text-slate-100">Bill uploaded</div>
-                    <div className="text-xs text-success mt-0.5">✓ Ready to scan</div>
-                  </div>
-                  <button onClick={() => { setImageB64(null); setImageThumb(null); }} className="text-muted hover:text-danger text-lg">✕</button>
-                </div>
-              ) : (
-                <div
-                  onClick={() => fileRef.current?.click()}
-                  className="border-2 border-dashed border-white/15 rounded-xl p-6 text-center cursor-pointer hover:border-teal/30 hover:bg-teal/5 transition-all"
-                >
-                  <div className="text-3xl mb-2">📷</div>
-                  <p className="text-xs text-muted">Tap to take photo or upload bill<br /><b>Max 10MB · JPG, PNG, PDF</b></p>
+              <label className="text-[10px] font-bold text-muted uppercase tracking-widest block mb-1">
+                Upload Bill Photos {images.length > 0 ? `(${images.length})` : '(optional)'}
+              </label>
+
+              {images.length > 0 && (
+                <div className="grid grid-cols-3 gap-2 mb-2">
+                  {images.map((img, i) => (
+                    <div key={i} className="relative aspect-square rounded-lg overflow-hidden border border-white/8 bg-surface2">
+                      {img.mime.startsWith('image/') ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={img.thumb} alt={`bill ${i + 1}`} className="w-full h-full object-cover" />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center text-2xl">📄</div>
+                      )}
+                      <button
+                        onClick={() => removeImage(i)}
+                        className="absolute top-1 right-1 w-6 h-6 rounded-full bg-black/70 text-white text-xs font-bold flex items-center justify-center hover:bg-danger"
+                      >
+                        ✕
+                      </button>
+                      {i === 0 && (
+                        <span className="absolute bottom-1 left-1 text-[9px] font-bold px-1.5 py-0.5 rounded bg-teal/80 text-navy">SCAN</span>
+                      )}
+                    </div>
+                  ))}
                 </div>
               )}
+
+              <div
+                onClick={() => fileRef.current?.click()}
+                className="border-2 border-dashed border-white/15 rounded-xl p-4 text-center cursor-pointer hover:border-teal/30 hover:bg-teal/5 transition-all"
+              >
+                <div className="text-2xl mb-1">{images.length > 0 ? '➕' : '📷'}</div>
+                <p className="text-xs text-muted">
+                  {images.length > 0 ? 'Add another image' : 'Tap to take photo or upload bill'}
+                  <br /><b>Max 10MB · JPG, PNG, PDF</b>
+                </p>
+              </div>
               <input ref={fileRef} type="file" accept="image/*,application/pdf" className="hidden"
-                onChange={e => e.target.files?.[0] && processFile(e.target.files[0])} />
+                onChange={e => {
+                  if (e.target.files?.[0]) processFile(e.target.files[0]);
+                  e.target.value = '';
+                }} />
             </div>
 
             {scanning && (
@@ -523,14 +577,21 @@ Read the purchase bill/invoice image and extract: the supplier/vendor name, bill
               </div>
             )}
 
+            {scanError && !scanning && (
+              <div className="rounded-lg bg-danger/10 border border-danger/30 px-3 py-2 text-xs text-danger break-words">
+                <div className="font-bold mb-0.5">Scan failed</div>
+                {scanError}
+              </div>
+            )}
+
             <div className="flex gap-3 mt-2">
               <button onClick={onClose} className="flex-1 py-2.5 rounded-xl bg-surface2 border border-white/8 text-muted text-sm font-semibold">Cancel</button>
-              {imageB64 && !scanning && (
+              {images.length > 0 && !scanning && (
                 <button onClick={scanBill} className="flex-1 py-2.5 rounded-xl bg-teal/15 border border-teal/30 text-teal text-sm font-bold">🔍 Scan Bill</button>
               )}
               <button onClick={() => { setItems([newBlankItem()]); setStep(2); }}
                 className="flex-1 py-2.5 rounded-xl bg-surface2 border border-white/8 text-muted text-sm font-semibold hover:text-slate-100">
-                {imageB64 ? 'Skip Scan →' : 'Enter Manually →'}
+                {images.length > 0 ? 'Skip Scan →' : 'Enter Manually →'}
               </button>
             </div>
           </div>
