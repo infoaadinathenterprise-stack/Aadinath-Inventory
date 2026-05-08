@@ -59,6 +59,14 @@ async function callGemini(prompt: string, imageBase64?: string, mimeType?: strin
   // 502 from Cloudflare, 404 if the function isn't deployed), res.json()
   // would throw a cryptic "string did not match the expected pattern".
   const txt = await res.text();
+  const trimmed = txt.trimStart();
+  // Cloudflare's standard 5xx page is a big HTML doc — don't dump it at the user.
+  if (trimmed.startsWith('<!DOCTYPE') || trimmed.startsWith('<html')) {
+    if (res.status === 502 || res.status === 504) {
+      throw new Error('Proxy timed out (Cloudflare 502/504). Try a smaller, sharper bill photo — large images make Gemini exceed the worker time limit.');
+    }
+    throw new Error(`Proxy returned an HTML error page (HTTP ${res.status}). The /api/gemini function may not be deployed or GEMINI_KEY isn't set.`);
+  }
   let data: { result?: string; error?: string; detail?: string };
   try {
     data = JSON.parse(txt) as { result?: string; error?: string; detail?: string };
@@ -353,15 +361,23 @@ function NewPurchaseModal({
       if (file.type.startsWith('image/')) {
         const img = new window.Image();
         img.onload = () => {
-          const MAX = 1200;
+          // Aggressive compression: Gemini OCR works fine on ~900px bills,
+          // and large payloads cause the Cloudflare worker to time out
+          // before Gemini responds (the 502 HTML you see is the worker
+          // being killed for exceeding wall-time).
+          const MAX = 900;
           let w = img.width, h = img.height;
           if (w > MAX || h > MAX) { if (w > h) { h = Math.round(h * MAX / w); w = MAX; } else { w = Math.round(w * MAX / h); h = MAX; } }
           const canvas = document.createElement('canvas');
           canvas.width = w; canvas.height = h;
           canvas.getContext('2d')?.drawImage(img, 0, 0, w, h);
-          let q = 0.8;
+          // Step the quality down until the encoded payload fits in ~600KB.
+          let q = 0.7;
           let du = canvas.toDataURL('image/jpeg', q);
-          if (du.split(',')[1].length * 0.75 > 3_000_000) { q = 0.6; du = canvas.toDataURL('image/jpeg', q); }
+          while (du.split(',')[1].length * 0.75 > 600_000 && q > 0.35) {
+            q -= 0.1;
+            du = canvas.toDataURL('image/jpeg', q);
+          }
           setImages(prev => [...prev, { b64: du.split(',')[1], mime, thumb: du }]);
         };
         img.src = dataUrl;
