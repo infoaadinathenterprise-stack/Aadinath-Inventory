@@ -1,4 +1,10 @@
 import { supabase } from '@/lib/supabase';
+import { USER_KEY } from '@/lib/types';
+
+function currentUser(): string {
+  if (typeof window === 'undefined') return 'System';
+  return localStorage.getItem(USER_KEY) || 'Admin';
+}
 
 export async function upsertStock(
   productId: number,
@@ -40,15 +46,20 @@ export async function logMovement(
   type:      string,
   reason:    string,
 ): Promise<void> {
-  await supabase.from('stock_movements').insert({
+  const user        = currentUser();
+  const now         = new Date().toISOString();
+  const notes       = `[${user}] ${reason}`;
+
+  const { error } = await supabase.from('stock_requests').insert({
     product_id:       productId,
+    request_type:     type,
+    quantity:         qty,
     from_location_id: fromLoc,
     to_location_id:   toLoc,
-    quantity:         qty,
-    movement_type:    type,
-    reason,
-    performed_by:     1,
-    approved_by:      1,
+    notes,
     status:           'APPROVED',
+    requested_at:     now,
+    approved_at:      now,
   });
+  if (error) throw new Error('Could not record movement: ' + error.message);
 }

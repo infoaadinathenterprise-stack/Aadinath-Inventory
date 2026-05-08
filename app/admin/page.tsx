@@ -4,8 +4,9 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { supabase } from '@/lib/supabase';
 import type { Product, StockMap, Location } from '@/lib/types';
-import { SESSION_KEY } from '@/lib/types';
+import { SESSION_KEY, USER_KEY } from '@/lib/types';
 import { useProductComponents } from '@/lib/hooks/useProductComponents';
+import { logMovement } from '@/lib/stockActions';
 import AdminNavbar      from './components/AdminNavbar';
 import StatsBar         from './components/StatsBar';
 import ProductList      from './components/ProductList';
@@ -91,6 +92,7 @@ async function loadData(): Promise<{
 
 function LoginForm({ onSuccess }: { onSuccess: () => void }) {
   const [pw,    setPw]    = useState('');
+  const [user,  setUser]  = useState('Admin');
   const [shake, setShake] = useState(false);
   const [err,   setErr]   = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
@@ -99,8 +101,10 @@ function LoginForm({ onSuccess }: { onSuccess: () => void }) {
 
   function submit(e: React.FormEvent) {
     e.preventDefault();
+    const trimmedUser = user.trim() || 'Admin';
     if (pw === PASS) {
       localStorage.setItem(SESSION_KEY, '1');
+      localStorage.setItem(USER_KEY, trimmedUser);
       onSuccess();
     } else {
       setErr('Incorrect password');
@@ -127,6 +131,16 @@ function LoginForm({ onSuccess }: { onSuccess: () => void }) {
             <p className="font-bold text-2xl text-teal tracking-tight">Aadinath<span className="text-gold">·</span></p>
             <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-gold/15 border border-gold/30 text-gold uppercase tracking-widest mt-1 inline-block">Admin Panel</span>
           </div>
+          <p className="text-sm font-semibold text-slate-300 mb-1">Your name</p>
+          <select
+            value={user}
+            onChange={e => setUser(e.target.value)}
+            className="w-full px-4 py-3 rounded-xl bg-surface2 border border-white/10 text-slate-100 outline-none focus:border-teal/50 transition-colors mb-3 text-sm"
+          >
+            <option value="Admin">Admin</option>
+            <option value="Akshat">Akshat</option>
+            <option value="Anjan">Anjan</option>
+          </select>
           <p className="text-sm font-semibold text-slate-300 mb-1">Password</p>
           <input
             ref={inputRef} type="password" value={pw}
@@ -306,7 +320,7 @@ function ProductModal({
           await supabase.from('stock_by_location').insert({ product_id: productId, location_id: locId, quantity: qty });
         }
         if (!editing && qty > 0) {
-          await supabase.from('stock_movements').insert({ product_id: productId, to_location_id: locId, quantity: qty, movement_type: 'ADJUSTMENT_IN', reason: 'Initial stock' });
+          await logMovement(productId, null, locId, qty, 'ADJUSTMENT_IN', 'Initial stock');
         }
       }
 
@@ -558,6 +572,7 @@ function Dashboard() {
 
   function handleLogout() {
     localStorage.removeItem(SESSION_KEY);
+    localStorage.removeItem(USER_KEY);
     window.location.reload();
   }
 

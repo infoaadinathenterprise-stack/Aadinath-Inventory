@@ -36,6 +36,7 @@ export type Location = 'back' | 'main';
 export const LOC_ID: Record<Location, number> = { back: 2, main: 1 };
 
 export const SESSION_KEY = 'aad_admin_auth';
+export const USER_KEY    = 'aad_admin_user';
 
 export interface Supplier {
   supplier_id:   number;

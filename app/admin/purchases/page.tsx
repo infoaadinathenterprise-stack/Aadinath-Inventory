@@ -6,6 +6,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { supabase } from '@/lib/supabase';
 import type { Purchase, PurchaseItem, Supplier, Product } from '@/lib/types';
 import { SESSION_KEY } from '@/lib/types';
+import { logMovement } from '@/lib/stockActions';
 import AdminNavbar from '../components/AdminNavbar';
 import Toast, { type ToastState } from '../components/Toast';
 
@@ -450,10 +451,7 @@ Read the purchase bill/invoice image and extract: the supplier/vendor name, bill
           } else {
             await supabase.from('stock_by_location').insert({ product_id: item.productId, location_id: item.locationId, quantity: item.qty });
           }
-          await supabase.from('stock_movements').insert({
-            product_id: item.productId, to_location_id: item.locationId,
-            quantity: item.qty, movement_type: 'PURCHASE_IN', reason: 'Purchase #' + purchaseId,
-          });
+          await logMovement(item.productId, null, item.locationId, item.qty, 'PURCHASE_IN', 'Purchase #' + purchaseId);
         }
       }
       onSaved();
