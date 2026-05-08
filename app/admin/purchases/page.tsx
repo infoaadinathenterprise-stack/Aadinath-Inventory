@@ -54,9 +54,34 @@ async function callGemini(prompt: string, imageBase64?: string, mimeType?: strin
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   });
-  const data = await res.json() as { result?: string; error?: string; detail?: string };
-  if (!res.ok || data.error) throw new Error(data.error ?? data.detail ?? `HTTP ${res.status}`);
+
+  // Read as text first — if the proxy returned an HTML error page (e.g.
+  // 502 from Cloudflare, 404 if the function isn't deployed), res.json()
+  // would throw a cryptic "string did not match the expected pattern".
+  const txt = await res.text();
+  let data: { result?: string; error?: string; detail?: string };
+  try {
+    data = JSON.parse(txt) as { result?: string; error?: string; detail?: string };
+  } catch {
+    throw new Error(`Gateway returned non-JSON (HTTP ${res.status}): ${txt.slice(0, 200)}`);
+  }
+  if (!res.ok || data.error) {
+    const combined = data.error && data.detail ? `${data.error}: ${data.detail}` : (data.error ?? data.detail ?? `HTTP ${res.status}`);
+    throw new Error(combined);
+  }
   return data.result ?? '';
+}
+
+// Clean up Gemini's JSON quirks before strict parse: BOM, zero-width chars,
+// smart quotes, trailing commas — all common reasons a valid-looking
+// response still fails JSON.parse.
+function sanitizeJson(s: string): string {
+  return s
+    .replace(/^﻿/, '')                  // BOM
+    .replace(/[​-‍﻿]/g, '')   // zero-width chars
+    .replace(/[“”]/g, '"')         // smart double quotes
+    .replace(/[‘’]/g, "'")         // smart single quotes
+    .replace(/,(\s*[}\]])/g, '$1');          // trailing commas before } or ]
 }
 
 function matchProduct(name: string, products: Product[]): Product | null {
@@ -385,14 +410,22 @@ Read the purchase bill/invoice image and extract: the supplier/vendor name, bill
       // Find the first { and last } to extract just the JSON object
       const start = jsonText.indexOf('{');
       const end   = jsonText.lastIndexOf('}');
-      if (start === -1 || end === -1) throw new Error('No JSON object found in AI response');
-      jsonText = jsonText.slice(start, end + 1);
-      const result = JSON.parse(jsonText) as {
+      if (start === -1 || end === -1) throw new Error('No JSON object found in AI response. Raw: ' + raw.slice(0, 200));
+      jsonText = sanitizeJson(jsonText.slice(start, end + 1));
+
+      type GeminiBill = {
         supplier_name: string | null;
         bill_date:     string | null;
         total_amount:  number | null;
         items: { product_name: string; quantity: number; unit_price: number | null; total_price: number | null }[];
       };
+      let result: GeminiBill;
+      try {
+        result = JSON.parse(jsonText) as GeminiBill;
+      } catch (parseErr) {
+        const pmsg = parseErr instanceof Error ? parseErr.message : 'parse error';
+        throw new Error(`Could not parse AI JSON (${pmsg}). Raw: ${jsonText.slice(0, 250)}`);
+      }
 
       // Pre-fill supplier if a match is found
       if (result.supplier_name) {
