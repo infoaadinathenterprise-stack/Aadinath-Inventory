@@ -290,20 +290,25 @@ function NewPurchaseModal({
   onSaved:   () => void;
   onError:   (msg: string) => void;
 }) {
-  const [supplierId, setSupplierId] = useState('');
-  const [date,       setDate]       = useState(new Date().toISOString().split('T')[0]);
-  const [notes,      setNotes]      = useState('');
-  const [images,     setImages]     = useState<BillImage[]>([]);
-  const [items,      setItems]      = useState<ItemRow[]>([blankRow()]);
-  const [saving,     setSaving]     = useState(false);
-  const [scanning,   setScanning]   = useState(false);
-  const [scanInfo,   setScanInfo]   = useState<{ msg: string; ok: boolean } | null>(null);
-  const fileRef = useRef<HTMLInputElement>(null);
+  // rowCounter must be declared BEFORE the useState that initialises
+  // items — its initializer calls blankRow(), which reads
+  // rowCounter.current. Otherwise we hit a TDZ ReferenceError on
+  // mount and the whole page fails to load.
   const rowCounter = useRef(1);
+  const fileRef = useRef<HTMLInputElement>(null);
 
   function blankRow(): ItemRow {
     return { rowId: rowCounter.current++, productId: null, productName: '', qty: 1, unitPrice: null, locationId: 2 };
   }
+
+  const [supplierId, setSupplierId] = useState('');
+  const [date,       setDate]       = useState(new Date().toISOString().split('T')[0]);
+  const [notes,      setNotes]      = useState('');
+  const [images,     setImages]     = useState<BillImage[]>([]);
+  const [items,      setItems]      = useState<ItemRow[]>(() => [blankRow()]);
+  const [saving,     setSaving]     = useState(false);
+  const [scanning,   setScanning]   = useState(false);
+  const [scanInfo,   setScanInfo]   = useState<{ msg: string; ok: boolean } | null>(null);
 
   // Auto-computed total — always reflects current rows so the user
   // doesn't have to keep a separate field in sync.
