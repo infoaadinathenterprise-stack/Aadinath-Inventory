@@ -398,24 +398,17 @@ function NewPurchaseModal({
     setScanning(true);
     setScanError(null);
     try {
-      const prompt = `You must respond with ONLY a valid JSON object. No markdown, no backticks, no explanation, no preamble.
-Start your response directly with { and end with }.
-The JSON must have this exact structure:
+      // The proxy now sends responseMimeType: application/json, so we
+      // don't need to beg for JSON output — keep the prompt short so
+      // the model finishes faster.
+      const prompt = `Extract from this purchase bill/invoice image and return JSON with this shape:
 {
-  "supplier_name": "string or null",
-  "bill_date": "YYYY-MM-DD or null",
-  "total_amount": number or null,
-  "items": [
-    {
-      "product_name": "string",
-      "quantity": number,
-      "unit_price": number or null,
-      "total_price": number or null,
-      "is_new": true
-    }
-  ]
+  "supplier_name": string|null,
+  "bill_date": "YYYY-MM-DD"|null,
+  "total_amount": number|null,
+  "items": [{ "product_name": string, "quantity": number, "unit_price": number|null, "total_price": number|null }]
 }
-Read the purchase bill/invoice image and extract: the supplier/vendor name, bill date, total amount, and all line items (products purchased). Skip header rows, taxes, and discount lines — only include actual product items.`;
+Only include real product line items — skip header labels, tax rows, discount rows, subtotals.`;
 
       const raw = await callGemini(prompt, images[0].b64, images[0].mime);
       setOcrRaw(raw);

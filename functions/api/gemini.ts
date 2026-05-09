@@ -1,5 +1,6 @@
 interface Env {
   GEMINI_KEY: string;
+  GEMINI_MODEL?: string;
 }
 
 interface GeminiBody {
@@ -7,6 +8,17 @@ interface GeminiBody {
   imageBase64?: string;
   mimeType?: string;
 }
+
+// Cloudflare Pages Functions are killed at ~30s wall time. Abort the
+// upstream Gemini call slightly before that so we can return a clean
+// JSON error instead of Cloudflare's HTML 502 page.
+const GEMINI_TIMEOUT_MS = 25_000;
+
+// Default to flash-lite — about 2x faster than flash on cold-start
+// quota and plenty accurate for invoice OCR. Override via the
+// GEMINI_MODEL env var if you want to switch (e.g., 'gemini-2.0-flash',
+// 'gemini-2.5-flash', 'gemini-flash-latest').
+const DEFAULT_MODEL = 'gemini-2.0-flash-lite';
 
 export const onRequestPost: PagesFunction<Env> = async (context) => {
   const origin = context.request.headers.get('Origin') ?? '';
@@ -39,26 +51,71 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   }
   parts.push({ text: prompt });
 
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${context.env.GEMINI_KEY}`;
+  const model = context.env.GEMINI_MODEL || DEFAULT_MODEL;
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${context.env.GEMINI_KEY}`;
+
+  // Forced JSON output mode + temperature 0 + a generous-but-bounded
+  // maxOutputTokens makes generation finish faster (Gemini stops as
+  // soon as the JSON closes) and removes any need to strip markdown
+  // fences client-side.
+  const requestBody = {
+    contents: [{ parts }],
+    generationConfig: {
+      responseMimeType: 'application/json',
+      temperature: 0.1,
+      maxOutputTokens: 2048,
+    },
+  };
+
+  const controller = new AbortController();
+  const timeoutHandle = setTimeout(() => controller.abort(), GEMINI_TIMEOUT_MS);
 
   let geminiRes: Response;
   try {
     geminiRes = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ contents: [{ parts }] }),
+      body: JSON.stringify(requestBody),
+      signal: controller.signal,
     });
-  } catch {
-    return new Response(JSON.stringify({ error: 'Failed to reach Gemini' }), { status: 502, headers: corsHeaders });
+    clearTimeout(timeoutHandle);
+  } catch (e) {
+    clearTimeout(timeoutHandle);
+    const isAbort = e instanceof Error && (e.name === 'AbortError' || /aborted/i.test(e.message));
+    if (isAbort) {
+      return new Response(
+        JSON.stringify({
+          error: `Gemini took longer than ${GEMINI_TIMEOUT_MS / 1000}s. Try a smaller / sharper bill image, or switch GEMINI_MODEL on the worker.`,
+        }),
+        { status: 504, headers: corsHeaders },
+      );
+    }
+    return new Response(
+      JSON.stringify({ error: 'Failed to reach Gemini', detail: e instanceof Error ? e.message : String(e) }),
+      { status: 502, headers: corsHeaders },
+    );
   }
 
   if (!geminiRes.ok) {
     const errText = await geminiRes.text();
-    return new Response(JSON.stringify({ error: 'Gemini error', detail: errText }), { status: 502, headers: corsHeaders });
+    return new Response(
+      JSON.stringify({ error: `Gemini HTTP ${geminiRes.status} (${model})`, detail: errText.slice(0, 800) }),
+      { status: 502, headers: corsHeaders },
+    );
   }
 
-  const data = await geminiRes.json() as { candidates?: { content?: { parts?: { text?: string }[] } }[] };
+  const data = await geminiRes.json() as {
+    candidates?: { content?: { parts?: { text?: string }[] }; finishReason?: string }[];
+    promptFeedback?: { blockReason?: string };
+  };
   const text = data.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
+  if (!text) {
+    const reason = data.promptFeedback?.blockReason ?? data.candidates?.[0]?.finishReason ?? 'unknown';
+    return new Response(
+      JSON.stringify({ error: `Gemini returned no text (reason: ${reason})` }),
+      { status: 502, headers: corsHeaders },
+    );
+  }
   return new Response(JSON.stringify({ result: text }), { status: 200, headers: corsHeaders });
 };
 
