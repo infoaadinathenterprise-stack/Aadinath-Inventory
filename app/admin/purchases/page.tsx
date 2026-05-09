@@ -279,7 +279,10 @@ interface ItemRow {
 // hits this directly so Cloudflare is never in the OCR path. If you want
 // to swap keys, get a new one at https://ocr.space/ocrapi/freekey.
 const OCR_SPACE_KEY = 'K89615870288957';
-const GEMINI_PROXY_URL = '/api/gemini';
+// Moved off /api/gemini because that path was returning Cloudflare HTML
+// 502 in <1s with no worker code executing — classic stuck-edge-function
+// symptom that a fresh route name forces past.
+const GEMINI_PROXY_URL = '/api/scan';
 
 function NewPurchaseModal({
   suppliers, products, onClose, onSaved, onError,
@@ -531,6 +534,49 @@ ${rawText}`;
     }
   }
 
+  // Pings the worker without involving Gemini. Use it to prove the
+  // /api/scan route is reachable separately from any AI behavior.
+  async function pingWorker() {
+    setScanning(true);
+    setScanInfo(null);
+    setLogCopied(false);
+    const lines: string[] = [];
+    const t0 = Date.now();
+    const log = (s: string) => lines.push(`[+${((Date.now() - t0) / 1000).toFixed(2)}s] ${s}`);
+    try {
+      log(`POST ${GEMINI_PROXY_URL} { test: true }`);
+      const res = await fetch(GEMINI_PROXY_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ test: true }),
+      });
+      const txt = await res.text();
+      log(`HTTP ${res.status} · X-Worker-Version=${res.headers.get('X-Worker-Version') ?? '(none)'}`);
+      log(`Body: ${txt.slice(0, 500)}`);
+      if (txt.trimStart().startsWith('<')) {
+        setScanInfo({ msg: `Worker UNREACHABLE — got HTML page (HTTP ${res.status}). The route ${GEMINI_PROXY_URL} isn't deployed yet.`, ok: false });
+      } else {
+        try {
+          const data = JSON.parse(txt) as { ok?: boolean; workerVersion?: string };
+          if (data.ok) {
+            setScanInfo({ msg: `Worker is alive · ${data.workerVersion ?? 'unknown version'}. Try the scan now.`, ok: true });
+          } else {
+            setScanInfo({ msg: `Worker responded but unexpected payload: ${txt.slice(0, 200)}`, ok: false });
+          }
+        } catch {
+          setScanInfo({ msg: `Worker non-JSON: ${txt.slice(0, 200)}`, ok: false });
+        }
+      }
+    } catch (e) {
+      log(`ERROR ${e instanceof Error ? e.message : String(e)}`);
+      setScanInfo({ msg: 'Network error pinging worker: ' + (e instanceof Error ? e.message : 'unknown'), ok: false });
+    } finally {
+      setScanLog(lines.join('\n'));
+      setShowLog(true);
+      setScanning(false);
+    }
+  }
+
   async function save() {
     const validRows = items.filter(r => (r.productId || r.productName.trim()) && r.qty > 0);
     if (validRows.length === 0) { onError('Add at least one item with quantity'); return; }
@@ -646,22 +692,32 @@ ${rawText}`;
             <input ref={fileRef} type="file" accept="image/*" className="hidden"
               onChange={e => { if (e.target.files?.[0]) processImageFile(e.target.files[0]); e.target.value = ''; }} />
 
-            {images.length > 0 && (
+            <div className="mt-2 flex gap-2">
+              {images.length > 0 && (
+                <button
+                  onClick={scanFirstBill}
+                  disabled={scanning}
+                  className="flex-1 py-2.5 rounded-xl bg-gold/10 border border-gold/30 text-gold text-xs font-bold hover:bg-gold/20 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+                >
+                  {scanning ? (
+                    <>
+                      <span className="w-3.5 h-3.5 rounded-full border-2 border-gold border-t-transparent animate-spin" />
+                      Reading bill…
+                    </>
+                  ) : (
+                    <>🤖 Auto-fill from first photo</>
+                  )}
+                </button>
+              )}
               <button
-                onClick={scanFirstBill}
+                onClick={pingWorker}
                 disabled={scanning}
-                className="mt-2 w-full py-2.5 rounded-xl bg-gold/10 border border-gold/30 text-gold text-xs font-bold hover:bg-gold/20 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+                className="px-3 py-2.5 rounded-xl bg-surface2 border border-white/10 text-muted text-xs font-bold hover:text-slate-100 hover:border-teal/30 transition-all disabled:opacity-50"
+                title="Ping the worker without using Gemini"
               >
-                {scanning ? (
-                  <>
-                    <span className="w-3.5 h-3.5 rounded-full border-2 border-gold border-t-transparent animate-spin" />
-                    Reading bill…
-                  </>
-                ) : (
-                  <>🤖 Auto-fill from first photo</>
-                )}
+                🩺 Test
               </button>
-            )}
+            </div>
 
             {scanInfo && (
               <div className={`mt-2 px-3 py-2 rounded-lg text-xs font-semibold border ${
