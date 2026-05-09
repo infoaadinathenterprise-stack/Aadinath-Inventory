@@ -378,8 +378,10 @@ function PosDashboard() {
                   {cart.length > 0 && (
                     <button
                       onClick={() => setCart([])}
-                      className="text-xs text-danger hover:underline"
-                    >Clear</button>
+                      className="flex items-center gap-1 px-3 py-1.5 rounded-lg border border-danger/40 bg-danger/10 text-danger text-xs font-bold hover:bg-danger hover:text-white active:scale-95 transition-all"
+                    >
+                      <span className="text-sm leading-none">🗑</span> Clear
+                    </button>
                   )}
                   <button
                     onClick={() => { setCartOpen(false); setTimeout(() => barcodeRef.current?.focus(), 100); }}
