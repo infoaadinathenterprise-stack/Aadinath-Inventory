@@ -89,6 +89,15 @@ function PosDashboard() {
   const sm = location === 'back' ? backStockMap : mainStockMap;
   const bm = location === 'back' ? backBoxMap   : mainBoxMap;
 
+  // The cart sells loose pieces only (existing deduction logic), so the
+  // max we can put in the cart is the loose-piece count summed across
+  // BOTH locations — sold-pull will dip into the other location if the
+  // current one runs out. Boxes are intentionally excluded from the cap
+  // because the deduction path doesn't unpack them.
+  function maxForProduct(p: Product): number {
+    return (backStockMap[p.product_id] || 0) + (mainStockMap[p.product_id] || 0);
+  }
+
   const inStock = products.filter(p => {
     const ppb = p.pieces_per_box || 0;
     return (sm[p.product_id] || 0) > 0 || (bm[p.product_id] || 0) * (ppb || 1) > 0;
@@ -113,18 +122,26 @@ function PosDashboard() {
   }, [inStock, category, search]);
 
   function addToCart(product: Product) {
+    const max = maxForProduct(product);
+    let blocked = false;
     setCart(prev => {
       const existing = prev.find(c => c.product.product_id === product.product_id);
       if (existing) {
+        if (existing.qty >= max) { blocked = true; return prev; }
         return prev.map(c =>
           c.product.product_id === product.product_id ? { ...c, qty: c.qty + 1 } : c
         );
       }
+      if (max < 1) { blocked = true; return prev; }
       return [...prev, { product, qty: 1 }];
     });
     barcodeRef.current?.focus();
-    showToast(`Added: ${product.product_name}`, 'success');
-    setCartOpen(true);
+    if (blocked) {
+      showToast(`Max ${max} available for ${product.product_name}`, 'error');
+    } else {
+      showToast(`Added: ${product.product_name}`, 'success');
+      setCartOpen(true);
+    }
   }
 
   function handleBarcodeKey(e: React.KeyboardEvent<HTMLInputElement>) {
@@ -155,24 +172,56 @@ function PosDashboard() {
     setModal({ product, direction, location });
   }
 
+  // Sell `qty` pieces of `pid`: take from current location first, then
+  // dip into the other location for any shortfall. Logs one or two SALE
+  // movements depending on the split.
+  async function sellOneItem(pid: number, qty: number) {
+    const locName = location === 'back' ? 'Back Godown' : 'Main Store';
+    const otherId = location === 'back' ? 1 : 2;
+    const otherName = location === 'back' ? 'Main Store' : 'Back Godown';
+    const locId = location === 'back' ? 2 : 1;
+    const curQty = (location === 'back' ? backStockMap : mainStockMap)[pid] || 0;
+    const otherQty = (location === 'back' ? mainStockMap : backStockMap)[pid] || 0;
+
+    const fromCur = Math.min(qty, curQty);
+    const fromOther = Math.max(0, qty - fromCur);
+    if (fromOther > otherQty) {
+      throw new Error(`Only ${curQty + otherQty} in stock total`);
+    }
+    if (fromCur > 0) {
+      await upsertStock(pid, locId, { quantity: curQty - fromCur });
+      await logMovement(pid, locId, null, fromCur, 'SALE', `Sold from ${locName}`);
+    }
+    if (fromOther > 0) {
+      await upsertStock(pid, otherId, { quantity: otherQty - fromOther });
+      await logMovement(pid, otherId, null, fromOther, 'SALE', `Sold from ${otherName} (POS overflow)`);
+    }
+  }
+
   async function processCart(action: 'sold' | 'to_main') {
     if (cart.length === 0) return;
+    if (action === 'to_main') {
+      // to_main only moves from Back Godown — validate every cart item fits.
+      const overflows = cart.filter(it => it.qty > (backStockMap[it.product.product_id] || 0));
+      if (overflows.length > 0) {
+        showToast(`Cannot move more than Back Godown has: ${overflows.map(o => o.product.product_name).join(', ')}`, 'error');
+        return;
+      }
+    }
     setProcessing(true);
-    const locId  = location === 'back' ? 2 : 1;
     const mainId = 1;
+    const backId = 2;
     try {
       for (const item of cart) {
-        const pid    = item.product.product_id;
-        const curQty = (location === 'back' ? backStockMap : mainStockMap)[pid] || 0;
-        const deduct = Math.min(item.qty, curQty);
+        const pid = item.product.product_id;
         if (action === 'sold') {
-          await upsertStock(pid, locId, { quantity: Math.max(0, curQty - deduct) });
-          await logMovement(pid, locId, null, deduct, 'SALE', `Sold from ${location === 'back' ? 'Back Godown' : 'Main Store'}`);
+          await sellOneItem(pid, item.qty);
         } else {
-          await upsertStock(pid, locId, { quantity: Math.max(0, curQty - deduct) });
+          const backQty = backStockMap[pid] || 0;
           const mainQty = mainStockMap[pid] || 0;
-          await upsertStock(pid, mainId, { quantity: mainQty + deduct });
-          await logMovement(pid, locId, mainId, deduct, 'TRANSFER', 'Moved from Back Godown to Main Store');
+          await upsertStock(pid, backId, { quantity: Math.max(0, backQty - item.qty) });
+          await upsertStock(pid, mainId, { quantity: mainQty + item.qty });
+          await logMovement(pid, backId, mainId, item.qty, 'TRANSFER', 'Moved from Back Godown to Main Store');
         }
       }
       showToast(`${action === 'sold' ? 'Sold' : 'Moved'} ${cart.length} item(s) ✓`, 'success');
@@ -188,21 +237,23 @@ function PosDashboard() {
   }
 
   async function processItem(item: CartItem, action: 'sold' | 'to_main') {
+    if (action === 'to_main' && item.qty > (backStockMap[item.product.product_id] || 0)) {
+      showToast(`Only ${backStockMap[item.product.product_id] || 0} in Back Godown for ${item.product.product_name}`, 'error');
+      return;
+    }
     setProcessing(true);
-    const locId  = location === 'back' ? 2 : 1;
+    const backId = 2;
     const mainId = 1;
     try {
-      const pid    = item.product.product_id;
-      const curQty = (location === 'back' ? backStockMap : mainStockMap)[pid] || 0;
-      const deduct = Math.min(item.qty, curQty);
+      const pid = item.product.product_id;
       if (action === 'sold') {
-        await upsertStock(pid, locId, { quantity: Math.max(0, curQty - deduct) });
-        await logMovement(pid, locId, null, deduct, 'SALE', `Sold from ${location === 'back' ? 'Back Godown' : 'Main Store'}`);
+        await sellOneItem(pid, item.qty);
       } else {
-        await upsertStock(pid, locId, { quantity: Math.max(0, curQty - deduct) });
+        const backQty = backStockMap[pid] || 0;
         const mainQty = mainStockMap[pid] || 0;
-        await upsertStock(pid, mainId, { quantity: mainQty + deduct });
-        await logMovement(pid, locId, mainId, deduct, 'TRANSFER', 'Moved from Back Godown to Main Store');
+        await upsertStock(pid, backId, { quantity: Math.max(0, backQty - item.qty) });
+        await upsertStock(pid, mainId, { quantity: mainQty + item.qty });
+        await logMovement(pid, backId, mainId, item.qty, 'TRANSFER', 'Moved from Back Godown to Main Store');
       }
       setCart(c => c.filter(i => i.product.product_id !== item.product.product_id));
       showToast(`${action === 'sold' ? 'Sold' : 'Moved'}: ${item.product.product_name} ✓`, 'success');
@@ -394,7 +445,10 @@ function PosDashboard() {
                 {cart.length === 0 && (
                   <p className="text-center text-muted text-xs py-8">Scan items to add to cart</p>
                 )}
-                {cart.map(item => (
+                {cart.map(item => {
+                  const max = maxForProduct(item.product);
+                  const atMax = item.qty >= max;
+                  return (
                   <div key={item.product.product_id} className="bg-surface2 rounded-xl px-3 py-2.5 border border-white/5">
                     <div className="flex items-start justify-between mb-2">
                       <p className="text-xs font-semibold text-slate-100 truncate flex-1 mr-2">{item.product.product_name}</p>
@@ -410,17 +464,36 @@ function PosDashboard() {
                             ? { ...i, qty: Math.max(1, i.qty - 1) }
                             : i
                         ))}
-                        className="w-6 h-6 rounded bg-surface border border-white/10 text-slate-300 text-sm flex items-center justify-center hover:bg-danger/20 hover:text-danger transition-all"
+                        className="w-7 h-7 rounded bg-surface border border-white/10 text-slate-300 text-sm font-bold flex items-center justify-center hover:bg-danger/20 hover:text-danger transition-all"
                       >−</button>
-                      <span className="text-sm font-bold text-slate-100 w-6 text-center tabular-nums">{item.qty}</span>
+                      <input
+                        type="number"
+                        min={1}
+                        max={max}
+                        value={item.qty}
+                        onChange={e => {
+                          const raw = parseInt(e.target.value) || 1;
+                          const v = Math.max(1, Math.min(raw, max));
+                          if (raw > max) showToast(`Max ${max} available for ${item.product.product_name}`, 'error');
+                          setCart(c => c.map(i =>
+                            i.product.product_id === item.product.product_id ? { ...i, qty: v } : i
+                          ));
+                        }}
+                        className="w-12 text-center text-sm font-bold tabular-nums bg-surface border border-white/10 rounded-md py-0.5 text-slate-100 outline-none focus:border-teal/50 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                      />
                       <button
-                        onClick={() => setCart(c => c.map(i =>
-                          i.product.product_id === item.product.product_id
-                            ? { ...i, qty: i.qty + 1 }
-                            : i
-                        ))}
-                        className="w-6 h-6 rounded bg-surface border border-white/10 text-slate-300 text-sm flex items-center justify-center hover:bg-teal/20 hover:text-teal transition-all"
+                        onClick={() => {
+                          if (atMax) { showToast(`Max ${max} available for ${item.product.product_name}`, 'error'); return; }
+                          setCart(c => c.map(i =>
+                            i.product.product_id === item.product.product_id ? { ...i, qty: i.qty + 1 } : i
+                          ));
+                        }}
+                        disabled={atMax}
+                        className="w-7 h-7 rounded bg-surface border border-white/10 text-slate-300 text-sm font-bold flex items-center justify-center hover:bg-teal/20 hover:text-teal transition-all disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-surface disabled:hover:text-slate-300"
                       >+</button>
+                      <span className={`text-[10px] font-mono ml-1 ${atMax ? 'text-gold' : 'text-muted'}`}>
+                        / {max}
+                      </span>
                     </div>
                     <div className="flex gap-1.5">
                       <button
@@ -437,7 +510,8 @@ function PosDashboard() {
                       )}
                     </div>
                   </div>
-                ))}
+                  );
+                })}
               </div>
 
               {cart.length > 0 && (
