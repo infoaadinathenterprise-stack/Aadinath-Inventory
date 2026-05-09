@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import { supabase } from '@/lib/supabase';
@@ -10,14 +10,19 @@ import { logMovement } from '@/lib/stockActions';
 import AdminNavbar from '../components/AdminNavbar';
 import Toast, { type ToastState } from '../components/Toast';
 
-const GEMINI_URL  = '/api/gemini';
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function fmtDate(iso: string) {
   return new Date(iso).toLocaleDateString('en-KE', { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
-// Parse the bill_image_url field, which now stores either a JSON-stringified
-// array of (data) URLs (new format) or a single URL string (old format).
+function fmtKsh(n: number | null | undefined) {
+  if (n == null) return '—';
+  return 'Ksh ' + Number(n).toLocaleString('en-KE');
+}
+
+// bill_image_url stores either a JSON-stringified array (new) or a single URL
+// (old). Parse defensively so old purchases still display.
 function parseBillUrls(s: string | null): string[] {
   if (!s) return [];
   const t = s.trim();
@@ -25,135 +30,26 @@ function parseBillUrls(s: string | null): string[] {
     try {
       const parsed = JSON.parse(t);
       return Array.isArray(parsed) ? parsed.filter((u): u is string => typeof u === 'string' && u.length > 0) : [s];
-    } catch {
-      return [s];
-    }
+    } catch { return [s]; }
   }
   return [s];
 }
 
-interface ScannedItem {
-  tempId:      number;
-  nameRaw:     string;
-  productId:   number | null;
-  productName: string;
-  qty:         number;
-  unitPrice:   number | null;
-  totalPrice:  number | null;
-  locationId:  number;
-  isNew:       boolean;
+// ─── Auth gate ────────────────────────────────────────────────────────────────
+
+export default function PurchasesPage() {
+  const [authed, setAuthed] = useState<boolean | null>(null);
+  const router = useRouter();
+  useEffect(() => {
+    const ok = typeof window !== 'undefined' && localStorage.getItem(SESSION_KEY) === '1';
+    if (!ok) router.replace('/admin');
+    else setAuthed(true);
+  }, [router]);
+  if (authed === null) return <div className="min-h-screen bg-navy" />;
+  return <PurchasesDashboard />;
 }
 
-// ── Gemini bill parser ────────────────────────────────────────────────────────
-
-// Decode our base64 string back into a fresh ArrayBuffer for the wire.
-// Sending the raw image as the body (instead of a JSON-wrapped base64
-// string) avoids an ~800KB JSON.parse on the worker, which was blowing
-// the 10ms CPU limit on Cloudflare Pages free tier.
-function base64ToArrayBuffer(b64: string): ArrayBuffer {
-  const binary = atob(b64);
-  const buf = new ArrayBuffer(binary.length);
-  const view = new Uint8Array(buf);
-  for (let i = 0; i < binary.length; i++) view[i] = binary.charCodeAt(i);
-  return buf;
-}
-
-async function callGemini(prompt: string, imageBase64?: string, mimeType?: string): Promise<string> {
-  // Prompt rides in a header (base64 to allow any chars); image rides
-  // in the body as raw bytes.
-  const promptHeader = btoa(unescape(encodeURIComponent(prompt)));
-  const headers: Record<string, string> = { 'X-Prompt': promptHeader };
-  let body: BodyInit | undefined;
-  if (imageBase64 && mimeType) {
-    headers['X-Mime-Type'] = mimeType;
-    headers['Content-Type'] = mimeType;
-    body = base64ToArrayBuffer(imageBase64);
-  } else {
-    headers['Content-Type'] = 'application/octet-stream';
-    body = new ArrayBuffer(0);
-  }
-  const res = await fetch(GEMINI_URL, { method: 'POST', headers, body });
-
-  // Read as text first — if the proxy returned an HTML error page (e.g.
-  // 502 from Cloudflare, 404 if the function isn't deployed), res.json()
-  // would throw a cryptic "string did not match the expected pattern".
-  const txt = await res.text();
-  const workerVersionHeader = res.headers.get('X-Worker-Version');
-  const trimmed = txt.trimStart();
-  // Cloudflare's standard 5xx page is a big HTML doc — don't dump it at the user.
-  if (trimmed.startsWith('<!DOCTYPE') || trimmed.startsWith('<html')) {
-    // If we get HTML AND there's no worker-version header, the new worker
-    // code isn't running yet — Pages caches functions and stale deploys
-    // are a common cause. Otherwise, our worker really did get killed.
-    const versionTag = workerVersionHeader
-      ? `worker ${workerVersionHeader} was killed mid-execution by Cloudflare (HTTP ${res.status}) — likely CPU-time limit on free tier; report this so we can shrink the request further`
-      : `OLD worker is still serving requests (no X-Worker-Version header). The Pages function deploy hasn't propagated yet — wait a minute and retry, or trigger a redeploy from the Cloudflare dashboard`;
-    throw new Error(`Proxy 5xx — ${versionTag}.`);
-  }
-  let data: { result?: string; error?: string; detail?: string; workerVersion?: string };
-  try {
-    data = JSON.parse(txt);
-  } catch {
-    throw new Error(`Gateway returned non-JSON (HTTP ${res.status}): ${txt.slice(0, 200)}`);
-  }
-  if (!res.ok || data.error) {
-    const combined = data.error && data.detail ? `${data.error}: ${data.detail}` : (data.error ?? data.detail ?? `HTTP ${res.status}`);
-    const versionTag = data.workerVersion ?? workerVersionHeader ?? 'unknown';
-    throw new Error(`${combined} [worker ${versionTag}]`);
-  }
-  return data.result ?? '';
-}
-
-// Clean up Gemini's JSON quirks before strict parse: BOM, zero-width chars,
-// smart quotes, trailing commas — all common reasons a valid-looking
-// response still fails JSON.parse.
-function sanitizeJson(s: string): string {
-  return s
-    .replace(/^﻿/, '')                  // BOM
-    .replace(/[​-‍﻿]/g, '')   // zero-width chars
-    .replace(/[“”]/g, '"')         // smart double quotes
-    .replace(/[‘’]/g, "'")         // smart single quotes
-    .replace(/,(\s*[}\]])/g, '$1');          // trailing commas before } or ]
-}
-
-function matchProduct(name: string, products: Product[]): Product | null {
-  const nl = name.toLowerCase();
-  return products.find(p => {
-    const pn = p.product_name.toLowerCase();
-    const key  = nl.substring(0, Math.min(7, nl.length));
-    const pkey = pn.substring(0, Math.min(7, pn.length));
-    return pn.includes(key) || nl.includes(pkey);
-  }) ?? null;
-}
-
-function parseGeminiItems(raw: string, products: Product[]): ScannedItem[] {
-  let counter = 0;
-  const lines = raw.split('\n').filter(l => l.trim());
-  const items: ScannedItem[] = [];
-  for (const line of lines) {
-    const m = line.match(/^([^|]+)\|(\d+(?:\.\d+)?)\|(\d+(?:\.\d+)?)\|(\d+(?:\.\d+)?)$/);
-    if (!m) continue;
-    const name = m[1].trim();
-    const qty  = parseFloat(m[2]);
-    const unitP = parseFloat(m[3]);
-    const totalP = parseFloat(m[4]);
-    const matched = matchProduct(name, products);
-    items.push({
-      tempId: ++counter,
-      nameRaw: name,
-      productId:   matched ? matched.product_id   : null,
-      productName: matched ? matched.product_name : name,
-      qty,
-      unitPrice:  isNaN(unitP)  ? null : unitP,
-      totalPrice: isNaN(totalP) ? null : totalP,
-      locationId: 2,
-      isNew: !matched,
-    });
-  }
-  return items;
-}
-
-// ── Purchases dashboard ───────────────────────────────────────────────────────
+// ─── Dashboard ────────────────────────────────────────────────────────────────
 
 function PurchasesDashboard() {
   const [purchases,  setPurchases]  = useState<Purchase[]>([]);
@@ -161,43 +57,28 @@ function PurchasesDashboard() {
   const [products,   setProducts]   = useState<Product[]>([]);
   const [loading,    setLoading]    = useState(true);
   const [toast,      setToast]      = useState<ToastState | null>(null);
-  const [newModal,   setNewModal]   = useState(false);
-  const [detailId,   setDetailId]   = useState<number | null>(null);
-  const [detailData, setDetailData] = useState<{ purchase: Purchase; items: PurchaseItem[] } | null>(null);
+  const [newOpen,    setNewOpen]    = useState(false);
+  const [detail,     setDetail]     = useState<{ purchase: Purchase; items: PurchaseItem[] } | null>(null);
   const toastId = useRef(0);
-  const router  = useRouter();
-
-  useEffect(() => {
-    if (typeof window === 'undefined' || localStorage.getItem(SESSION_KEY) !== '1') router.replace('/admin');
-  }, [router]);
 
   const load = useCallback(async () => {
     setLoading(true);
-    const [{ data: purch, error: purchErr }, { data: sup, error: supErr }, { data: prod, error: prodErr }] = await Promise.all([
+    const [pr, sr, prd] = await Promise.all([
       supabase.from('purchases').select('*').order('created_at', { ascending: false }),
       supabase.from('suppliers').select('*').eq('active_status', true).order('supplier_name'),
       supabase.from('products').select('*').eq('active_status', true).order('product_name'),
     ]);
-    if (purchErr || supErr || prodErr) {
-      setToast({ msg: 'Failed to load purchases: ' + (purchErr ?? supErr ?? prodErr)!.message, type: 'error', id: ++toastId.current });
+    if (pr.error || sr.error || prd.error) {
+      const msg = (pr.error ?? sr.error ?? prd.error)!.message;
+      setToast({ msg: 'Failed to load: ' + msg, type: 'error', id: ++toastId.current });
     } else {
-      setPurchases((purch ?? []) as Purchase[]);
-      setSuppliers((sup   ?? []) as Supplier[]);
-      setProducts( (prod  ?? []) as Product[]);
+      setPurchases((pr.data ?? []) as Purchase[]);
+      setSuppliers((sr.data ?? []) as Supplier[]);
+      setProducts((prd.data ?? []) as Product[]);
     }
     setLoading(false);
   }, []);
-
   useEffect(() => { load(); }, [load]);
-
-  async function openDetail(id: number) {
-    setDetailId(id);
-    const [{ data: pArr }, { data: items }] = await Promise.all([
-      supabase.from('purchases').select('*').eq('purchase_id', id),
-      supabase.from('purchase_items').select('*').eq('purchase_id', id),
-    ]);
-    if (pArr?.[0]) setDetailData({ purchase: pArr[0] as Purchase, items: (items ?? []) as PurchaseItem[] });
-  }
 
   function showToast(msg: string, type: ToastState['type']) {
     setToast({ msg, type, id: ++toastId.current });
@@ -218,18 +99,27 @@ function PurchasesDashboard() {
     return products.find(p => p.product_id === id)?.product_name ?? raw ?? `#${id}`;
   }
 
+  async function openDetail(id: number) {
+    const [pArr, items] = await Promise.all([
+      supabase.from('purchases').select('*').eq('purchase_id', id),
+      supabase.from('purchase_items').select('*').eq('purchase_id', id),
+    ]);
+    if (pArr.data?.[0]) {
+      setDetail({ purchase: pArr.data[0] as Purchase, items: (items.data ?? []) as PurchaseItem[] });
+    }
+  }
+
   return (
     <div className="min-h-screen bg-navy">
       <AdminNavbar onLogout={handleLogout} />
       <main className="pt-14 max-w-2xl mx-auto px-4 pb-10">
-
         <div className="flex items-center justify-between pt-5 pb-3">
           <div>
             <h2 className="text-base font-bold text-slate-100">Purchases</h2>
             <p className="text-xs text-muted mt-0.5">{purchases.length} records</p>
           </div>
           <button
-            onClick={() => setNewModal(true)}
+            onClick={() => setNewOpen(true)}
             className="px-4 py-2 rounded-xl bg-teal/10 border border-teal/30 text-teal text-xs font-bold hover:bg-teal/20 transition-all"
           >
             + New Purchase
@@ -250,21 +140,24 @@ function PurchasesDashboard() {
             {purchases.map((p, i) => (
               <motion.div
                 key={p.purchase_id}
-                initial={{ opacity: 0, y: 6 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: i * 0.02 }}
+                initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.02 }}
                 onClick={() => openDetail(p.purchase_id)}
                 className="bg-surface border border-white/8 rounded-xl p-4 cursor-pointer hover:border-teal/20 transition-all"
               >
                 <div className="flex items-center justify-between">
                   <div className="font-semibold text-sm text-slate-100">{supplierName(p.supplier_id)}</div>
-                  <div className="text-sm font-bold text-teal">{p.total_amount ? `Ksh ${Number(p.total_amount).toLocaleString('en-KE')}` : '—'}</div>
+                  <div className="text-sm font-bold text-teal">{fmtKsh(p.total_amount)}</div>
                 </div>
                 <div className="flex items-center justify-between mt-1">
-                  <div className="text-xs text-muted">{p.purchase_date ? fmtDate(p.purchase_date) : '—'}{p.notes ? ' · ' + p.notes : ''}</div>
-                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${p.status === 'CONFIRMED' ? 'bg-success/10 border-success/20 text-success' : 'bg-gold/10 border-gold/20 text-gold'}`}>
-                    {p.status}
-                  </span>
+                  <div className="text-xs text-muted">
+                    {p.purchase_date ? fmtDate(p.purchase_date) : '—'}
+                    {p.notes ? ' · ' + p.notes : ''}
+                  </div>
+                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                    p.status === 'CONFIRMED'
+                      ? 'bg-success/10 border-success/20 text-success'
+                      : 'bg-gold/10 border-gold/20 text-gold'
+                  }`}>{p.status}</span>
                 </div>
               </motion.div>
             ))}
@@ -273,73 +166,25 @@ function PurchasesDashboard() {
       </main>
 
       <AnimatePresence>
-        {newModal && (
+        {newOpen && (
           <NewPurchaseModal
             suppliers={suppliers}
             products={products}
-            onClose={() => setNewModal(false)}
-            onSaved={() => { setNewModal(false); load(); showToast('Purchase saved ✓', 'success'); }}
+            onClose={() => setNewOpen(false)}
+            onSaved={() => { setNewOpen(false); load(); showToast('Purchase saved ✓', 'success'); }}
             onError={msg => showToast(msg, 'error')}
           />
         )}
       </AnimatePresence>
 
       <AnimatePresence>
-        {detailId !== null && detailData && (
-          <>
-            <motion.div key="dbd" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              className="fixed inset-0 z-40 bg-black/70 backdrop-blur-sm" onClick={() => { setDetailId(null); setDetailData(null); }} />
-            <motion.div key="dmd" initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }}
-              transition={{ type: 'spring', damping: 28, stiffness: 220 }}
-              className="fixed bottom-0 inset-x-0 z-50 max-w-lg mx-auto bg-surface border border-white/8 rounded-t-2xl p-5 pb-8 max-h-[90vh] overflow-y-auto"
-            >
-              <div className="w-8 h-1 rounded-full bg-white/10 mx-auto mb-4" />
-              <div className="bg-surface2 rounded-xl p-4 mb-4">
-                <div className="font-bold text-slate-100">{supplierName(detailData.purchase.supplier_id)}</div>
-                <div className="text-xs text-muted mt-0.5">{detailData.purchase.purchase_date ? fmtDate(detailData.purchase.purchase_date) : '—'}</div>
-                {detailData.purchase.notes && <div className="text-xs text-muted/70 mt-1">{detailData.purchase.notes}</div>}
-              </div>
-              <div className="text-[10px] font-bold text-muted uppercase tracking-widest mb-2">Items ({detailData.items.length})</div>
-              {detailData.items.map(item => (
-                <div key={item.id} className="flex justify-between py-2.5 border-b border-white/5 text-sm">
-                  <div>
-                    <div className="font-semibold text-slate-100">{productName(item.product_id, item.product_name_raw)}</div>
-                    <div className="text-xs text-muted">Qty: {item.quantity}{item.unit_price ? ` · Ksh ${item.unit_price}/unit` : ''}</div>
-                  </div>
-                  {item.total_price && <div className="font-bold text-teal">Ksh {Number(item.total_price).toLocaleString('en-KE')}</div>}
-                </div>
-              ))}
-              {detailData.purchase.total_amount && (
-                <div className="flex justify-between pt-3 font-bold text-base">
-                  <span className="text-slate-100">Total</span>
-                  <span className="text-teal">Ksh {Number(detailData.purchase.total_amount).toLocaleString('en-KE')}</span>
-                </div>
-              )}
-              {(() => {
-                const urls = parseBillUrls(detailData.purchase.bill_image_url);
-                if (urls.length === 0) return null;
-                return (
-                  <div className="mt-4">
-                    <div className="text-[10px] font-bold text-muted uppercase tracking-widest mb-2">
-                      Bill Image{urls.length > 1 ? `s (${urls.length})` : ''}
-                    </div>
-                    <div className="flex flex-col gap-2">
-                      {urls.map((url, i) => (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img key={i} src={url} alt={`Bill ${i + 1}`} className="w-full rounded-xl border border-white/8" />
-                      ))}
-                    </div>
-                  </div>
-                );
-              })()}
-              <button
-                onClick={() => { setDetailId(null); setDetailData(null); }}
-                className="w-full mt-5 py-2.5 rounded-xl bg-surface2 border border-white/8 text-muted text-sm font-semibold hover:text-slate-100 transition-colors"
-              >
-                Close
-              </button>
-            </motion.div>
-          </>
+        {detail && (
+          <DetailDrawer
+            data={detail}
+            supplierName={supplierName}
+            productName={productName}
+            onClose={() => setDetail(null)}
+          />
         )}
       </AnimatePresence>
 
@@ -348,209 +193,191 @@ function PurchasesDashboard() {
   );
 }
 
-// ── New Purchase Modal ────────────────────────────────────────────────────────
+// ─── Detail drawer ────────────────────────────────────────────────────────────
+
+function DetailDrawer({
+  data, supplierName, productName, onClose,
+}: {
+  data: { purchase: Purchase; items: PurchaseItem[] };
+  supplierName: (id: number | null) => string;
+  productName:  (id: number | null, raw: string | null) => string;
+  onClose: () => void;
+}) {
+  const urls = parseBillUrls(data.purchase.bill_image_url);
+  return (
+    <>
+      <motion.div key="dbd" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+        className="fixed inset-0 z-40 bg-black/70 backdrop-blur-sm" onClick={onClose} />
+      <motion.div key="dmd" initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }}
+        transition={{ type: 'spring', damping: 28, stiffness: 220 }}
+        className="fixed bottom-0 inset-x-0 z-50 max-w-lg mx-auto bg-surface border border-white/8 rounded-t-2xl p-5 pb-8 max-h-[90vh] overflow-y-auto"
+      >
+        <div className="w-8 h-1 rounded-full bg-white/10 mx-auto mb-4" />
+        <div className="bg-surface2 rounded-xl p-4 mb-4">
+          <div className="font-bold text-slate-100">{supplierName(data.purchase.supplier_id)}</div>
+          <div className="text-xs text-muted mt-0.5">{data.purchase.purchase_date ? fmtDate(data.purchase.purchase_date) : '—'}</div>
+          {data.purchase.notes && <div className="text-xs text-muted/70 mt-1">{data.purchase.notes}</div>}
+        </div>
+
+        <div className="text-[10px] font-bold text-muted uppercase tracking-widest mb-2">Items ({data.items.length})</div>
+        {data.items.map(item => (
+          <div key={item.id} className="flex justify-between py-2.5 border-b border-white/5 text-sm">
+            <div>
+              <div className="font-semibold text-slate-100">{productName(item.product_id, item.product_name_raw)}</div>
+              <div className="text-xs text-muted">
+                Qty: {item.quantity}{item.unit_price ? ` · ${fmtKsh(item.unit_price)}/unit` : ''}
+              </div>
+            </div>
+            {item.total_price && <div className="font-bold text-teal">{fmtKsh(item.total_price)}</div>}
+          </div>
+        ))}
+
+        {data.purchase.total_amount != null && (
+          <div className="flex justify-between pt-3 font-bold text-base">
+            <span className="text-slate-100">Total</span>
+            <span className="text-teal">{fmtKsh(data.purchase.total_amount)}</span>
+          </div>
+        )}
+
+        {urls.length > 0 && (
+          <div className="mt-4">
+            <div className="text-[10px] font-bold text-muted uppercase tracking-widest mb-2">
+              Bill Image{urls.length > 1 ? `s (${urls.length})` : ''}
+            </div>
+            <div className="flex flex-col gap-2">
+              {urls.map((url, i) => (
+                /* eslint-disable-next-line @next/next/no-img-element */
+                <img key={i} src={url} alt={`Bill ${i + 1}`} className="w-full rounded-xl border border-white/8" />
+              ))}
+            </div>
+          </div>
+        )}
+
+        <button
+          onClick={onClose}
+          className="w-full mt-5 py-2.5 rounded-xl bg-surface2 border border-white/8 text-muted text-sm font-semibold hover:text-slate-100 transition-colors"
+        >Close</button>
+      </motion.div>
+    </>
+  );
+}
+
+// ─── New purchase modal ───────────────────────────────────────────────────────
+
+interface BillImage { thumb: string }
+interface ItemRow {
+  rowId:       number;
+  productId:   number | null;
+  productName: string;       // free-text fallback when productId is null
+  qty:         number;
+  unitPrice:   number | null;
+  locationId:  number;       // 1 = main, 2 = back
+}
 
 function NewPurchaseModal({
   suppliers, products, onClose, onSaved, onError,
 }: {
   suppliers: Supplier[];
-  products: Product[];
-  onClose: () => void;
-  onSaved: () => void;
-  onError: (msg: string) => void;
+  products:  Product[];
+  onClose:   () => void;
+  onSaved:   () => void;
+  onError:   (msg: string) => void;
 }) {
-  interface BillImage { b64: string; mime: string; thumb: string }
-
-  const [step,       setStep]       = useState<1 | 2>(1);
   const [supplierId, setSupplierId] = useState('');
   const [date,       setDate]       = useState(new Date().toISOString().split('T')[0]);
-  const [total,      setTotal]      = useState('');
   const [notes,      setNotes]      = useState('');
   const [images,     setImages]     = useState<BillImage[]>([]);
-  const [scanning,   setScanning]   = useState(false);
-  const [scanError,  setScanError]  = useState<string | null>(null);
-  const [items,      setItems]      = useState<ScannedItem[]>([]);
+  const [items,      setItems]      = useState<ItemRow[]>([blankRow()]);
   const [saving,     setSaving]     = useState(false);
-  const [ocrRaw,     setOcrRaw]     = useState('');
-  const [showRaw,    setShowRaw]    = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
-  const tempCounter = useRef(100);
+  const rowCounter = useRef(1);
 
-  function processFile(file: File) {
-    if (file.size > 10 * 1024 * 1024) { onError('File too large. Max 10MB'); return; }
-    const mime = file.type.startsWith('image/') ? 'image/jpeg' : file.type;
+  function blankRow(): ItemRow {
+    return { rowId: rowCounter.current++, productId: null, productName: '', qty: 1, unitPrice: null, locationId: 2 };
+  }
+
+  // Auto-computed total — always reflects current rows so the user
+  // doesn't have to keep a separate field in sync.
+  const computedTotal = useMemo(() => {
+    let sum = 0;
+    for (const r of items) {
+      if (r.qty > 0 && r.unitPrice != null) sum += r.qty * r.unitPrice;
+    }
+    return sum;
+  }, [items]);
+
+  function processImageFile(file: File) {
+    if (!file.type.startsWith('image/')) { onError('Please pick an image file'); return; }
+    if (file.size > 10 * 1024 * 1024) { onError('Image too large. Max 10MB'); return; }
     const reader = new FileReader();
     reader.onload = (e) => {
       const dataUrl = e.target?.result as string;
-      if (file.type.startsWith('image/')) {
-        const img = new window.Image();
-        img.onload = () => {
-          // Aggressive compression: Gemini OCR works fine on ~900px bills,
-          // and large payloads cause the Cloudflare worker to time out
-          // before Gemini responds (the 502 HTML you see is the worker
-          // being killed for exceeding wall-time).
-          const MAX = 900;
-          let w = img.width, h = img.height;
-          if (w > MAX || h > MAX) { if (w > h) { h = Math.round(h * MAX / w); w = MAX; } else { w = Math.round(w * MAX / h); h = MAX; } }
-          const canvas = document.createElement('canvas');
-          canvas.width = w; canvas.height = h;
-          canvas.getContext('2d')?.drawImage(img, 0, 0, w, h);
-          // Step the quality down until the encoded payload fits in ~600KB.
-          let q = 0.7;
-          let du = canvas.toDataURL('image/jpeg', q);
-          while (du.split(',')[1].length * 0.75 > 600_000 && q > 0.35) {
-            q -= 0.1;
-            du = canvas.toDataURL('image/jpeg', q);
-          }
-          setImages(prev => [...prev, { b64: du.split(',')[1], mime, thumb: du }]);
-        };
-        img.src = dataUrl;
-      } else {
-        // PDF or other — keep raw data URL for display fallback
-        setImages(prev => [...prev, { b64: dataUrl.split(',')[1], mime, thumb: dataUrl }]);
-      }
+      const img = new window.Image();
+      img.onload = () => {
+        // 900px / q=0.6 keeps a sharp thumbnail at ~250-400KB so the
+        // detail page stays snappy.
+        const MAX = 900;
+        let w = img.width, h = img.height;
+        if (w > MAX || h > MAX) { if (w > h) { h = Math.round(h * MAX / w); w = MAX; } else { w = Math.round(w * MAX / h); h = MAX; } }
+        const c = document.createElement('canvas');
+        c.width = w; c.height = h;
+        c.getContext('2d')?.drawImage(img, 0, 0, w, h);
+        let q = 0.7;
+        let du = c.toDataURL('image/jpeg', q);
+        while (du.split(',')[1].length * 0.75 > 400_000 && q > 0.4) {
+          q -= 0.1; du = c.toDataURL('image/jpeg', q);
+        }
+        setImages(prev => [...prev, { thumb: du }]);
+      };
+      img.src = dataUrl;
     };
     reader.readAsDataURL(file);
   }
 
-  function removeImage(idx: number) {
-    setImages(prev => prev.filter((_, i) => i !== idx));
+  function updateRow(rowId: number, patch: Partial<ItemRow>) {
+    setItems(rows => rows.map(r => r.rowId === rowId ? { ...r, ...patch } : r));
   }
 
-  async function scanBill() {
-    if (images.length === 0) return;
-    setScanning(true);
-    setScanError(null);
-    try {
-      // The proxy now sends responseMimeType: application/json, so we
-      // don't need to beg for JSON output — keep the prompt short so
-      // the model finishes faster.
-      const prompt = `Extract from this purchase bill/invoice image and return JSON with this shape:
-{
-  "supplier_name": string|null,
-  "bill_date": "YYYY-MM-DD"|null,
-  "total_amount": number|null,
-  "items": [{ "product_name": string, "quantity": number, "unit_price": number|null, "total_price": number|null }]
-}
-Only include real product line items — skip header labels, tax rows, discount rows, subtotals.`;
-
-      const raw = await callGemini(prompt, images[0].b64, images[0].mime);
-      setOcrRaw(raw);
-
-      // Strip markdown code fences if present
-      let jsonText = raw.trim();
-      jsonText = jsonText.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```\s*$/i, '').trim();
-      // Find the first { and last } to extract just the JSON object
-      const start = jsonText.indexOf('{');
-      const end   = jsonText.lastIndexOf('}');
-      if (start === -1 || end === -1) throw new Error('No JSON object found in AI response. Raw: ' + raw.slice(0, 200));
-      jsonText = sanitizeJson(jsonText.slice(start, end + 1));
-
-      type GeminiBill = {
-        supplier_name: string | null;
-        bill_date:     string | null;
-        total_amount:  number | null;
-        items: { product_name: string; quantity: number; unit_price: number | null; total_price: number | null }[];
-      };
-      let result: GeminiBill;
-      try {
-        result = JSON.parse(jsonText) as GeminiBill;
-      } catch (parseErr) {
-        const pmsg = parseErr instanceof Error ? parseErr.message : 'parse error';
-        throw new Error(`Could not parse AI JSON (${pmsg}). Raw: ${jsonText.slice(0, 250)}`);
-      }
-
-      // Pre-fill supplier if a match is found
-      if (result.supplier_name) {
-        const sName = result.supplier_name.toLowerCase();
-        const matched = suppliers.find(s =>
-          s.supplier_name.toLowerCase().includes(sName) || sName.includes(s.supplier_name.toLowerCase())
-        );
-        if (matched) setSupplierId(String(matched.supplier_id));
-      }
-      // Pre-fill date and total
-      if (result.bill_date)      setDate(result.bill_date);
-      if (result.total_amount != null) setTotal(String(result.total_amount));
-
-      // Map items to ScannedItem[]
-      let counter = 0;
-      const parsed: ScannedItem[] = (result.items ?? []).map(it => {
-        const m = matchProduct(it.product_name, products);
-        return {
-          tempId:      ++counter,
-          nameRaw:     it.product_name,
-          productId:   m ? m.product_id   : null,
-          productName: m ? m.product_name : it.product_name,
-          qty:         it.quantity ?? 1,
-          unitPrice:   it.unit_price  ?? null,
-          totalPrice:  it.total_price ?? null,
-          locationId:  2,
-          isNew:       !m,
-        };
-      });
-
-      setItems(parsed.length > 0 ? parsed : [newBlankItem()]);
-      setStep(2);
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : 'Unknown error';
-      setScanError(msg);
-      onError('AI scan failed: ' + msg);
-    } finally {
-      setScanning(false);
-    }
-  }
-
-  function newBlankItem(): ScannedItem {
-    return { tempId: ++tempCounter.current, nameRaw: '', productId: null, productName: '', qty: 1, unitPrice: null, totalPrice: null, locationId: 2, isNew: false };
-  }
-
-  function updateItem(tempId: number, patch: Partial<ScannedItem>) {
-    setItems(items => items.map(it => it.tempId === tempId ? { ...it, ...patch } : it));
-  }
-
-  function removeItem(tempId: number) {
-    setItems(items => items.filter(it => it.tempId !== tempId));
-  }
-
-  async function confirmPurchase() {
-    if (items.length === 0) { onError('Add at least one item'); return; }
+  async function save() {
+    const validRows = items.filter(r => (r.productId || r.productName.trim()) && r.qty > 0);
+    if (validRows.length === 0) { onError('Add at least one item with quantity'); return; }
     setSaving(true);
     try {
-      const billUrlsField = images.length > 0
-        ? JSON.stringify(images.map(i => i.thumb))
-        : null;
+      const billField = images.length > 0 ? JSON.stringify(images.map(i => i.thumb)) : null;
       const { data: pArr, error: pErr } = await supabase.from('purchases').insert({
         supplier_id:    supplierId ? parseInt(supplierId) : null,
         purchase_date:  date || null,
-        total_amount:   total ? parseFloat(total) : null,
-        notes:          notes || null,
+        total_amount:   computedTotal > 0 ? computedTotal : null,
+        notes:          notes.trim() || null,
         status:         'CONFIRMED',
-        bill_image_url: billUrlsField,
+        bill_image_url: billField,
       }).select();
       if (pErr || !pArr?.[0]) throw new Error(pErr?.message ?? 'Failed to save purchase');
       const purchaseId = (pArr[0] as Purchase).purchase_id;
 
-      for (const item of items) {
+      for (const row of validRows) {
+        const totalPrice = row.unitPrice != null ? row.qty * row.unitPrice : null;
         const { error: iErr } = await supabase.from('purchase_items').insert({
           purchase_id:      purchaseId,
-          product_id:       item.productId,
-          product_name_raw: item.nameRaw || null,
-          quantity:         item.qty,
-          unit_price:       item.unitPrice,
-          total_price:      item.totalPrice,
-          location_id:      item.locationId,
+          product_id:       row.productId,
+          product_name_raw: row.productId ? null : row.productName.trim(),
+          quantity:         row.qty,
+          unit_price:       row.unitPrice,
+          total_price:      totalPrice,
+          location_id:      row.locationId,
         });
         if (iErr) throw new Error(iErr.message);
 
-        if (item.productId) {
-          const { data: existing } = await supabase.from('stock_by_location')
-            .select('id, quantity').eq('product_id', item.productId).eq('location_id', item.locationId).single();
+        if (row.productId) {
+          const { data: existing } = await supabase
+            .from('stock_by_location').select('id, quantity')
+            .eq('product_id', row.productId).eq('location_id', row.locationId).single();
           if (existing) {
-            await supabase.from('stock_by_location').update({ quantity: (existing.quantity ?? 0) + item.qty }).eq('id', existing.id);
+            await supabase.from('stock_by_location').update({ quantity: (existing.quantity ?? 0) + row.qty }).eq('id', existing.id);
           } else {
-            await supabase.from('stock_by_location').insert({ product_id: item.productId, location_id: item.locationId, quantity: item.qty });
+            await supabase.from('stock_by_location').insert({ product_id: row.productId, location_id: row.locationId, quantity: row.qty });
           }
-          await logMovement(item.productId, null, item.locationId, item.qty, 'PURCHASE_IN', 'Purchase #' + purchaseId);
+          await logMovement(row.productId, null, row.locationId, row.qty, 'PURCHASE_IN', `Purchase #${purchaseId}`);
         }
       }
       onSaved();
@@ -570,236 +397,230 @@ Only include real product line items — skip header labels, tax rows, discount 
         className="fixed bottom-0 inset-x-0 z-50 max-w-lg mx-auto bg-surface border border-white/8 rounded-t-2xl p-5 pb-8 max-h-[95vh] overflow-y-auto"
       >
         <div className="w-8 h-1 rounded-full bg-white/10 mx-auto mb-4" />
-        <h3 className="text-base font-bold text-slate-100 mb-4">
-          {step === 1 ? 'New Purchase' : 'Review Items'}
-        </h3>
+        <h3 className="text-base font-bold text-slate-100 mb-4">New Purchase</h3>
 
-        {step === 1 && (
-          <div className="flex flex-col gap-3">
-            <div>
-              <label className="text-[10px] font-bold text-muted uppercase tracking-widest block mb-1">Supplier</label>
-              <select value={supplierId} onChange={e => setSupplierId(e.target.value)}
-                className="w-full px-3 py-2.5 rounded-xl bg-surface2 border border-white/8 text-slate-100 text-sm outline-none focus:border-teal/40">
-                <option value="">— Select supplier (optional) —</option>
-                {suppliers.map(s => <option key={s.supplier_id} value={s.supplier_id}>{s.supplier_name}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="text-[10px] font-bold text-muted uppercase tracking-widest block mb-1">Purchase Date</label>
-              <input type="date" value={date} onChange={e => setDate(e.target.value)}
-                className="w-full px-3 py-2.5 rounded-xl bg-surface2 border border-white/8 text-slate-100 text-sm outline-none focus:border-teal/40" />
-            </div>
+        <div className="flex flex-col gap-3">
+          {/* Supplier */}
+          <div>
+            <label className="text-[10px] font-bold text-muted uppercase tracking-widest block mb-1">Supplier</label>
+            <select value={supplierId} onChange={e => setSupplierId(e.target.value)}
+              className="w-full px-3 py-2.5 rounded-xl bg-surface2 border border-white/8 text-slate-100 text-sm outline-none focus:border-teal/40">
+              <option value="">— Select supplier (optional) —</option>
+              {suppliers.map(s => <option key={s.supplier_id} value={s.supplier_id}>{s.supplier_name}</option>)}
+            </select>
+          </div>
 
-            <div>
-              <label className="text-[10px] font-bold text-muted uppercase tracking-widest block mb-1">
-                Upload Bill Photos {images.length > 0 ? `(${images.length})` : '(optional)'}
-              </label>
+          {/* Date */}
+          <div>
+            <label className="text-[10px] font-bold text-muted uppercase tracking-widest block mb-1">Purchase Date</label>
+            <input type="date" value={date} onChange={e => setDate(e.target.value)}
+              className="w-full px-3 py-2.5 rounded-xl bg-surface2 border border-white/8 text-slate-100 text-sm outline-none focus:border-teal/40" />
+          </div>
 
-              {images.length > 0 && (
-                <div className="grid grid-cols-3 gap-2 mb-2">
-                  {images.map((img, i) => (
-                    <div key={i} className="relative aspect-square rounded-lg overflow-hidden border border-white/8 bg-surface2">
-                      {img.mime.startsWith('image/') ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img src={img.thumb} alt={`bill ${i + 1}`} className="w-full h-full object-cover" />
-                      ) : (
-                        <div className="w-full h-full flex items-center justify-center text-2xl">📄</div>
-                      )}
-                      <button
-                        onClick={() => removeImage(i)}
-                        className="absolute top-1 right-1 w-6 h-6 rounded-full bg-black/70 text-white text-xs font-bold flex items-center justify-center hover:bg-danger"
-                      >
-                        ✕
-                      </button>
-                      {i === 0 && (
-                        <span className="absolute bottom-1 left-1 text-[9px] font-bold px-1.5 py-0.5 rounded bg-teal/80 text-navy">SCAN</span>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              <div
-                onClick={() => fileRef.current?.click()}
-                className="border-2 border-dashed border-white/15 rounded-xl p-4 text-center cursor-pointer hover:border-teal/30 hover:bg-teal/5 transition-all"
-              >
-                <div className="text-2xl mb-1">{images.length > 0 ? '➕' : '📷'}</div>
-                <p className="text-xs text-muted">
-                  {images.length > 0 ? 'Add another image' : 'Tap to take photo or upload bill'}
-                  <br /><b>Max 10MB · JPG, PNG, PDF</b>
-                </p>
-              </div>
-              <input ref={fileRef} type="file" accept="image/*,application/pdf" className="hidden"
-                onChange={e => {
-                  if (e.target.files?.[0]) processFile(e.target.files[0]);
-                  e.target.value = '';
-                }} />
-            </div>
-
-            {scanning && (
-              <div className="flex items-center gap-2 text-teal text-sm font-semibold py-2">
-                <div className="w-4 h-4 rounded-full border-2 border-teal border-t-transparent animate-spin" />
-                AI is reading your bill...
+          {/* Bill images (optional, no AI scan) */}
+          <div>
+            <label className="text-[10px] font-bold text-muted uppercase tracking-widest block mb-1">
+              Bill Photos (optional) {images.length > 0 ? `· ${images.length}` : ''}
+            </label>
+            {images.length > 0 && (
+              <div className="grid grid-cols-3 gap-2 mb-2">
+                {images.map((img, i) => (
+                  <div key={i} className="relative aspect-square rounded-lg overflow-hidden border border-white/8 bg-surface2">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={img.thumb} alt={`bill ${i + 1}`} className="w-full h-full object-cover" />
+                    <button
+                      onClick={() => setImages(prev => prev.filter((_, idx) => idx !== i))}
+                      className="absolute top-1 right-1 w-6 h-6 rounded-full bg-black/70 text-white text-xs font-bold flex items-center justify-center hover:bg-danger"
+                    >✕</button>
+                  </div>
+                ))}
               </div>
             )}
+            <div
+              onClick={() => fileRef.current?.click()}
+              className="border-2 border-dashed border-white/15 rounded-xl p-4 text-center cursor-pointer hover:border-teal/30 hover:bg-teal/5 transition-all"
+            >
+              <div className="text-2xl mb-1">{images.length > 0 ? '➕' : '📷'}</div>
+              <p className="text-xs text-muted">
+                {images.length > 0 ? 'Add another photo' : 'Tap to attach a bill photo'}
+                <br /><b>Stored only · Max 10MB · JPG, PNG</b>
+              </p>
+            </div>
+            <input ref={fileRef} type="file" accept="image/*" className="hidden"
+              onChange={e => { if (e.target.files?.[0]) processImageFile(e.target.files[0]); e.target.value = ''; }} />
+          </div>
 
-            {scanError && !scanning && (
-              <div className="rounded-lg bg-danger/10 border border-danger/30 px-3 py-2 text-xs text-danger break-words">
-                <div className="font-bold mb-0.5">Scan failed</div>
-                {scanError}
-              </div>
-            )}
-
-            <div className="flex gap-3 mt-2">
-              <button onClick={onClose} className="flex-1 py-2.5 rounded-xl bg-surface2 border border-white/8 text-muted text-sm font-semibold">Cancel</button>
-              {images.length > 0 && !scanning && (
-                <button onClick={scanBill} className="flex-1 py-2.5 rounded-xl bg-teal/15 border border-teal/30 text-teal text-sm font-bold">🔍 Scan Bill</button>
-              )}
-              <button onClick={() => { setItems([newBlankItem()]); setStep(2); }}
-                className="flex-1 py-2.5 rounded-xl bg-surface2 border border-white/8 text-muted text-sm font-semibold hover:text-slate-100">
-                {images.length > 0 ? 'Skip Scan →' : 'Enter Manually →'}
-              </button>
+          {/* Items */}
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-[10px] font-bold text-muted uppercase tracking-widest">Items</span>
+              <button
+                onClick={() => setItems(r => [...r, blankRow()])}
+                className="text-[11px] font-bold text-teal px-3 py-1 rounded-lg bg-teal/10 border border-teal/20 hover:bg-teal/20 transition-colors"
+              >+ Add Item</button>
+            </div>
+            <div className="flex flex-col gap-2">
+              {items.map((row, idx) => (
+                <ItemRowEditor
+                  key={row.rowId}
+                  row={row}
+                  index={idx}
+                  products={products}
+                  onChange={patch => updateRow(row.rowId, patch)}
+                  onRemove={items.length > 1 ? () => setItems(rs => rs.filter(r => r.rowId !== row.rowId)) : undefined}
+                />
+              ))}
             </div>
           </div>
-        )}
 
-        {step === 2 && (
-          <div className="flex flex-col gap-3">
-            {ocrRaw && (
-              <div>
-                <button onClick={() => setShowRaw(v => !v)} className="text-xs text-muted underline mb-1">
-                  {showRaw ? 'Hide' : '🔍 View'} what AI read
-                </button>
-                {showRaw && (
-                  <pre className="bg-navy rounded-lg p-3 text-[10px] text-muted/70 font-mono max-h-28 overflow-y-auto whitespace-pre-wrap">{ocrRaw}</pre>
-                )}
-              </div>
-            )}
-
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-bold text-slate-300">Items ({items.length})</span>
-              <button onClick={() => setItems(it => [...it, newBlankItem()])}
-                className="text-xs text-teal font-bold px-3 py-1 rounded-lg bg-teal/10 border border-teal/20">+ Add Item</button>
-            </div>
-
-            {items.map(item => (
-              <ScannedItemRow
-                key={item.tempId}
-                item={item}
-                products={products}
-                onChange={patch => updateItem(item.tempId, patch)}
-                onRemove={() => removeItem(item.tempId)}
-              />
-            ))}
-
-            <div>
-              <label className="text-[10px] font-bold text-muted uppercase tracking-widest block mb-1">Total Amount (Ksh)</label>
-              <input type="number" value={total} onChange={e => setTotal(e.target.value)} placeholder="0.00"
-                className="w-full px-3 py-2.5 rounded-xl bg-surface2 border border-white/8 text-slate-100 text-sm outline-none focus:border-teal/40" />
-            </div>
-            <div>
-              <label className="text-[10px] font-bold text-muted uppercase tracking-widest block mb-1">Notes</label>
-              <input value={notes} onChange={e => setNotes(e.target.value)} placeholder="Optional"
-                className="w-full px-3 py-2.5 rounded-xl bg-surface2 border border-white/8 text-slate-100 text-sm outline-none focus:border-teal/40" />
-            </div>
-
-            <div className="flex gap-3 mt-2">
-              <button onClick={() => setStep(1)} className="flex-1 py-2.5 rounded-xl bg-surface2 border border-white/8 text-muted text-sm font-semibold">← Back</button>
-              <button onClick={confirmPurchase} disabled={saving}
-                className="flex-1 py-2.5 rounded-xl bg-teal/15 border border-teal/30 text-teal text-sm font-bold disabled:opacity-50">
-                {saving ? 'Saving…' : '✓ Save Purchase'}
-              </button>
-            </div>
+          {/* Notes */}
+          <div>
+            <label className="text-[10px] font-bold text-muted uppercase tracking-widest block mb-1">Notes</label>
+            <input value={notes} onChange={e => setNotes(e.target.value)} placeholder="Optional"
+              className="w-full px-3 py-2.5 rounded-xl bg-surface2 border border-white/8 text-slate-100 text-sm outline-none focus:border-teal/40" />
           </div>
-        )}
+
+          {/* Computed total */}
+          <div className="flex items-center justify-between bg-surface2 border border-white/8 rounded-xl px-4 py-3">
+            <span className="text-xs font-bold text-muted uppercase tracking-widest">Total</span>
+            <span className="text-base font-bold text-teal tabular-nums">{fmtKsh(computedTotal)}</span>
+          </div>
+
+          {/* Actions */}
+          <div className="flex gap-3 mt-2">
+            <button onClick={onClose} className="flex-1 py-2.5 rounded-xl bg-surface2 border border-white/8 text-muted text-sm font-semibold hover:text-slate-100">Cancel</button>
+            <button onClick={save} disabled={saving}
+              className="flex-1 py-2.5 rounded-xl bg-teal/15 border border-teal/30 text-teal text-sm font-bold disabled:opacity-50">
+              {saving ? 'Saving…' : '✓ Save Purchase'}
+            </button>
+          </div>
+        </div>
       </motion.div>
     </>
   );
 }
 
-function ScannedItemRow({
-  item, products, onChange, onRemove,
-}: {
-  item: ScannedItem;
-  products: Product[];
-  onChange: (patch: Partial<ScannedItem>) => void;
-  onRemove: () => void;
-}) {
-  const [pSearch,  setPSearch]  = useState(item.productName);
-  const [pOpen,    setPOpen]    = useState(false);
+// ─── Item row editor ──────────────────────────────────────────────────────────
 
-  const matches = pSearch.length > 1
-    ? products.filter(p => p.product_name.toLowerCase().includes(pSearch.toLowerCase())).slice(0, 6)
-    : [];
+function ItemRowEditor({
+  row, index, products, onChange, onRemove,
+}: {
+  row:      ItemRow;
+  index:    number;
+  products: Product[];
+  onChange: (patch: Partial<ItemRow>) => void;
+  onRemove: (() => void) | undefined;
+}) {
+  const [search, setSearch] = useState(row.productName);
+  const [open,   setOpen]   = useState(false);
+
+  // Keep local search box in sync if parent overwrites the row (e.g.
+  // after picking a product elsewhere).
+  useEffect(() => { setSearch(row.productName); }, [row.productName]);
+
+  const matches = useMemo(() => {
+    if (search.trim().length < 1) return [];
+    const q = search.toLowerCase();
+    return products.filter(p =>
+      p.product_name.toLowerCase().includes(q) ||
+      (p.stock_keeping_unit ?? '').toLowerCase().includes(q),
+    ).slice(0, 6);
+  }, [search, products]);
+
+  const lineTotal = row.unitPrice != null ? row.qty * row.unitPrice : null;
+  const matched = row.productId != null;
 
   return (
-    <div className={`rounded-xl border p-3 ${item.isNew ? 'border-gold/30 bg-gold/5' : 'border-white/8 bg-surface2'}`}>
-      <div className="flex items-start justify-between mb-2">
-        <div className="flex items-center gap-2">
-          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${item.isNew ? 'bg-gold/10 border-gold/20 text-gold' : item.productId ? 'bg-success/10 border-success/20 text-success' : 'bg-danger/10 border-danger/20 text-danger'}`}>
-            {item.isNew ? 'New' : item.productId ? 'Matched' : 'Unmatched'}
-          </span>
-          {item.nameRaw && <span className="text-[10px] text-muted">{item.nameRaw}</span>}
-        </div>
-        <button onClick={onRemove} className="text-muted hover:text-danger text-sm">✕</button>
+    <div className={`rounded-xl border p-3 ${matched ? 'border-success/20 bg-success/5' : 'border-white/8 bg-surface2'}`}>
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-[10px] font-bold text-muted uppercase tracking-widest">
+          #{index + 1} {matched ? '· Matched' : (row.productName.trim() ? '· New product' : '')}
+        </span>
+        {onRemove && (
+          <button onClick={onRemove} className="text-muted hover:text-danger text-sm transition-colors">✕</button>
+        )}
       </div>
 
+      {/* Product autocomplete */}
       <div className="relative mb-2">
         <input
-          value={pSearch}
-          onChange={e => { setPSearch(e.target.value); setPOpen(true); onChange({ productName: e.target.value, productId: null }); }}
-          onFocus={() => setPOpen(true)}
-          onBlur={() => setTimeout(() => setPOpen(false), 150)}
-          placeholder="Search or type product name..."
+          value={search}
+          onChange={e => { setSearch(e.target.value); setOpen(true); onChange({ productId: null, productName: e.target.value }); }}
+          onFocus={() => setOpen(true)}
+          onBlur={() => setTimeout(() => setOpen(false), 150)}
+          placeholder="Product name or SKU…"
           className="w-full px-3 py-2 rounded-lg bg-surface border border-white/8 text-slate-100 text-xs outline-none focus:border-teal/40"
         />
-        {pOpen && matches.length > 0 && (
-          <div className="absolute top-full left-0 right-0 z-50 bg-surface border border-white/10 rounded-lg shadow-xl max-h-36 overflow-y-auto">
+        {open && matches.length > 0 && (
+          <div className="absolute top-full left-0 right-0 z-20 mt-1 bg-surface border border-white/10 rounded-lg shadow-xl max-h-40 overflow-y-auto">
             {matches.map(p => (
-              <div key={p.product_id} onMouseDown={() => { onChange({ productId: p.product_id, productName: p.product_name, isNew: false }); setPSearch(p.product_name); setPOpen(false); }}
-                className="px-3 py-2 text-xs text-slate-300 hover:bg-surface2 cursor-pointer border-b border-white/5 last:border-0">
-                {p.product_name}
+              <div
+                key={p.product_id}
+                onMouseDown={() => {
+                  setSearch(p.product_name);
+                  setOpen(false);
+                  onChange({
+                    productId:   p.product_id,
+                    productName: p.product_name,
+                    unitPrice:   row.unitPrice ?? p.buying_price ?? null,
+                  });
+                }}
+                className="px-3 py-2 text-xs text-slate-300 hover:bg-surface2 cursor-pointer border-b border-white/5 last:border-0"
+              >
+                <div className="font-semibold text-slate-100">{p.product_name}</div>
+                <div className="text-[10px] text-muted">
+                  {p.stock_keeping_unit || 'No SKU'}{p.buying_price ? ` · last buy ${fmtKsh(p.buying_price)}` : ''}
+                </div>
               </div>
             ))}
           </div>
         )}
       </div>
 
-      <div className="grid grid-cols-3 gap-2">
-        {(['qty', 'unitPrice', 'totalPrice'] as const).map(field => (
-          <div key={field}>
-            <label className="text-[9px] font-bold text-muted uppercase block mb-0.5">
-              {field === 'qty' ? 'Qty' : field === 'unitPrice' ? 'Unit Ksh' : 'Total Ksh'}
-            </label>
-            <input
-              type="number"
-              value={item[field] ?? ''}
-              onChange={e => onChange({ [field]: e.target.value ? parseFloat(e.target.value) : null } as Partial<ScannedItem>)}
-              className="w-full px-2 py-1.5 rounded-lg bg-surface border border-white/8 text-slate-100 text-xs outline-none focus:border-teal/40"
-            />
+      {/* qty / unit / total */}
+      <div className="grid grid-cols-[1fr_1fr_auto] gap-2 items-end">
+        <div>
+          <label className="text-[9px] font-bold text-muted uppercase block mb-0.5">Qty</label>
+          <input
+            type="number" min={1} value={row.qty}
+            onChange={e => onChange({ qty: Math.max(1, parseInt(e.target.value) || 1) })}
+            className="w-full px-2 py-1.5 rounded-lg bg-surface border border-white/8 text-slate-100 text-xs outline-none focus:border-teal/40"
+          />
+        </div>
+        <div>
+          <label className="text-[9px] font-bold text-muted uppercase block mb-0.5">Unit Price (Ksh)</label>
+          <input
+            type="number" min={0} step="0.01" value={row.unitPrice ?? ''}
+            placeholder="0.00"
+            onChange={e => onChange({ unitPrice: e.target.value ? parseFloat(e.target.value) : null })}
+            className="w-full px-2 py-1.5 rounded-lg bg-surface border border-white/8 text-slate-100 text-xs outline-none focus:border-teal/40"
+          />
+        </div>
+        <div>
+          <label className="text-[9px] font-bold text-muted uppercase block mb-0.5">Line</label>
+          <div className="px-2 py-1.5 rounded-lg bg-surface border border-white/8 text-teal text-xs font-bold tabular-nums min-w-20 text-right">
+            {lineTotal != null ? Number(lineTotal).toLocaleString('en-KE') : '—'}
           </div>
-        ))}
+        </div>
       </div>
+
+      {/* Location */}
       <div className="mt-2">
-        <label className="text-[9px] font-bold text-muted uppercase block mb-0.5">Location</label>
-        <select value={item.locationId} onChange={e => onChange({ locationId: parseInt(e.target.value) })}
-          className="w-full px-2 py-1.5 rounded-lg bg-surface border border-white/8 text-slate-100 text-xs outline-none focus:border-teal/40">
-          <option value={2}>Back Godown</option>
-          <option value={1}>Main Store</option>
-        </select>
+        <label className="text-[9px] font-bold text-muted uppercase block mb-0.5">Goes to</label>
+        <div className="flex gap-1.5">
+          {([[2, '🏭 Back Godown'], [1, '🏪 Main Store']] as const).map(([id, label]) => (
+            <button
+              key={id}
+              onClick={() => onChange({ locationId: id })}
+              className={`flex-1 py-1.5 rounded-lg border text-[11px] font-bold transition-all ${
+                row.locationId === id
+                  ? 'border-teal bg-teal/10 text-teal'
+                  : 'border-white/8 bg-surface text-muted hover:border-white/20'
+              }`}
+            >{label}</button>
+          ))}
+        </div>
       </div>
     </div>
   );
-}
-
-export default function PurchasesPage() {
-  const [authed, setAuthed] = useState<boolean | null>(null);
-  const router = useRouter();
-  useEffect(() => {
-    const ok = typeof window !== 'undefined' && localStorage.getItem(SESSION_KEY) === '1';
-    if (!ok) router.replace('/admin');
-    else setAuthed(true);
-  }, [router]);
-  if (authed === null) return <div className="min-h-screen bg-navy" />;
-  return <PurchasesDashboard />;
 }
