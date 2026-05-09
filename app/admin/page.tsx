@@ -208,6 +208,37 @@ function ProductModal({
   const [selectedComp, setSelectedComp] = useState<Product | null>(null);
   const [compQty,      setCompQty]      = useState(1);
   const [compGroup,    setCompGroup]    = useState('');
+  const [imageUrl,     setImageUrl]     = useState<string | null>(editing?.image_url ?? null);
+  const imageInputRef = useRef<HTMLInputElement>(null);
+
+  function processImageFile(file: File) {
+    if (!file.type.startsWith('image/')) { onError('Please pick an image file'); return; }
+    if (file.size > 10 * 1024 * 1024) { onError('Image too large. Max 10MB'); return; }
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const dataUrl = e.target?.result as string;
+      const img = new window.Image();
+      img.onload = () => {
+        // Product cards render at ~square aspect; 600px max edge gives sharp
+        // results at 2x density without bloating the row.
+        const MAX = 600;
+        let w = img.width, h = img.height;
+        if (w > MAX || h > MAX) { if (w > h) { h = Math.round(h * MAX / w); w = MAX; } else { w = Math.round(w * MAX / h); h = MAX; } }
+        const canvas = document.createElement('canvas');
+        canvas.width = w; canvas.height = h;
+        canvas.getContext('2d')?.drawImage(img, 0, 0, w, h);
+        let q = 0.75;
+        let du = canvas.toDataURL('image/jpeg', q);
+        while (du.split(',')[1].length * 0.75 > 250_000 && q > 0.4) {
+          q -= 0.1;
+          du = canvas.toDataURL('image/jpeg', q);
+        }
+        setImageUrl(du);
+      };
+      img.src = dataUrl;
+    };
+    reader.readAsDataURL(file);
+  }
 
   const isBox = form.unit_type === 'box';
   const ppb   = parseInt(form.pieces_per_box) || 0;
@@ -297,6 +328,7 @@ function ProductModal({
       box_selling_price:  isBox ? (parseFloat(form.box_selling_price) || null) : null,
       reorder_level:      parseInt(form.reorder_level) || 0,
       active_status:      true,
+      image_url:          imageUrl,
     };
 
     try {
@@ -353,6 +385,50 @@ function ProductModal({
         <h3 className="text-base font-bold text-slate-100 mb-4">{editing ? 'Edit Product' : 'Add Product'}</h3>
 
         <div className="flex flex-col gap-3">
+          {/* Image uploader */}
+          <div>
+            <label className="text-[10px] font-bold text-muted uppercase tracking-widest block mb-1">Product Image (optional)</label>
+            {imageUrl ? (
+              <div className="flex items-center gap-3 bg-surface2 border border-white/8 rounded-xl p-3">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={imageUrl} alt="product" className="w-20 h-20 object-cover rounded-lg border border-white/10 shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <div className="text-xs font-semibold text-slate-100 mb-2">Image set</div>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => imageInputRef.current?.click()}
+                      className="px-3 py-1.5 rounded-lg bg-teal/10 border border-teal/30 text-teal text-[11px] font-bold hover:bg-teal/20 transition-colors"
+                    >Replace</button>
+                    <button
+                      type="button"
+                      onClick={() => setImageUrl(null)}
+                      className="px-3 py-1.5 rounded-lg bg-surface border border-white/10 text-muted text-[11px] font-bold hover:text-danger hover:border-danger/30 transition-colors"
+                    >Remove</button>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div
+                onClick={() => imageInputRef.current?.click()}
+                className="border-2 border-dashed border-white/15 rounded-xl p-5 text-center cursor-pointer hover:border-teal/30 hover:bg-teal/5 transition-all"
+              >
+                <div className="text-2xl mb-1">🖼️</div>
+                <p className="text-xs text-muted">Tap to upload product photo<br /><b>Max 10MB · auto-compressed</b></p>
+              </div>
+            )}
+            <input
+              ref={imageInputRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={e => {
+                if (e.target.files?.[0]) processImageFile(e.target.files[0]);
+                e.target.value = '';
+              }}
+            />
+          </div>
+
           <div className="grid grid-cols-2 gap-3">
             <FormField label="Product Name *">
               <input value={form.product_name} onChange={e => set('product_name', e.target.value)}
