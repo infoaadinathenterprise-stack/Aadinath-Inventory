@@ -264,7 +264,7 @@ function DetailDrawer({
 
 // ─── New purchase modal ───────────────────────────────────────────────────────
 
-interface BillImage { thumb: string }
+interface BillImage { thumb: string; b64: string; mime: string }
 interface ItemRow {
   rowId:       number;
   productId:   number | null;
@@ -273,6 +273,13 @@ interface ItemRow {
   unitPrice:   number | null;
   locationId:  number;       // 1 = main, 2 = back
 }
+
+// OCR.space free-tier API key — same one the previous Aadinath-Inventory
+// project used. Free tier: 25k requests/month, 1MB max image. The browser
+// hits this directly so Cloudflare is never in the OCR path. If you want
+// to swap keys, get a new one at https://ocr.space/ocrapi/freekey.
+const OCR_SPACE_KEY = 'K89615870288957';
+const GEMINI_PROXY_URL = '/api/gemini';
 
 function NewPurchaseModal({
   suppliers, products, onClose, onSaved, onError,
@@ -289,6 +296,8 @@ function NewPurchaseModal({
   const [images,     setImages]     = useState<BillImage[]>([]);
   const [items,      setItems]      = useState<ItemRow[]>([blankRow()]);
   const [saving,     setSaving]     = useState(false);
+  const [scanning,   setScanning]   = useState(false);
+  const [scanInfo,   setScanInfo]   = useState<{ msg: string; ok: boolean } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const rowCounter = useRef(1);
 
@@ -324,10 +333,11 @@ function NewPurchaseModal({
         c.getContext('2d')?.drawImage(img, 0, 0, w, h);
         let q = 0.7;
         let du = c.toDataURL('image/jpeg', q);
-        while (du.split(',')[1].length * 0.75 > 400_000 && q > 0.4) {
+        // OCR.space free tier caps at 1MB. Stay under to be safe.
+        while (du.split(',')[1].length * 0.75 > 700_000 && q > 0.4) {
           q -= 0.1; du = c.toDataURL('image/jpeg', q);
         }
-        setImages(prev => [...prev, { thumb: du }]);
+        setImages(prev => [...prev, { thumb: du, b64: du.split(',')[1], mime: 'image/jpeg' }]);
       };
       img.src = dataUrl;
     };
@@ -336,6 +346,120 @@ function NewPurchaseModal({
 
   function updateRow(rowId: number, patch: Partial<ItemRow>) {
     setItems(rows => rows.map(r => r.rowId === rowId ? { ...r, ...patch } : r));
+  }
+
+  // Two-step scan: OCR.space (browser → their API directly) for image
+  // → text, then our /api/gemini proxy (tiny text body only) for
+  // text → structured JSON. Cloudflare never sees the image, so the
+  // 10ms CPU budget on Pages free tier is not a concern.
+  async function scanFirstBill() {
+    if (images.length === 0) { onError('Upload a bill image first'); return; }
+    const img = images[0];
+    setScanning(true);
+    setScanInfo(null);
+
+    try {
+      // ── Step 1: OCR ──
+      const form = new FormData();
+      form.append('base64Image', `data:${img.mime};base64,${img.b64}`);
+      form.append('apikey', OCR_SPACE_KEY);
+      form.append('language', 'eng');
+      form.append('isOverlayRequired', 'false');
+      form.append('detectOrientation', 'true');
+      form.append('scale', 'true');
+      form.append('OCREngine', '2');
+
+      const ocrRes = await fetch('https://api.ocr.space/parse/image', { method: 'POST', body: form });
+      if (!ocrRes.ok) throw new Error(`OCR HTTP ${ocrRes.status}`);
+      const ocrData = await ocrRes.json() as {
+        IsErroredOnProcessing?: boolean;
+        ErrorMessage?: string | string[];
+        ParsedResults?: { ParsedText?: string }[];
+      };
+      if (ocrData.IsErroredOnProcessing) {
+        const m = Array.isArray(ocrData.ErrorMessage) ? ocrData.ErrorMessage.join(' ') : ocrData.ErrorMessage;
+        throw new Error('OCR error: ' + (m ?? 'unknown'));
+      }
+      const rawText = ocrData.ParsedResults?.[0]?.ParsedText?.trim() ?? '';
+      if (!rawText) throw new Error('OCR returned no text — try a sharper, well-lit photo');
+
+      // ── Step 2: Gemini parse (text-only, tiny payload) ──
+      const productList = products
+        .map(p => `${p.product_id}:${p.product_name}`)
+        .join(', ')
+        .substring(0, 3000);
+      const prompt = `You are extracting line items from a hardware/equipment shop purchase invoice (Kenya, Ksh).
+For EVERY product line on the bill return:
+- product_name (exact text from bill)
+- quantity (integer, default 1 if missing)
+- unit_price (number, no currency, default 0 if missing)
+- total_price (number, no currency, default qty * unit_price)
+- matched_product_id: integer ID from the list below if there is a CLEAR match, otherwise null
+
+Also extract:
+- supplier_name
+- bill_total (number)
+- bill_date (YYYY-MM-DD if visible)
+
+Return ONLY a JSON object, no markdown, no commentary:
+{"supplier_name":"...","bill_total":0,"bill_date":"YYYY-MM-DD","items":[{"product_name":"...","quantity":1,"unit_price":0,"total_price":0,"matched_product_id":null}]}
+
+Existing products: ${productList}
+
+BILL TEXT:
+${rawText}`;
+
+      const aiRes = await fetch(GEMINI_PROXY_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt }),
+      });
+      const aiData = await aiRes.json() as { result?: string; error?: string; detail?: string };
+      if (!aiRes.ok || !aiData.result) {
+        const detail = aiData.detail ? `: ${aiData.detail}` : '';
+        throw new Error((aiData.error ?? `HTTP ${aiRes.status}`) + detail);
+      }
+      const cleaned = aiData.result.replace(/```json|```/g, '').trim();
+      const parsed = JSON.parse(cleaned) as {
+        supplier_name?: string | null;
+        bill_total?:    number | null;
+        bill_date?:     string | null;
+        items?: { product_name: string; quantity: number; unit_price: number | null; total_price: number | null; matched_product_id: number | null }[];
+      };
+
+      // ── Apply to form ──
+      if (parsed.bill_date) setDate(parsed.bill_date);
+      if (parsed.supplier_name) {
+        const needle = parsed.supplier_name.toLowerCase();
+        const supMatch = suppliers.find(s =>
+          s.supplier_name.toLowerCase().includes(needle.substring(0, 5)) ||
+          needle.includes(s.supplier_name.toLowerCase().substring(0, 5)),
+        );
+        if (supMatch) setSupplierId(String(supMatch.supplier_id));
+      }
+      const newRows: ItemRow[] = (parsed.items ?? []).map(it => ({
+        rowId:       rowCounter.current++,
+        productId:   it.matched_product_id ?? null,
+        productName: it.matched_product_id
+          ? (products.find(p => p.product_id === it.matched_product_id)?.product_name ?? it.product_name)
+          : it.product_name,
+        qty:         Math.max(1, Math.round(it.quantity || 1)),
+        unitPrice:   it.unit_price ?? null,
+        locationId:  2,
+      }));
+      if (newRows.length === 0) {
+        setScanInfo({ msg: 'AI returned 0 items — check the OCR result and add rows manually.', ok: false });
+      } else {
+        setItems(newRows);
+        setScanInfo({ msg: `Added ${newRows.length} line item${newRows.length > 1 ? 's' : ''} from bill — review before saving.`, ok: true });
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Unknown error';
+      setScanInfo({ msg, ok: false });
+      onError('Scan failed: ' + msg);
+    } finally {
+      setScanning(false);
+    }
   }
 
   async function save() {
@@ -448,6 +572,33 @@ function NewPurchaseModal({
             </div>
             <input ref={fileRef} type="file" accept="image/*" className="hidden"
               onChange={e => { if (e.target.files?.[0]) processImageFile(e.target.files[0]); e.target.value = ''; }} />
+
+            {images.length > 0 && (
+              <button
+                onClick={scanFirstBill}
+                disabled={scanning}
+                className="mt-2 w-full py-2.5 rounded-xl bg-gold/10 border border-gold/30 text-gold text-xs font-bold hover:bg-gold/20 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+              >
+                {scanning ? (
+                  <>
+                    <span className="w-3.5 h-3.5 rounded-full border-2 border-gold border-t-transparent animate-spin" />
+                    Reading bill…
+                  </>
+                ) : (
+                  <>🤖 Auto-fill from first photo</>
+                )}
+              </button>
+            )}
+
+            {scanInfo && (
+              <div className={`mt-2 px-3 py-2 rounded-lg text-xs font-semibold border ${
+                scanInfo.ok
+                  ? 'bg-success/10 border-success/30 text-success'
+                  : 'bg-danger/10 border-danger/30 text-danger break-words'
+              }`}>
+                {scanInfo.ok ? '✓ ' : '✕ '}{scanInfo.msg}
+              </div>
+            )}
           </div>
 
           {/* Items */}

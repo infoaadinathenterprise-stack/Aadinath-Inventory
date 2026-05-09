@@ -10,8 +10,8 @@
 export const onRequest: PagesFunction = async () => {
   return new Response(
     JSON.stringify({
-      version: 'v5-2026-05-09-file-api',
-      builtAt: 'gemini.ts: upload bytes via Gemini File API (no base64 in worker)',
+      version: 'v6-2026-05-09-text-only',
+      builtAt: 'gemini.ts: text-only proxy (browser does OCR via OCR.space first)',
       time: new Date().toISOString(),
     }, null, 2),
     {
@@ -19,7 +19,7 @@ export const onRequest: PagesFunction = async () => {
       headers: {
         'Content-Type': 'application/json',
         'Cache-Control': 'no-store',
-        'X-Worker-Version': 'v5-2026-05-09-file-api',
+        'X-Worker-Version': 'v6-2026-05-09-text-only',
       },
     },
   );
