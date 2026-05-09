@@ -363,6 +363,19 @@ function NewPurchaseModal({
     setScanning(true);
     setScanInfo(null);
 
+    // Read a response as JSON, but if it's not JSON (e.g. an HTML
+    // error page) surface a clear message that tells us which step
+    // failed and what the body actually was.
+    async function readJsonOrFail<T>(res: Response, stepLabel: string): Promise<T> {
+      const txt = await res.text();
+      const head = txt.trimStart();
+      if (head.startsWith('<!DOCTYPE') || head.startsWith('<html')) {
+        throw new Error(`${stepLabel} returned an HTML error page (HTTP ${res.status}) instead of JSON. First 200 chars: ${head.slice(0, 200).replace(/\s+/g, ' ')}`);
+      }
+      try { return JSON.parse(txt) as T; }
+      catch { throw new Error(`${stepLabel} returned non-JSON (HTTP ${res.status}): ${txt.slice(0, 200)}`); }
+    }
+
     try {
       // ── Step 1: OCR ──
       const form = new FormData();
@@ -375,12 +388,12 @@ function NewPurchaseModal({
       form.append('OCREngine', '2');
 
       const ocrRes = await fetch('https://api.ocr.space/parse/image', { method: 'POST', body: form });
-      if (!ocrRes.ok) throw new Error(`OCR HTTP ${ocrRes.status}`);
-      const ocrData = await ocrRes.json() as {
+      if (!ocrRes.ok && ocrRes.status >= 500) throw new Error(`OCR.space HTTP ${ocrRes.status}`);
+      const ocrData = await readJsonOrFail<{
         IsErroredOnProcessing?: boolean;
         ErrorMessage?: string | string[];
         ParsedResults?: { ParsedText?: string }[];
-      };
+      }>(ocrRes, 'OCR.space');
       if (ocrData.IsErroredOnProcessing) {
         const m = Array.isArray(ocrData.ErrorMessage) ? ocrData.ErrorMessage.join(' ') : ocrData.ErrorMessage;
         throw new Error('OCR error: ' + (m ?? 'unknown'));
@@ -419,10 +432,16 @@ ${rawText}`;
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ prompt }),
       });
-      const aiData = await aiRes.json() as { result?: string; error?: string; detail?: string };
+      const aiData = await readJsonOrFail<{
+        result?: string;
+        error?: string;
+        detail?: string;
+        workerVersion?: string;
+      }>(aiRes, '/api/gemini');
       if (!aiRes.ok || !aiData.result) {
         const detail = aiData.detail ? `: ${aiData.detail}` : '';
-        throw new Error((aiData.error ?? `HTTP ${aiRes.status}`) + detail);
+        const v = aiData.workerVersion ? ` [worker ${aiData.workerVersion}]` : '';
+        throw new Error((aiData.error ?? `HTTP ${aiRes.status}`) + detail + v);
       }
       const cleaned = aiData.result.replace(/```json|```/g, '').trim();
       const parsed = JSON.parse(cleaned) as {
