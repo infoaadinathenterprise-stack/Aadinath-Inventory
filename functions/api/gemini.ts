@@ -3,29 +3,25 @@ interface Env {
   GEMINI_MODEL?: string;
 }
 
-interface GeminiBody {
-  prompt: string;
-  imageBase64?: string;
-  mimeType?: string;
-}
-
-// Cloudflare Pages Functions are killed at ~30s wall time. We abort
-// well before that so we can return a clean JSON error instead of
-// Cloudflare's HTML 502 page. 12s is plenty for flash-lite under
-// normal conditions and leaves a huge safety margin.
 const GEMINI_TIMEOUT_MS = 12_000;
-
-// Bump this when you change worker behavior so the client can prove
-// which version of the function is actually live (Pages caches
-// functions separately from the static site and stale deploys are a
-// common source of "fix didn't work" reports).
-const WORKER_VERSION = 'v3-2026-05-09';
-
-// Default to flash-lite — about 2x faster than flash on cold-start
-// quota and plenty accurate for invoice OCR. Override via the
-// GEMINI_MODEL env var if you want to switch (e.g., 'gemini-2.0-flash',
-// 'gemini-2.5-flash', 'gemini-flash-latest').
 const DEFAULT_MODEL = 'gemini-2.0-flash-lite';
+// v4: switched request format from JSON-wrapped base64 (~800KB JSON.parse,
+// blew the free-tier 10ms CPU budget) to raw image bytes in the body with
+// prompt + mime in headers. Worker reads ArrayBuffer (zero parse cost),
+// base64-encodes server-side just before forwarding to Gemini.
+const WORKER_VERSION = 'v4-2026-05-09-binary-body';
+
+// btoa() on long binary strings can stack-overflow when built with the
+// spread operator; chunk it.
+function arrayBufferToBase64(buf: ArrayBuffer): string {
+  const bytes = new Uint8Array(buf);
+  const chunkSize = 8192;
+  let binary = '';
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + chunkSize)));
+  }
+  return btoa(binary);
+}
 
 export const onRequestPost: PagesFunction<Env> = async (context) => {
   const origin = context.request.headers.get('Origin') ?? '';
@@ -33,39 +29,51 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   const corsHeaders = {
     'Access-Control-Allow-Origin': origin || '*',
     'Access-Control-Allow-Methods': 'POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type',
+    'Access-Control-Allow-Headers': 'Content-Type, X-Prompt, X-Mime-Type',
     'Content-Type': 'application/json',
     'X-Worker-Version': WORKER_VERSION,
   };
 
-  let body: GeminiBody;
-  try {
-    body = await context.request.json() as GeminiBody;
-  } catch {
-    return new Response(JSON.stringify({ error: 'Invalid JSON' }), { status: 400, headers: corsHeaders });
+  if (!context.env.GEMINI_KEY) {
+    return new Response(JSON.stringify({ error: 'GEMINI_KEY not set', workerVersion: WORKER_VERSION }), { status: 500, headers: corsHeaders });
   }
 
-  const { prompt, imageBase64, mimeType } = body;
-  if (!prompt) return new Response(JSON.stringify({ error: 'Missing prompt' }), { status: 400, headers: corsHeaders });
-  if (!context.env.GEMINI_KEY) return new Response(JSON.stringify({ error: 'GEMINI_KEY not set' }), { status: 500, headers: corsHeaders });
+  // Prompt arrives in a header, base64-encoded so it can carry any
+  // characters safely (raw header values are restricted to ASCII).
+  const promptB64 = context.request.headers.get('X-Prompt') ?? '';
+  if (!promptB64) {
+    return new Response(JSON.stringify({ error: 'Missing X-Prompt header', workerVersion: WORKER_VERSION }), { status: 400, headers: corsHeaders });
+  }
+  let prompt: string;
+  try {
+    prompt = decodeURIComponent(escape(atob(promptB64)));
+  } catch {
+    return new Response(JSON.stringify({ error: 'X-Prompt is not valid base64', workerVersion: WORKER_VERSION }), { status: 400, headers: corsHeaders });
+  }
+
+  const mimeType = context.request.headers.get('X-Mime-Type') ?? '';
+  const contentLen = context.request.headers.get('Content-Length');
+
+  // The body is the raw image bytes — no JSON parsing on the hot path.
+  const buf = await context.request.arrayBuffer();
+  const hasImage = buf.byteLength > 0;
+  if (hasImage && !mimeType) {
+    return new Response(JSON.stringify({ error: 'Missing X-Mime-Type header for image', workerVersion: WORKER_VERSION }), { status: 400, headers: corsHeaders });
+  }
 
   type GeminiPart =
     | { inline_data: { mime_type: string; data: string } }
     | { text: string };
 
   const parts: GeminiPart[] = [];
-  if (imageBase64 && mimeType) {
-    parts.push({ inline_data: { mime_type: mimeType, data: imageBase64 } });
+  if (hasImage) {
+    parts.push({ inline_data: { mime_type: mimeType, data: arrayBufferToBase64(buf) } });
   }
   parts.push({ text: prompt });
 
   const model = context.env.GEMINI_MODEL || DEFAULT_MODEL;
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${context.env.GEMINI_KEY}`;
 
-  // Forced JSON output mode + temperature 0 + a generous-but-bounded
-  // maxOutputTokens makes generation finish faster (Gemini stops as
-  // soon as the JSON closes) and removes any need to strip markdown
-  // fences client-side.
   const requestBody = {
     contents: [{ parts }],
     generationConfig: {
@@ -108,7 +116,12 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   if (!geminiRes.ok) {
     const errText = await geminiRes.text();
     return new Response(
-      JSON.stringify({ error: `Gemini HTTP ${geminiRes.status} (${model})`, detail: errText.slice(0, 800), workerVersion: WORKER_VERSION }),
+      JSON.stringify({
+        error: `Gemini HTTP ${geminiRes.status} (${model})`,
+        detail: errText.slice(0, 800),
+        workerVersion: WORKER_VERSION,
+        bodyBytes: contentLen,
+      }),
       { status: 502, headers: corsHeaders },
     );
   }
@@ -135,7 +148,7 @@ export const onRequestOptions: PagesFunction = async (context) => {
     headers: {
       'Access-Control-Allow-Origin': origin || '*',
       'Access-Control-Allow-Methods': 'POST, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type',
+      'Access-Control-Allow-Headers': 'Content-Type, X-Prompt, X-Mime-Type',
     },
   });
 };

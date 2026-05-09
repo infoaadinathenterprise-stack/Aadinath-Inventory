@@ -10,8 +10,8 @@
 export const onRequest: PagesFunction = async () => {
   return new Response(
     JSON.stringify({
-      version: 'v3-2026-05-09',
-      builtAt: 'gemini.ts: 12s abort, flash-lite default, JSON mode on',
+      version: 'v4-2026-05-09-binary-body',
+      builtAt: 'gemini.ts: raw image body + headers (was JSON-wrapped, blew CPU limit)',
       time: new Date().toISOString(),
     }, null, 2),
     {
@@ -19,7 +19,7 @@ export const onRequest: PagesFunction = async () => {
       headers: {
         'Content-Type': 'application/json',
         'Cache-Control': 'no-store',
-        'X-Worker-Version': 'v3-2026-05-09',
+        'X-Worker-Version': 'v4-2026-05-09-binary-body',
       },
     },
   );

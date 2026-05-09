@@ -46,14 +46,33 @@ interface ScannedItem {
 
 // ── Gemini bill parser ────────────────────────────────────────────────────────
 
+// Decode our base64 string back into a fresh ArrayBuffer for the wire.
+// Sending the raw image as the body (instead of a JSON-wrapped base64
+// string) avoids an ~800KB JSON.parse on the worker, which was blowing
+// the 10ms CPU limit on Cloudflare Pages free tier.
+function base64ToArrayBuffer(b64: string): ArrayBuffer {
+  const binary = atob(b64);
+  const buf = new ArrayBuffer(binary.length);
+  const view = new Uint8Array(buf);
+  for (let i = 0; i < binary.length; i++) view[i] = binary.charCodeAt(i);
+  return buf;
+}
+
 async function callGemini(prompt: string, imageBase64?: string, mimeType?: string): Promise<string> {
-  const body: Record<string, string> = { prompt };
-  if (imageBase64 && mimeType) { body.imageBase64 = imageBase64; body.mimeType = mimeType; }
-  const res = await fetch(GEMINI_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
+  // Prompt rides in a header (base64 to allow any chars); image rides
+  // in the body as raw bytes.
+  const promptHeader = btoa(unescape(encodeURIComponent(prompt)));
+  const headers: Record<string, string> = { 'X-Prompt': promptHeader };
+  let body: BodyInit | undefined;
+  if (imageBase64 && mimeType) {
+    headers['X-Mime-Type'] = mimeType;
+    headers['Content-Type'] = mimeType;
+    body = base64ToArrayBuffer(imageBase64);
+  } else {
+    headers['Content-Type'] = 'application/octet-stream';
+    body = new ArrayBuffer(0);
+  }
+  const res = await fetch(GEMINI_URL, { method: 'POST', headers, body });
 
   // Read as text first — if the proxy returned an HTML error page (e.g.
   // 502 from Cloudflare, 404 if the function isn't deployed), res.json()
@@ -67,7 +86,7 @@ async function callGemini(prompt: string, imageBase64?: string, mimeType?: strin
     // code isn't running yet — Pages caches functions and stale deploys
     // are a common cause. Otherwise, our worker really did get killed.
     const versionTag = workerVersionHeader
-      ? `worker ${workerVersionHeader} was killed by Cloudflare (HTTP ${res.status}) — the upstream call exceeded the platform's wall-time even before our 12s abort fired`
+      ? `worker ${workerVersionHeader} was killed mid-execution by Cloudflare (HTTP ${res.status}) — likely CPU-time limit on free tier; report this so we can shrink the request further`
       : `OLD worker is still serving requests (no X-Worker-Version header). The Pages function deploy hasn't propagated yet — wait a minute and retry, or trigger a redeploy from the Cloudflare dashboard`;
     throw new Error(`Proxy 5xx — ${versionTag}.`);
   }
