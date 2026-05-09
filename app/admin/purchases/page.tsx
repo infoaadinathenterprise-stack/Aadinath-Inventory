@@ -59,23 +59,28 @@ async function callGemini(prompt: string, imageBase64?: string, mimeType?: strin
   // 502 from Cloudflare, 404 if the function isn't deployed), res.json()
   // would throw a cryptic "string did not match the expected pattern".
   const txt = await res.text();
+  const workerVersionHeader = res.headers.get('X-Worker-Version');
   const trimmed = txt.trimStart();
   // Cloudflare's standard 5xx page is a big HTML doc — don't dump it at the user.
   if (trimmed.startsWith('<!DOCTYPE') || trimmed.startsWith('<html')) {
-    if (res.status === 502 || res.status === 504) {
-      throw new Error('Proxy timed out (Cloudflare 502/504). Try a smaller, sharper bill photo — large images make Gemini exceed the worker time limit.');
-    }
-    throw new Error(`Proxy returned an HTML error page (HTTP ${res.status}). The /api/gemini function may not be deployed or GEMINI_KEY isn't set.`);
+    // If we get HTML AND there's no worker-version header, the new worker
+    // code isn't running yet — Pages caches functions and stale deploys
+    // are a common cause. Otherwise, our worker really did get killed.
+    const versionTag = workerVersionHeader
+      ? `worker ${workerVersionHeader} was killed by Cloudflare (HTTP ${res.status}) — the upstream call exceeded the platform's wall-time even before our 12s abort fired`
+      : `OLD worker is still serving requests (no X-Worker-Version header). The Pages function deploy hasn't propagated yet — wait a minute and retry, or trigger a redeploy from the Cloudflare dashboard`;
+    throw new Error(`Proxy 5xx — ${versionTag}.`);
   }
-  let data: { result?: string; error?: string; detail?: string };
+  let data: { result?: string; error?: string; detail?: string; workerVersion?: string };
   try {
-    data = JSON.parse(txt) as { result?: string; error?: string; detail?: string };
+    data = JSON.parse(txt);
   } catch {
     throw new Error(`Gateway returned non-JSON (HTTP ${res.status}): ${txt.slice(0, 200)}`);
   }
   if (!res.ok || data.error) {
     const combined = data.error && data.detail ? `${data.error}: ${data.detail}` : (data.error ?? data.detail ?? `HTTP ${res.status}`);
-    throw new Error(combined);
+    const versionTag = data.workerVersion ?? workerVersionHeader ?? 'unknown';
+    throw new Error(`${combined} [worker ${versionTag}]`);
   }
   return data.result ?? '';
 }

@@ -9,10 +9,17 @@ interface GeminiBody {
   mimeType?: string;
 }
 
-// Cloudflare Pages Functions are killed at ~30s wall time. Abort the
-// upstream Gemini call slightly before that so we can return a clean
-// JSON error instead of Cloudflare's HTML 502 page.
-const GEMINI_TIMEOUT_MS = 25_000;
+// Cloudflare Pages Functions are killed at ~30s wall time. We abort
+// well before that so we can return a clean JSON error instead of
+// Cloudflare's HTML 502 page. 12s is plenty for flash-lite under
+// normal conditions and leaves a huge safety margin.
+const GEMINI_TIMEOUT_MS = 12_000;
+
+// Bump this when you change worker behavior so the client can prove
+// which version of the function is actually live (Pages caches
+// functions separately from the static site and stale deploys are a
+// common source of "fix didn't work" reports).
+const WORKER_VERSION = 'v3-2026-05-09';
 
 // Default to flash-lite — about 2x faster than flash on cold-start
 // quota and plenty accurate for invoice OCR. Override via the
@@ -28,6 +35,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     'Access-Control-Allow-Methods': 'POST, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type',
     'Content-Type': 'application/json',
+    'X-Worker-Version': WORKER_VERSION,
   };
 
   let body: GeminiBody;
@@ -85,13 +93,14 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     if (isAbort) {
       return new Response(
         JSON.stringify({
-          error: `Gemini took longer than ${GEMINI_TIMEOUT_MS / 1000}s. Try a smaller / sharper bill image, or switch GEMINI_MODEL on the worker.`,
+          error: `Gemini took longer than ${GEMINI_TIMEOUT_MS / 1000}s. Model ${model} may be slow on free quota — set GEMINI_MODEL or check API quota.`,
+          workerVersion: WORKER_VERSION,
         }),
         { status: 504, headers: corsHeaders },
       );
     }
     return new Response(
-      JSON.stringify({ error: 'Failed to reach Gemini', detail: e instanceof Error ? e.message : String(e) }),
+      JSON.stringify({ error: 'Failed to reach Gemini', detail: e instanceof Error ? e.message : String(e), workerVersion: WORKER_VERSION }),
       { status: 502, headers: corsHeaders },
     );
   }
@@ -99,7 +108,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   if (!geminiRes.ok) {
     const errText = await geminiRes.text();
     return new Response(
-      JSON.stringify({ error: `Gemini HTTP ${geminiRes.status} (${model})`, detail: errText.slice(0, 800) }),
+      JSON.stringify({ error: `Gemini HTTP ${geminiRes.status} (${model})`, detail: errText.slice(0, 800), workerVersion: WORKER_VERSION }),
       { status: 502, headers: corsHeaders },
     );
   }
@@ -112,11 +121,11 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   if (!text) {
     const reason = data.promptFeedback?.blockReason ?? data.candidates?.[0]?.finishReason ?? 'unknown';
     return new Response(
-      JSON.stringify({ error: `Gemini returned no text (reason: ${reason})` }),
+      JSON.stringify({ error: `Gemini returned no text (reason: ${reason})`, workerVersion: WORKER_VERSION }),
       { status: 502, headers: corsHeaders },
     );
   }
-  return new Response(JSON.stringify({ result: text }), { status: 200, headers: corsHeaders });
+  return new Response(JSON.stringify({ result: text, workerVersion: WORKER_VERSION }), { status: 200, headers: corsHeaders });
 };
 
 export const onRequestOptions: PagesFunction = async (context) => {
