@@ -49,9 +49,9 @@ export default function Navbar() {
             aria-label="Open menu"
             className="flex flex-col justify-center items-center gap-1.5 w-10 h-10 rounded-xl bg-surface/80 border border-white/8 hover:border-teal/30 transition-all duration-200"
           >
-            <span className="w-5 h-px bg-slate-300 block" />
-            <span className="w-5 h-px bg-slate-300 block" />
-            <span className="w-3.5 h-px bg-slate-300 block self-start ml-1.25" />
+            <span className="w-5 h-0.5 rounded-full bg-slate-300 block" />
+            <span className="w-5 h-0.5 rounded-full bg-slate-300 block" />
+            <span className="w-5 h-0.5 rounded-full bg-slate-300 block" />
           </button>
         </div>
       </motion.nav>

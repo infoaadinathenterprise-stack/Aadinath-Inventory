@@ -70,7 +70,7 @@ export default function AdminNavbar({ onLogout }: Props) {
             >
               <span className="w-4 h-0.5 bg-slate-300 rounded-full" />
               <span className="w-4 h-0.5 bg-slate-300 rounded-full" />
-              <span className="w-3 h-0.5 bg-slate-300 rounded-full" />
+              <span className="w-4 h-0.5 bg-slate-300 rounded-full" />
             </button>
           </div>
         </div>
