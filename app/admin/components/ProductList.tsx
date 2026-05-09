@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useRef, useEffect } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import AdminProductCard from './AdminProductCard';
 import type { Product, StockMap, Location } from '@/lib/types';
@@ -21,6 +21,63 @@ export default function ProductList({
   const [location, setLocation]   = useState<Location>('main');
   const [category, setCategory]   = useState('All');
   const [search,   setSearch]     = useState('');
+  const [scanMsg,  setScanMsg]    = useState<{ text: string; ok: boolean } | null>(null);
+  const barcodeRef = useRef<HTMLInputElement>(null);
+
+  // Auto-focus the barcode input on mount so a USB scanner "just works"
+  // without the user having to click into the field.
+  useEffect(() => {
+    const t = setTimeout(() => barcodeRef.current?.focus(), 300);
+    return () => clearTimeout(t);
+  }, []);
+
+  // Snap focus back to the barcode field when keystrokes arrive but
+  // nothing is focused (USB scanners type characters very fast). Skip
+  // when an input/textarea/select is already focused (don't disrupt
+  // typing) and skip when any modal is open (any element with the
+  // `fixed inset-0` overlay class — both AdjustStockModal and
+  // ProductModal use that pattern).
+  useEffect(() => {
+    function handleGlobalKey(e: KeyboardEvent) {
+      // Ignore modifier-only events and our own Enter on the barcode field
+      if (e.key === 'Tab' || e.metaKey || e.ctrlKey || e.altKey) return;
+      const active = document.activeElement;
+      if (active && active !== document.body && active.tagName !== 'HTML') {
+        if (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement || active instanceof HTMLSelectElement) return;
+      }
+      if (document.querySelector('.fixed.inset-0')) return; // modal/drawer open
+      barcodeRef.current?.focus();
+    }
+    window.addEventListener('keydown', handleGlobalKey);
+    return () => window.removeEventListener('keydown', handleGlobalKey);
+  }, []);
+
+  // Auto-clear the scan-result banner after a couple seconds.
+  useEffect(() => {
+    if (!scanMsg) return;
+    const t = setTimeout(() => setScanMsg(null), 2500);
+    return () => clearTimeout(t);
+  }, [scanMsg]);
+
+  function handleBarcodeKey(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key !== 'Enter') return;
+    const code = e.currentTarget.value.trim();
+    e.currentTarget.value = '';
+    if (!code) return;
+    const lc = code.toLowerCase();
+    const match =
+      products.find(p => (p.stock_keeping_unit ?? '').toLowerCase() === lc) ??
+      products.find(p => p.product_name.toLowerCase().includes(lc));
+    if (!match) {
+      setSearch(code);
+      setScanMsg({ text: `No product matches "${code}"`, ok: false });
+      return;
+    }
+    // Filter the list down to this product and confirm visually.
+    setSearch(match.product_name);
+    setCategory('All');
+    setScanMsg({ text: `Found: ${match.product_name}`, ok: true });
+  }
 
   const categories = useMemo(() => {
     const cats = Array.from(new Set(products.map(p => p.type).filter(Boolean))) as string[];
@@ -70,6 +127,24 @@ export default function ProductList({
           </button>
         ))}
       </div>
+
+      <div className="relative mb-2">
+        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gold text-sm">📷</span>
+        <input
+          ref={barcodeRef}
+          type="text"
+          onKeyDown={handleBarcodeKey}
+          placeholder="Scan barcode / type SKU + Enter"
+          autoComplete="off"
+          inputMode="text"
+          className="w-full pl-9 pr-4 py-2.5 bg-gold/5 border border-gold/30 rounded-xl text-sm text-slate-100 placeholder:text-gold/40 outline-none focus:border-gold focus:bg-gold/10 transition-colors font-mono"
+        />
+      </div>
+      {scanMsg && (
+        <div className={`mb-2 px-3 py-1.5 rounded-lg text-xs font-semibold ${scanMsg.ok ? 'bg-success/10 text-success border border-success/20' : 'bg-danger/10 text-danger border border-danger/20'}`}>
+          {scanMsg.ok ? '✓ ' : '✕ '}{scanMsg.text}
+        </div>
+      )}
 
       <div className="relative mb-3">
         <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted text-sm">🔍</span>
