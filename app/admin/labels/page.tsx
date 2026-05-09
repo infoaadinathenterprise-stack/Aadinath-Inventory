@@ -6,11 +6,11 @@ import Link from 'next/link';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useProducts } from '@/lib/hooks/useProducts';
 import { upsertStock, logMovement } from '@/lib/stockActions';
-import type { Product } from '@/lib/types';
-import { SESSION_KEY } from '@/lib/types';
+import type { Product, Location } from '@/lib/types';
+import { SESSION_KEY, LOC_ID } from '@/lib/types';
 
-const BACK_LOC    = 2;
 const LABELS_PER_PAGE = 24;
+type SortBy = 'recent' | 'name';
 
 // ── Auth guard ─────────────────────────────────────────────────────────────────
 
@@ -35,9 +35,11 @@ export default function LabelsPage() {
 type Selected = Record<number, number>; // productId → copies
 
 function LabelsDashboard() {
-  const { products, backStockMap, loading, error, refresh } = useProducts();
+  const { products, backStockMap, mainStockMap, loading, error, refresh } = useProducts();
   const [selected, setSelected] = useState<Selected>({});
   const [search,   setSearch]   = useState('');
+  const [location, setLocation] = useState<Location>('back');
+  const [sortBy,   setSortBy]   = useState<SortBy>('recent');
   const [mobileTab, setMobileTab] = useState<'products' | 'preview'>('products');
   const [toast,    setToast]    = useState<{ msg: string; type: string } | null>(null);
   const [stockModal, setStockModal] = useState<{ mode: 'add' | 'remove'; product: Product } | null>(null);
@@ -45,25 +47,34 @@ function LabelsDashboard() {
   const [stockSaving, setStockSaving] = useState(false);
   const toastRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
+  const stockMap   = location === 'back' ? backStockMap : mainStockMap;
+  const locId      = LOC_ID[location];
+  const locName    = location === 'back' ? 'Back Godown' : 'Main Store';
+
   function showToast(msg: string, type = 'success') {
     setToast({ msg, type });
     clearTimeout(toastRef.current);
     toastRef.current = setTimeout(() => setToast(null), 2600);
   }
 
-  const inBackStock = products.filter(p => (backStockMap[p.product_id] || 0) > 0);
+  const inLocStock = products.filter(p => (stockMap[p.product_id] || 0) > 0);
 
-  const filtered = inBackStock.filter(p => {
-    if (!search) return true;
-    const hay = [p.product_name, p.stock_keeping_unit, p.type].filter(Boolean).join(' ').toLowerCase();
-    return hay.includes(search.toLowerCase());
-  });
+  const filtered = inLocStock
+    .filter(p => {
+      if (!search) return true;
+      const hay = [p.product_name, p.stock_keeping_unit, p.type].filter(Boolean).join(' ').toLowerCase();
+      return hay.includes(search.toLowerCase());
+    })
+    .sort((a, b) => {
+      if (sortBy === 'recent') return b.product_id - a.product_id; // newest first
+      return a.product_name.localeCompare(b.product_name);
+    });
 
   function toggleProduct(id: number) {
     setSelected(sel => {
       const next = { ...sel };
       if (next[id]) { delete next[id]; }
-      else { next[id] = Math.max(1, backStockMap[id] || 1); }
+      else { next[id] = Math.max(1, stockMap[id] || 1); }
       return next;
     });
   }
@@ -75,7 +86,7 @@ function LabelsDashboard() {
 
   function selectAll() {
     const next: Selected = {};
-    inBackStock.forEach(p => { next[p.product_id] = Math.max(1, backStockMap[p.product_id] || 1); });
+    inLocStock.forEach(p => { next[p.product_id] = Math.max(1, stockMap[p.product_id] || 1); });
     setSelected(next);
   }
 
@@ -96,13 +107,15 @@ function LabelsDashboard() {
   }
 
   function handlePrint() {
-    const overLimit = inBackStock
-      .map(p => ({ p, copies: selected[p.product_id] ?? 0, stock: backStockMap[p.product_id] || 0 }))
+    // We allow printing more than the on-hand count (the user can do this
+    // intentionally — pre-print spares). Just confirm via toast if any
+    // selection exceeds stock so it's not silent.
+    const overLimit = inLocStock
+      .map(p => ({ p, copies: selected[p.product_id] ?? 0, stock: stockMap[p.product_id] || 0 }))
       .filter(({ copies, stock }) => copies > 0 && copies > stock);
 
     if (overLimit.length > 0) {
-      showToast(`${overLimit.length} product(s) exceed back-godown stock. Please adjust copies or add stock first.`, 'error');
-      return;
+      showToast(`Printing ${overLimit.length} product(s) above ${locName} stock — extras will print anyway.`, 'success');
     }
     window.print();
   }
@@ -113,23 +126,23 @@ function LabelsDashboard() {
     const qty = stockQty;
     if (qty < 1) { showToast('Enter a valid quantity', 'error'); return; }
 
-    const cur = backStockMap[product.product_id] || 0;
+    const cur = stockMap[product.product_id] || 0;
     if (mode === 'remove' && qty > cur) {
-      showToast(`Only ${cur} in Back Godown`, 'error');
+      showToast(`Only ${cur} in ${locName}`, 'error');
       return;
     }
 
     setStockSaving(true);
     try {
       const newQty = mode === 'add' ? cur + qty : Math.max(0, cur - qty);
-      await upsertStock(product.product_id, BACK_LOC, { quantity: newQty });
+      await upsertStock(product.product_id, locId, { quantity: newQty });
       await logMovement(
         product.product_id,
-        mode === 'add' ? null : BACK_LOC,
-        mode === 'add' ? BACK_LOC : null,
+        mode === 'add' ? null : locId,
+        mode === 'add' ? locId : null,
         qty,
         mode === 'add' ? 'ADJUSTMENT_IN' : 'ADJUSTMENT_OUT',
-        mode === 'add' ? 'Stock Correction (Labels)' : 'Stock Removed (Labels)',
+        mode === 'add' ? `Stock Correction (Labels — ${locName})` : `Stock Removed (Labels — ${locName})`,
       );
       refresh();
       showToast(`${mode === 'add' ? 'Added' : 'Removed'} ${qty} units ✓`, 'success');
@@ -201,14 +214,46 @@ function LabelsDashboard() {
 
       <div className="flex flex-1 overflow-hidden">
         <aside className={`${mobileTab === 'preview' ? 'hidden' : 'flex'} sm:flex print-hide w-full sm:w-72 lg:w-80 shrink-0 bg-surface border-r border-white/8 flex-col`}>
-          <div className="p-3 border-b border-white/8 shrink-0">
-            <div className="relative mb-2">
+          <div className="p-3 border-b border-white/8 shrink-0 flex flex-col gap-2">
+            <div className="flex gap-1.5">
+              {(['main', 'back'] as Location[]).map(loc => (
+                <button
+                  key={loc}
+                  onClick={() => { setLocation(loc); setSelected({}); }}
+                  className={`flex-1 py-2 rounded-xl border text-[11px] font-bold transition-all ${
+                    location === loc
+                      ? 'border-teal bg-teal/10 text-teal'
+                      : 'border-white/8 bg-surface2 text-muted hover:border-white/20'
+                  }`}
+                >
+                  {loc === 'main' ? '🏪 Main Store' : '🏭 Back Godown'}
+                </button>
+              ))}
+            </div>
+
+            <div className="flex gap-1.5">
+              {([['recent', '🆕 Recent'], ['name', '🔤 A–Z']] as const).map(([key, label]) => (
+                <button
+                  key={key}
+                  onClick={() => setSortBy(key)}
+                  className={`flex-1 py-1.5 rounded-lg border text-[10px] font-semibold transition-all ${
+                    sortBy === key
+                      ? 'border-gold/40 bg-gold/10 text-gold'
+                      : 'border-white/8 bg-surface2 text-muted hover:border-white/20'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+
+            <div className="relative">
               <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted text-sm pointer-events-none">🔍</span>
               <input
                 type="text"
                 value={search}
                 onChange={e => setSearch(e.target.value)}
-                placeholder="Search back godown…"
+                placeholder={`Search ${locName.toLowerCase()}…`}
                 className="w-full pl-9 pr-3 py-2 rounded-xl bg-surface2 border border-white/8 text-sm text-slate-100 placeholder:text-muted/50 outline-none focus:border-teal/40 transition-colors"
               />
             </div>
@@ -221,11 +266,11 @@ function LabelsDashboard() {
 
           <div className="flex-1 overflow-y-auto p-2 flex flex-col gap-0.5">
             {filtered.length === 0 && (
-              <p className="text-center text-muted text-xs py-8">No products in back godown</p>
+              <p className="text-center text-muted text-xs py-8">No products in {locName.toLowerCase()}</p>
             )}
             {filtered.map(p => {
               const copies   = selected[p.product_id];
-              const stock    = backStockMap[p.product_id] || 0;
+              const stock    = stockMap[p.product_id] || 0;
               const isOver   = copies != null && copies > stock;
               const isSel    = copies != null;
               return (
@@ -323,7 +368,7 @@ function LabelsDashboard() {
               </h3>
               <p className="text-xs text-muted text-center mb-4">{stockModal.product.product_name}</p>
               <p className="text-xs text-muted text-center mb-4">
-                Currently <span className="text-slate-300 font-semibold">{backStockMap[stockModal.product.product_id] || 0}</span> in Back Godown
+                Currently <span className="text-slate-300 font-semibold">{stockMap[stockModal.product.product_id] || 0}</span> in {locName}
               </p>
 
               <div className="flex items-center gap-3 mb-6">
