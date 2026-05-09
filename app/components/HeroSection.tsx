@@ -88,7 +88,7 @@ export default function HeroSection() {
         </motion.div>
 
         <h1 className="text-5xl md:text-7xl font-bold leading-tight mb-4">
-          {'Aadinath Enterprises'.split(' ').map((word, i) => (
+          {'Jay Aadinath Enterprises LTD'.split(' ').map((word, i) => (
             <motion.span
               key={i}
               initial={{ opacity: 0, y: 20 }}

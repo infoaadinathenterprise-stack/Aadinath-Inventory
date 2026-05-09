@@ -29,7 +29,7 @@ export default function AdminNavbar({ onLogout }: Props) {
         <div className="max-w-7xl mx-auto px-4 h-14 flex items-center justify-between gap-3">
           <div className="flex items-center gap-2.5">
             <span className="font-bold text-base text-teal tracking-tight leading-none">
-              Aadinath<span className="text-gold">·</span>
+              Jay Aadinath<span className="text-gold">·</span>
             </span>
             <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-gold/15 border border-gold/30 text-gold uppercase tracking-widest">
               Admin
@@ -94,7 +94,7 @@ export default function AdminNavbar({ onLogout }: Props) {
             >
               <div className="flex items-center justify-between px-5 h-14 border-b border-white/5">
                 <div className="flex items-center gap-2">
-                  <span className="font-bold text-teal text-sm">Aadinath<span className="text-gold">·</span></span>
+                  <span className="font-bold text-teal text-sm">Jay Aadinath<span className="text-gold">·</span></span>
                   <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-gold/15 border border-gold/30 text-gold uppercase tracking-widest">Admin</span>
                 </div>
                 <button onClick={() => setOpen(false)} className="w-7 h-7 flex items-center justify-center rounded-lg bg-surface2 text-muted hover:text-slate-100 transition-colors text-lg">×</button>

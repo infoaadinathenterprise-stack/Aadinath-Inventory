@@ -39,7 +39,7 @@ export default function Navbar() {
         <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
           <Link href="/" className="flex items-center group">
             <span className="font-bold text-xl text-teal tracking-tight group-hover:opacity-80 transition-opacity">
-              Aadinath
+              Jay Aadinath
             </span>
             <span className="text-gold font-bold text-xl">·</span>
           </Link>
@@ -79,7 +79,7 @@ export default function Navbar() {
             >
               <div className="flex items-center justify-between px-6 h-16 border-b border-white/5">
                 <span className="font-bold text-teal text-base tracking-tight">
-                  Aadinath<span className="text-gold">·</span>
+                  Jay Aadinath<span className="text-gold">·</span>
                 </span>
                 <button
                   onClick={() => setOpen(false)}
@@ -116,7 +116,7 @@ export default function Navbar() {
 
               <div className="px-6 py-4 border-t border-white/5">
                 <p className="text-xs text-muted/50 text-center">
-                  © {new Date().getFullYear()} Aadinath Enterprises
+                  © {new Date().getFullYear()} Jay Aadinath Enterprises LTD
                 </p>
               </div>
             </motion.div>

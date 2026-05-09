@@ -48,7 +48,7 @@ export default function AboutSection() {
               <span className="text-teal">Road Ahead</span>
             </h2>
             <p className="text-muted max-w-xl mx-auto text-base leading-relaxed">
-              Aadinath Enterprises has been supplying quality auto parts and consumables to workshops,
+              Jay Aadinath Enterprises LTD has been supplying quality auto parts and consumables to workshops,
               retailers, and fleet operators. From engine oils to specialty bearings — we have it all.
             </p>
           </div>
@@ -109,7 +109,7 @@ export default function AboutSection() {
 
         <FadeIn delay={0.4}>
           <p className="text-center text-muted text-xs mt-12">
-            © {new Date().getFullYear()} Aadinath Enterprises. All rights reserved.
+            © {new Date().getFullYear()} Jay Aadinath Enterprises LTD. All rights reserved.
           </p>
         </FadeIn>
       </div>

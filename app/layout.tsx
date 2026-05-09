@@ -6,7 +6,7 @@ import NavbarConditional from './components/NavbarConditional';
 const inter = Inter({ subsets: ['latin'], variable: '--font-inter' });
 
 export const metadata: Metadata = {
-  title: 'Aadinath Enterprises — Auto Parts & Consumables',
+  title: 'Jay Aadinath Enterprises LTD — Auto Parts & Consumables',
   description: 'Premium auto parts and consumables distributor. Oils, batteries, bearings and more.',
 };
 

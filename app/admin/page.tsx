@@ -128,7 +128,7 @@ function LoginForm({ onSuccess }: { onSuccess: () => void }) {
           className="bg-surface border border-white/8 rounded-2xl p-8 shadow-2xl"
         >
           <div className="text-center mb-8">
-            <p className="font-bold text-2xl text-teal tracking-tight">Aadinath<span className="text-gold">·</span></p>
+            <p className="font-bold text-2xl text-teal tracking-tight">Jay Aadinath<span className="text-gold">·</span></p>
             <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-gold/15 border border-gold/30 text-gold uppercase tracking-widest mt-1 inline-block">Admin Panel</span>
           </div>
           <p className="text-sm font-semibold text-slate-300 mb-1">Your name</p>
