@@ -10,7 +10,7 @@ export function useProductComponents(): ComponentMap {
   useEffect(() => {
     supabase
       .from('product_components')
-      .select('product_id, component_product_id, quantity')
+      .select('product_id, component_product_id, quantity, choice_group')
       .then(({ data, error }) => {
         if (error) { console.error('product_components fetch error:', error.message); return; }
         if (!data) return;
@@ -20,6 +20,7 @@ export function useProductComponents(): ComponentMap {
           m[row.product_id].push({
             component_product_id: row.component_product_id,
             quantity: row.quantity,
+            choice_group: (row as { choice_group?: string | null }).choice_group ?? null,
           });
         }
         setMap(m);

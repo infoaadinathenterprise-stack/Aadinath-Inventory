@@ -51,6 +51,8 @@ export default function AdjustStockModal({
   const [unit, setUnit] = useState<AdjUnit>('piece');
   const [qty, setQty]   = useState(1);
   const [saving, setSaving] = useState(false);
+  // For each choice_group on this product, which component_product_id the user picked.
+  const [groupChoices, setGroupChoices] = useState<Record<string, number>>({});
 
   if (!product || !direction) return null;
 
@@ -89,8 +91,27 @@ export default function AdjustStockModal({
     from_back: 'TRANSFER', from_main: 'TRANSFER', stockin: 'ADJUSTMENT_IN',
   };
 
+  // Split this product's components into always-deducted and groups of alternatives.
+  const productComponents = product ? (componentMap[product.product_id] ?? []) : [];
+  const alwaysComps = productComponents.filter(c => !c.choice_group);
+  const choiceGroupMap: Record<string, typeof productComponents> = {};
+  for (const c of productComponents) {
+    if (!c.choice_group) continue;
+    (choiceGroupMap[c.choice_group] ??= []).push(c);
+  }
+  const choiceGroupNames = Object.keys(choiceGroupMap);
+
   async function confirm() {
     if (!product || !selectedAction || qty < 1) return;
+    // Outbound actions must have a pick for every choice group.
+    if (['sold', 'to_front', 'to_back'].includes(selectedAction)) {
+      for (const g of choiceGroupNames) {
+        if (groupChoices[g] == null) {
+          onError(`Pick a ${g} before confirming`);
+          return;
+        }
+      }
+    }
     const isBoxUnit = unit === 'box';
     const movQty    = isBoxUnit ? qty * ppb : qty;  // always in pieces
 
@@ -155,9 +176,13 @@ export default function AdjustStockModal({
         await logMovement(product.product_id, null, locId, movQty, TYPE_MAP[selectedAction], NOTE_MAP[selectedAction]);
       }
 
-      // Deduct components for outbound actions (movQty is already in pieces)
+      // Deduct components for outbound actions (movQty is already in pieces).
+      // Always-deducted comps + the user's pick from each choice group.
       if (['sold', 'to_front', 'to_back'].includes(selectedAction)) {
-        const components = componentMap[product.product_id] ?? [];
+        const pickedFromGroups = choiceGroupNames
+          .map(g => choiceGroupMap[g].find(c => c.component_product_id === groupChoices[g]))
+          .filter((c): c is NonNullable<typeof c> => Boolean(c));
+        const components = [...alwaysComps, ...pickedFromGroups];
         for (const comp of components) {
           const compCurQty = location === 'back'
             ? (backStockMap[comp.component_product_id] || 0)
@@ -258,23 +283,58 @@ export default function AdjustStockModal({
             ))}
           </div>
 
-          {selectedAction && ['sold', 'to_front', 'to_back'].includes(selectedAction) &&
-            (componentMap[product.product_id]?.length ?? 0) > 0 && (
-            <div className="mb-4 rounded-xl bg-surface2 border border-white/8 px-3 py-2.5">
-              <p className="text-[10px] font-bold text-muted uppercase tracking-widest mb-1.5">
-                🔧 Components also deducted:
-              </p>
-              <ul className="flex flex-col gap-0.5">
-                {componentMap[product.product_id].map(c => {
-                  const name = allProducts.find(p => p.product_id === c.component_product_id)?.product_name
-                    ?? `#${c.component_product_id}`;
-                  return (
-                    <li key={c.component_product_id} className="text-xs text-slate-300">
-                      • {name} × {c.quantity} per unit
-                    </li>
-                  );
-                })}
-              </ul>
+          {selectedAction && ['sold', 'to_front', 'to_back'].includes(selectedAction) && productComponents.length > 0 && (
+            <div className="mb-4 flex flex-col gap-2">
+              {alwaysComps.length > 0 && (
+                <div className="rounded-xl bg-surface2 border border-white/8 px-3 py-2.5">
+                  <p className="text-[10px] font-bold text-muted uppercase tracking-widest mb-1.5">
+                    🔧 Always deducted:
+                  </p>
+                  <ul className="flex flex-col gap-0.5">
+                    {alwaysComps.map(c => {
+                      const name = allProducts.find(p => p.product_id === c.component_product_id)?.product_name
+                        ?? `#${c.component_product_id}`;
+                      return (
+                        <li key={c.component_product_id} className="text-xs text-slate-300">
+                          • {name} × {c.quantity} per unit
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </div>
+              )}
+
+              {choiceGroupNames.map(groupName => {
+                const members = choiceGroupMap[groupName];
+                const picked = groupChoices[groupName];
+                return (
+                  <div key={groupName} className="rounded-xl bg-gold/5 border border-gold/30 px-3 py-2.5">
+                    <p className="text-[10px] font-bold text-gold uppercase tracking-widest mb-2">
+                      Pick {groupName} ({members.length} options)
+                    </p>
+                    <div className="flex flex-col gap-1.5">
+                      {members.map(c => {
+                        const name = allProducts.find(p => p.product_id === c.component_product_id)?.product_name
+                          ?? `#${c.component_product_id}`;
+                        const isPicked = picked === c.component_product_id;
+                        return (
+                          <button
+                            key={c.component_product_id}
+                            onClick={() => setGroupChoices(prev => ({ ...prev, [groupName]: c.component_product_id }))}
+                            className={`text-left px-3 py-2 rounded-lg border text-xs font-semibold transition-all ${
+                              isPicked
+                                ? 'border-gold bg-gold/15 text-gold'
+                                : 'border-white/8 bg-surface2 text-slate-300 hover:border-gold/40'
+                            }`}
+                          >
+                            {isPicked && '✓ '}{name} <span className="text-muted font-normal">× {c.quantity}/unit</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           )}
 

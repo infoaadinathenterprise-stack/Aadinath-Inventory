@@ -176,7 +176,7 @@ function ProductModal({
   onSaved:  (msg: string) => void;
   onError:  (msg: string) => void;
 }) {
-  type CompEntry = { component_id: number; component_product_id: number; quantity: number; name: string };
+  type CompEntry = { component_id: number; component_product_id: number; quantity: number; name: string; choice_group: string | null };
 
   const [form,   setForm]   = useState<ProductForm>(() => {
     if (!editing) return EMPTY_FORM;
@@ -207,6 +207,7 @@ function ProductModal({
   const [compOpen,     setCompOpen]     = useState(false);
   const [selectedComp, setSelectedComp] = useState<Product | null>(null);
   const [compQty,      setCompQty]      = useState(1);
+  const [compGroup,    setCompGroup]    = useState('');
 
   const isBox = form.unit_type === 'box';
   const ppb   = parseInt(form.pieces_per_box) || 0;
@@ -228,7 +229,7 @@ function ProductModal({
     if (!editing) return;
     supabase
       .from('product_components')
-      .select('component_id, component_product_id, quantity')
+      .select('component_id, component_product_id, quantity, choice_group')
       .eq('product_id', editing.product_id)
       .then(({ data, error }) => {
         if (error) { console.error('components fetch error:', error.message); return; }
@@ -237,6 +238,7 @@ function ProductModal({
           component_product_id: c.component_product_id,
           quantity: c.quantity,
           name: products.find(p => p.product_id === c.component_product_id)?.product_name ?? `#${c.component_product_id}`,
+          choice_group: (c as { choice_group?: string | null }).choice_group ?? null,
         })));
       });
   }, [editing, products]);
@@ -244,13 +246,14 @@ function ProductModal({
   async function refreshComps(productId: number) {
     const { data } = await supabase
       .from('product_components')
-      .select('component_id, component_product_id, quantity')
+      .select('component_id, component_product_id, quantity, choice_group')
       .eq('product_id', productId);
     setCompList((data ?? []).map(c => ({
       component_id: c.component_id,
       component_product_id: c.component_product_id,
       quantity: c.quantity,
       name: products.find(p => p.product_id === c.component_product_id)?.product_name ?? `#${c.component_product_id}`,
+      choice_group: (c as { choice_group?: string | null }).choice_group ?? null,
     })));
   }
 
@@ -260,12 +263,14 @@ function ProductModal({
       product_id: editing.product_id,
       component_product_id: selectedComp.product_id,
       quantity: compQty,
+      choice_group: compGroup.trim() || null,
     });
     if (error) { onError('Failed to add component: ' + error.message); return; }
     await refreshComps(editing.product_id);
     setSelectedComp(null);
     setCompSearch('');
     setCompQty(1);
+    // keep compGroup so adding several alternatives in a row is fast
   }
 
   async function deleteComponent(componentId: number) {
@@ -449,16 +454,44 @@ function ProductModal({
           {editing && (
             <div className="border-t border-white/8 pt-4">
               <p className="text-[10px] font-bold text-muted uppercase tracking-widest mb-2">🔧 Machine Components</p>
-              {compList.length > 0 && (
-                <div className="flex flex-col gap-0.5 mb-3 rounded-xl bg-surface2 border border-white/8 px-3 py-2">
-                  {compList.map(c => (
-                    <div key={c.component_id} className="flex items-center justify-between py-1">
-                      <span className="text-xs text-slate-300">{c.name} <span className="text-muted">× {c.quantity}/unit</span></span>
-                      <button onClick={() => deleteComponent(c.component_id)} className="text-danger text-xs hover:opacity-70 ml-2 shrink-0">✕</button>
-                    </div>
-                  ))}
-                </div>
-              )}
+              {compList.length > 0 && (() => {
+                // Render always-deducted comps first, then each choice group together.
+                const always = compList.filter(c => !c.choice_group);
+                const groups = new Map<string, CompEntry[]>();
+                for (const c of compList) {
+                  if (!c.choice_group) continue;
+                  const g = c.choice_group;
+                  if (!groups.has(g)) groups.set(g, []);
+                  groups.get(g)!.push(c);
+                }
+                return (
+                  <div className="flex flex-col gap-2 mb-3">
+                    {always.length > 0 && (
+                      <div className="flex flex-col gap-0.5 rounded-xl bg-surface2 border border-white/8 px-3 py-2">
+                        {always.map(c => (
+                          <div key={c.component_id} className="flex items-center justify-between py-1">
+                            <span className="text-xs text-slate-300">{c.name} <span className="text-muted">× {c.quantity}/unit</span></span>
+                            <button onClick={() => deleteComponent(c.component_id)} className="text-danger text-xs hover:opacity-70 ml-2 shrink-0">✕</button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {[...groups.entries()].map(([groupName, members]) => (
+                      <div key={groupName} className="rounded-xl bg-gold/5 border border-gold/20 px-3 py-2">
+                        <div className="text-[10px] font-bold text-gold uppercase tracking-widest mb-1">
+                          Choose 1 of {members.length} · {groupName}
+                        </div>
+                        {members.map(c => (
+                          <div key={c.component_id} className="flex items-center justify-between py-1">
+                            <span className="text-xs text-slate-300">{c.name} <span className="text-muted">× {c.quantity}/unit</span></span>
+                            <button onClick={() => deleteComponent(c.component_id)} className="text-danger text-xs hover:opacity-70 ml-2 shrink-0">✕</button>
+                          </div>
+                        ))}
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
               <div className="relative">
                 <input
                   value={compSearch}
@@ -486,22 +519,34 @@ function ProductModal({
                 )}
               </div>
               {selectedComp && (
-                <div className="flex items-center gap-2 mt-2">
-                  <div className="flex items-center gap-1 shrink-0">
-                    <button onClick={() => setCompQty(q => Math.max(1, q - 1))} className="w-8 h-8 rounded-lg bg-surface2 border border-white/10 text-slate-100 font-bold text-sm flex items-center justify-center">−</button>
+                <div className="flex flex-col gap-2 mt-2">
+                  <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-1 shrink-0">
+                      <button onClick={() => setCompQty(q => Math.max(1, q - 1))} className="w-8 h-8 rounded-lg bg-surface2 border border-white/10 text-slate-100 font-bold text-sm flex items-center justify-center">−</button>
+                      <input
+                        type="number" min={1} value={compQty}
+                        onChange={e => setCompQty(Math.max(1, parseInt(e.target.value) || 1))}
+                        className="w-14 text-center px-1 py-1.5 rounded-lg bg-surface2 border border-white/8 text-slate-100 text-sm outline-none focus:border-teal/40"
+                      />
+                      <button onClick={() => setCompQty(q => q + 1)} className="w-8 h-8 rounded-lg bg-surface2 border border-white/10 text-slate-100 font-bold text-sm flex items-center justify-center">+</button>
+                    </div>
                     <input
-                      type="number" min={1} value={compQty}
-                      onChange={e => setCompQty(Math.max(1, parseInt(e.target.value) || 1))}
-                      className="w-14 text-center px-1 py-1.5 rounded-lg bg-surface2 border border-white/8 text-slate-100 text-sm outline-none focus:border-teal/40"
+                      value={compGroup}
+                      onChange={e => setCompGroup(e.target.value)}
+                      placeholder="Group (optional, e.g. Engine)"
+                      className="flex-1 px-2 py-1.5 rounded-lg bg-surface2 border border-white/8 text-slate-100 text-xs outline-none focus:border-gold/40"
                     />
-                    <button onClick={() => setCompQty(q => q + 1)} className="w-8 h-8 rounded-lg bg-surface2 border border-white/10 text-slate-100 font-bold text-sm flex items-center justify-center">+</button>
                   </div>
                   <button
                     onClick={addComponent}
-                    className="flex-1 py-2 rounded-xl bg-teal/15 border border-teal/30 text-teal text-xs font-bold hover:bg-teal/25 transition-colors"
+                    className="w-full py-2 rounded-xl bg-teal/15 border border-teal/30 text-teal text-xs font-bold hover:bg-teal/25 transition-colors"
                   >
-                    + Add Component
+                    + Add Component {compGroup.trim() ? `to "${compGroup.trim()}"` : ''}
                   </button>
+                  <p className="text-[10px] text-muted/70 leading-relaxed">
+                    Leave Group blank for components that are <b>always</b> deducted.
+                    Use the same group name on multiple components to make them <b>alternatives</b> — at sale time the user picks one.
+                  </p>
                 </div>
               )}
             </div>

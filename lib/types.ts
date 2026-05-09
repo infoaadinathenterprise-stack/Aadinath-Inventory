@@ -75,9 +75,10 @@ export interface ProductComponent {
   product_id:           number;
   component_product_id: number;
   quantity:             number;
+  choice_group:         string | null;
 }
 
-export type ComponentMap = Record<number, { component_product_id: number; quantity: number }[]>;
+export type ComponentMap = Record<number, { component_product_id: number; quantity: number; choice_group: string | null }[]>;
 
 export interface StockMovement {
   id:               number;
