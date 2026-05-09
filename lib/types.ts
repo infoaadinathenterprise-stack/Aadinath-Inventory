@@ -17,6 +17,9 @@ export interface Product {
   current_stock:      number | null;
   parent_product_id:  number | null;
   split_type:         string | null;
+  // Optional product image (URL or data URL). Falls back to the default
+  // placeholder when not set.
+  image_url?:         string | null;
   // Computed join field: sum of stock_by_location quantities across all locations
   total_stock?:       number;
 }
