@@ -309,6 +309,11 @@ function NewPurchaseModal({
   const [saving,     setSaving]     = useState(false);
   const [scanning,   setScanning]   = useState(false);
   const [scanInfo,   setScanInfo]   = useState<{ msg: string; ok: boolean } | null>(null);
+  // Captured per-step traces from the last scan attempt — surfaced in
+  // a copyable textarea so failures are easy to share.
+  const [scanLog,    setScanLog]    = useState<string>('');
+  const [showLog,    setShowLog]    = useState(false);
+  const [logCopied,  setLogCopied]  = useState(false);
 
   // Auto-computed total — always reflects current rows so the user
   // doesn't have to keep a separate field in sync.
@@ -362,12 +367,31 @@ function NewPurchaseModal({
     const img = images[0];
     setScanning(true);
     setScanInfo(null);
+    setLogCopied(false);
+
+    // Per-step trace lines. Whatever happens (success or any failure),
+    // this string ends up in the copyable textarea so the user can
+    // share the exact wire activity.
+    const traceLines: string[] = [];
+    const startedAt = Date.now();
+    function log(line: string) {
+      traceLines.push(`[+${((Date.now() - startedAt) / 1000).toFixed(2)}s] ${line}`);
+    }
+    function dumpLog() {
+      setScanLog(traceLines.join('\n'));
+    }
+
+    log(`User-Agent: ${navigator.userAgent}`);
+    log(`Image: ${img.mime}, ~${Math.round(img.b64.length * 0.75 / 1024)}KB`);
 
     // Read a response as JSON, but if it's not JSON (e.g. an HTML
     // error page) surface a clear message that tells us which step
-    // failed and what the body actually was.
+    // failed and what the body actually was. Also log the raw
+    // response body so the textarea has every byte the server sent.
     async function readJsonOrFail<T>(res: Response, stepLabel: string): Promise<T> {
       const txt = await res.text();
+      log(`${stepLabel} HTTP ${res.status} · X-Worker-Version=${res.headers.get('X-Worker-Version') ?? '(none)'}`);
+      log(`${stepLabel} body (first 1000 chars):\n${txt.slice(0, 1000)}`);
       const head = txt.trimStart();
       if (head.startsWith('<!DOCTYPE') || head.startsWith('<html')) {
         throw new Error(`${stepLabel} returned an HTML error page (HTTP ${res.status}) instead of JSON. First 200 chars: ${head.slice(0, 200).replace(/\s+/g, ' ')}`);
@@ -387,6 +411,7 @@ function NewPurchaseModal({
       form.append('scale', 'true');
       form.append('OCREngine', '2');
 
+      log('Calling OCR.space…');
       const ocrRes = await fetch('https://api.ocr.space/parse/image', { method: 'POST', body: form });
       if (!ocrRes.ok && ocrRes.status >= 500) throw new Error(`OCR.space HTTP ${ocrRes.status}`);
       const ocrData = await readJsonOrFail<{
@@ -399,6 +424,8 @@ function NewPurchaseModal({
         throw new Error('OCR error: ' + (m ?? 'unknown'));
       }
       const rawText = ocrData.ParsedResults?.[0]?.ParsedText?.trim() ?? '';
+      log(`OCR extracted ${rawText.length} chars of text`);
+      log(`OCR text:\n${rawText.slice(0, 1500)}`);
       if (!rawText) throw new Error('OCR returned no text — try a sharper, well-lit photo');
 
       // ── Step 2: Gemini parse (text-only, tiny payload) ──
@@ -427,6 +454,7 @@ Existing products: ${productList}
 BILL TEXT:
 ${rawText}`;
 
+      log(`Calling /api/gemini with ${prompt.length} char prompt…`);
       const aiRes = await fetch(GEMINI_PROXY_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -471,6 +499,7 @@ ${rawText}`;
         unitPrice:   it.unit_price ?? null,
         locationId:  2,
       }));
+      log(`Parsed ${newRows.length} item(s) from Gemini`);
       if (newRows.length === 0) {
         setScanInfo({ msg: 'AI returned 0 items — check the OCR result and add rows manually.', ok: false });
       } else {
@@ -479,12 +508,26 @@ ${rawText}`;
         // earlier failed attempts) with a fresh success message.
         setScanInfo({ msg: `Added ${newRows.length} line item${newRows.length > 1 ? 's' : ''} from bill — review before saving.`, ok: true });
       }
+      dumpLog();
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Unknown error';
+      log(`ERROR: ${msg}`);
       setScanInfo({ msg, ok: false });
+      setShowLog(true); // auto-open the trace on failure
+      dumpLog();
       onError('Scan failed: ' + msg);
     } finally {
       setScanning(false);
+    }
+  }
+
+  async function copyScanLog() {
+    try {
+      await navigator.clipboard.writeText(scanLog);
+      setLogCopied(true);
+      setTimeout(() => setLogCopied(false), 2000);
+    } catch {
+      onError('Could not copy — long-press the textarea and copy manually.');
     }
   }
 
@@ -627,6 +670,37 @@ ${rawText}`;
                   : 'bg-danger/10 border-danger/30 text-danger break-words'
               }`}>
                 {scanInfo.ok ? '✓ ' : '✕ '}{scanInfo.msg}
+              </div>
+            )}
+
+            {scanLog && (
+              <div className="mt-2 rounded-lg bg-surface2 border border-white/8 overflow-hidden">
+                <div className="flex items-center justify-between px-3 py-2 border-b border-white/8">
+                  <button
+                    onClick={() => setShowLog(s => !s)}
+                    className="text-[11px] font-bold text-muted hover:text-slate-100 transition-colors"
+                  >
+                    {showLog ? '▾' : '▸'} Scan trace ({scanLog.length} chars)
+                  </button>
+                  <button
+                    onClick={copyScanLog}
+                    className={`text-[11px] font-bold px-3 py-1 rounded-md border transition-all ${
+                      logCopied
+                        ? 'bg-success/10 border-success/30 text-success'
+                        : 'bg-teal/10 border-teal/30 text-teal hover:bg-teal/20'
+                    }`}
+                  >
+                    {logCopied ? '✓ Copied' : '📋 Copy all'}
+                  </button>
+                </div>
+                {showLog && (
+                  <textarea
+                    readOnly
+                    value={scanLog}
+                    onClick={e => (e.target as HTMLTextAreaElement).select()}
+                    className="w-full h-64 px-3 py-2 bg-navy text-[10px] font-mono text-slate-300 outline-none resize-y"
+                  />
+                )}
               </div>
             )}
           </div>

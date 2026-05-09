@@ -10,8 +10,8 @@
 export const onRequest: PagesFunction = async () => {
   return new Response(
     JSON.stringify({
-      version: 'v6-2026-05-09-text-only',
-      builtAt: 'gemini.ts: text-only proxy (browser does OCR via OCR.space first)',
+      version: 'v7-2026-05-09-text-only-bounded',
+      builtAt: 'gemini.ts: text-only + 22s abort + JSON mode + bounded output',
       time: new Date().toISOString(),
     }, null, 2),
     {
@@ -19,7 +19,7 @@ export const onRequest: PagesFunction = async () => {
       headers: {
         'Content-Type': 'application/json',
         'Cache-Control': 'no-store',
-        'X-Worker-Version': 'v6-2026-05-09-text-only',
+        'X-Worker-Version': 'v7-2026-05-09-text-only-bounded',
       },
     },
   );
