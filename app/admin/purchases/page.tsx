@@ -475,6 +475,8 @@ ${rawText}`;
         setScanInfo({ msg: 'AI returned 0 items — check the OCR result and add rows manually.', ok: false });
       } else {
         setItems(newRows);
+        // Replace any prior banner (including stale red ones from
+        // earlier failed attempts) with a fresh success message.
         setScanInfo({ msg: `Added ${newRows.length} line item${newRows.length > 1 ? 's' : ''} from bill — review before saving.`, ok: true });
       }
     } catch (e) {
@@ -505,6 +507,11 @@ ${rawText}`;
 
       for (const row of validRows) {
         const totalPrice = row.unitPrice != null ? row.qty * row.unitPrice : null;
+        // Note: we don't persist location_id on purchase_items — the
+        // user's schema doesn't have that column and we don't need it.
+        // The stock_by_location update below is what actually routes
+        // the goods to the chosen store; the row's locationId only
+        // controls that destination, not history.
         const { error: iErr } = await supabase.from('purchase_items').insert({
           purchase_id:      purchaseId,
           product_id:       row.productId,
@@ -512,7 +519,6 @@ ${rawText}`;
           quantity:         row.qty,
           unit_price:       row.unitPrice,
           total_price:      totalPrice,
-          location_id:      row.locationId,
         });
         if (iErr) throw new Error(iErr.message);
 
