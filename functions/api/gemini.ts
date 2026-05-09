@@ -3,25 +3,18 @@ interface Env {
   GEMINI_MODEL?: string;
 }
 
-const GEMINI_TIMEOUT_MS = 12_000;
+const GEMINI_TIMEOUT_MS = 20_000;
 const DEFAULT_MODEL = 'gemini-2.0-flash-lite';
-// v4: switched request format from JSON-wrapped base64 (~800KB JSON.parse,
-// blew the free-tier 10ms CPU budget) to raw image bytes in the body with
-// prompt + mime in headers. Worker reads ArrayBuffer (zero parse cost),
-// base64-encodes server-side just before forwarding to Gemini.
-const WORKER_VERSION = 'v4-2026-05-09-binary-body';
+// v5: stop base64-encoding images in the worker. v4 read the body
+// cheaply but then had to base64-encode the bytes in JS to inline them
+// into Gemini's generateContent request — that's ~50ms of CPU on
+// 600KB, which blows the Pages free-tier 10ms budget. v5 uploads the
+// raw bytes to Gemini's File API (no encoding work on our side), then
+// references the returned file URI in generateContent.
+const WORKER_VERSION = 'v5-2026-05-09-file-api';
 
-// btoa() on long binary strings can stack-overflow when built with the
-// spread operator; chunk it.
-function arrayBufferToBase64(buf: ArrayBuffer): string {
-  const bytes = new Uint8Array(buf);
-  const chunkSize = 8192;
-  let binary = '';
-  for (let i = 0; i < bytes.length; i += chunkSize) {
-    binary += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + chunkSize)));
-  }
-  return btoa(binary);
-}
+const FILES_UPLOAD = 'https://generativelanguage.googleapis.com/upload/v1beta/files';
+const GEN_BASE     = 'https://generativelanguage.googleapis.com/v1beta/models';
 
 export const onRequestPost: PagesFunction<Env> = async (context) => {
   const origin = context.request.headers.get('Origin') ?? '';
@@ -38,8 +31,6 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     return new Response(JSON.stringify({ error: 'GEMINI_KEY not set', workerVersion: WORKER_VERSION }), { status: 500, headers: corsHeaders });
   }
 
-  // Prompt arrives in a header, base64-encoded so it can carry any
-  // characters safely (raw header values are restricted to ASCII).
   const promptB64 = context.request.headers.get('X-Prompt') ?? '';
   if (!promptB64) {
     return new Response(JSON.stringify({ error: 'Missing X-Prompt header', workerVersion: WORKER_VERSION }), { status: 400, headers: corsHeaders });
@@ -52,56 +43,113 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   }
 
   const mimeType = context.request.headers.get('X-Mime-Type') ?? '';
-  const contentLen = context.request.headers.get('Content-Length');
 
-  // The body is the raw image bytes — no JSON parsing on the hot path.
+  // Body = raw image bytes (or empty for text-only). No parsing, no
+  // encoding. arrayBuffer() is essentially zero CPU.
   const buf = await context.request.arrayBuffer();
   const hasImage = buf.byteLength > 0;
   if (hasImage && !mimeType) {
     return new Response(JSON.stringify({ error: 'Missing X-Mime-Type header for image', workerVersion: WORKER_VERSION }), { status: 400, headers: corsHeaders });
   }
 
-  type GeminiPart =
-    | { inline_data: { mime_type: string; data: string } }
-    | { text: string };
-
-  const parts: GeminiPart[] = [];
-  if (hasImage) {
-    parts.push({ inline_data: { mime_type: mimeType, data: arrayBufferToBase64(buf) } });
-  }
-  parts.push({ text: prompt });
-
   const model = context.env.GEMINI_MODEL || DEFAULT_MODEL;
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${context.env.GEMINI_KEY}`;
-
-  const requestBody = {
-    contents: [{ parts }],
-    generationConfig: {
-      responseMimeType: 'application/json',
-      temperature: 0.1,
-      maxOutputTokens: 2048,
-    },
-  };
-
   const controller = new AbortController();
   const timeoutHandle = setTimeout(() => controller.abort(), GEMINI_TIMEOUT_MS);
 
-  let geminiRes: Response;
+  type GeminiPart =
+    | { inline_data?: { mime_type: string; data: string } }
+    | { file_data?:   { mime_type: string; file_uri: string } }
+    | { text: string };
+
   try {
-    geminiRes = await fetch(url, {
+    const parts: GeminiPart[] = [];
+
+    if (hasImage) {
+      // Upload bytes to Gemini's File API and reference by URI in
+      // generateContent. The platform handles the encoding for us; we
+      // ship raw octets straight through.
+      const uploadUrl = `${FILES_UPLOAD}?uploadType=media&key=${context.env.GEMINI_KEY}`;
+      const uploadRes = await fetch(uploadUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': mimeType, 'X-Goog-Upload-Protocol': 'raw' },
+        body: buf,
+        signal: controller.signal,
+      });
+      if (!uploadRes.ok) {
+        clearTimeout(timeoutHandle);
+        const errText = await uploadRes.text();
+        return new Response(
+          JSON.stringify({
+            error: `Gemini File API HTTP ${uploadRes.status}`,
+            detail: errText.slice(0, 500),
+            workerVersion: WORKER_VERSION,
+          }),
+          { status: 502, headers: corsHeaders },
+        );
+      }
+      const uploaded = await uploadRes.json() as { file?: { uri?: string; mimeType?: string } };
+      const fileUri = uploaded.file?.uri;
+      if (!fileUri) {
+        clearTimeout(timeoutHandle);
+        return new Response(
+          JSON.stringify({ error: 'Gemini upload returned no file URI', detail: JSON.stringify(uploaded).slice(0, 300), workerVersion: WORKER_VERSION }),
+          { status: 502, headers: corsHeaders },
+        );
+      }
+      parts.push({ file_data: { mime_type: uploaded.file?.mimeType || mimeType, file_uri: fileUri } });
+    }
+    parts.push({ text: prompt });
+
+    const requestBody = {
+      contents: [{ parts }],
+      generationConfig: {
+        responseMimeType: 'application/json',
+        temperature: 0.1,
+        maxOutputTokens: 2048,
+      },
+    };
+
+    const genUrl = `${GEN_BASE}/${model}:generateContent?key=${context.env.GEMINI_KEY}`;
+    const geminiRes = await fetch(genUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(requestBody),
       signal: controller.signal,
     });
     clearTimeout(timeoutHandle);
+
+    if (!geminiRes.ok) {
+      const errText = await geminiRes.text();
+      return new Response(
+        JSON.stringify({
+          error: `Gemini HTTP ${geminiRes.status} (${model})`,
+          detail: errText.slice(0, 800),
+          workerVersion: WORKER_VERSION,
+        }),
+        { status: 502, headers: corsHeaders },
+      );
+    }
+
+    const data = await geminiRes.json() as {
+      candidates?: { content?: { parts?: { text?: string }[] }; finishReason?: string }[];
+      promptFeedback?: { blockReason?: string };
+    };
+    const text = data.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
+    if (!text) {
+      const reason = data.promptFeedback?.blockReason ?? data.candidates?.[0]?.finishReason ?? 'unknown';
+      return new Response(
+        JSON.stringify({ error: `Gemini returned no text (reason: ${reason})`, workerVersion: WORKER_VERSION }),
+        { status: 502, headers: corsHeaders },
+      );
+    }
+    return new Response(JSON.stringify({ result: text, workerVersion: WORKER_VERSION }), { status: 200, headers: corsHeaders });
   } catch (e) {
     clearTimeout(timeoutHandle);
     const isAbort = e instanceof Error && (e.name === 'AbortError' || /aborted/i.test(e.message));
     if (isAbort) {
       return new Response(
         JSON.stringify({
-          error: `Gemini took longer than ${GEMINI_TIMEOUT_MS / 1000}s. Model ${model} may be slow on free quota — set GEMINI_MODEL or check API quota.`,
+          error: `Gemini round-trip exceeded ${GEMINI_TIMEOUT_MS / 1000}s — try a smaller image or check API quota.`,
           workerVersion: WORKER_VERSION,
         }),
         { status: 504, headers: corsHeaders },
@@ -112,33 +160,6 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       { status: 502, headers: corsHeaders },
     );
   }
-
-  if (!geminiRes.ok) {
-    const errText = await geminiRes.text();
-    return new Response(
-      JSON.stringify({
-        error: `Gemini HTTP ${geminiRes.status} (${model})`,
-        detail: errText.slice(0, 800),
-        workerVersion: WORKER_VERSION,
-        bodyBytes: contentLen,
-      }),
-      { status: 502, headers: corsHeaders },
-    );
-  }
-
-  const data = await geminiRes.json() as {
-    candidates?: { content?: { parts?: { text?: string }[] }; finishReason?: string }[];
-    promptFeedback?: { blockReason?: string };
-  };
-  const text = data.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
-  if (!text) {
-    const reason = data.promptFeedback?.blockReason ?? data.candidates?.[0]?.finishReason ?? 'unknown';
-    return new Response(
-      JSON.stringify({ error: `Gemini returned no text (reason: ${reason})`, workerVersion: WORKER_VERSION }),
-      { status: 502, headers: corsHeaders },
-    );
-  }
-  return new Response(JSON.stringify({ result: text, workerVersion: WORKER_VERSION }), { status: 200, headers: corsHeaders });
 };
 
 export const onRequestOptions: PagesFunction = async (context) => {
