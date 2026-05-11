@@ -150,15 +150,39 @@ function PurchasesDashboard() {
           }
         }
       }
-      // Delete child rows first to respect FK constraints.
-      const { error: iErr } = await supabase.from('purchase_items').delete().eq('purchase_id', data.purchase.purchase_id);
+      // Delete child rows first to respect FK constraints. Chain
+      // .select() so Supabase returns the deleted rows — if RLS
+      // silently blocks the delete, error is null but data is empty,
+      // which is the most common reason a "successful" delete leaves
+      // the row in the table.
+      const { data: delItems, error: iErr } = await supabase
+        .from('purchase_items')
+        .delete()
+        .eq('purchase_id', data.purchase.purchase_id)
+        .select();
       if (iErr) throw new Error(iErr.message);
-      const { error: pErr } = await supabase.from('purchases').delete().eq('purchase_id', data.purchase.purchase_id);
+
+      const { data: delPurchase, error: pErr } = await supabase
+        .from('purchases')
+        .delete()
+        .eq('purchase_id', data.purchase.purchase_id)
+        .select();
       if (pErr) throw new Error(pErr.message);
+
+      if (!delPurchase || delPurchase.length === 0) {
+        // Most common cause: no DELETE RLS policy for anon on these
+        // tables. Surface the exact SQL the user can paste into
+        // Supabase to fix it.
+        throw new Error(
+          `Delete returned success but 0 rows were affected — Row-Level Security is blocking DELETE on 'purchases' (and probably 'purchase_items', which removed ${delItems?.length ?? 0} rows). Run this once in Supabase SQL editor:\n\n` +
+          `CREATE POLICY "Allow public delete" ON purchases FOR DELETE TO anon USING (true);\n` +
+          `CREATE POLICY "Allow public delete" ON purchase_items FOR DELETE TO anon USING (true);`
+        );
+      }
 
       setDetail(null);
       load();
-      showToast('Purchase deleted ✓', 'success');
+      showToast(`Purchase deleted ✓ (${delItems?.length ?? 0} item${delItems?.length === 1 ? '' : 's'} removed)`, 'success');
     } catch (e) {
       showToast('Could not delete: ' + (e instanceof Error ? e.message : 'Unknown'), 'error');
     } finally {
