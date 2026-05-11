@@ -111,82 +111,88 @@ export default function ProductList({
   );
 
   return (
-    <div className="px-4 pb-8">
-      <div className="flex gap-2 mb-4">
-        {(['main', 'back'] as Location[]).map((loc) => (
-          <button
-            key={loc}
-            onClick={() => setLocation(loc)}
-            className={`flex-1 py-2.5 rounded-xl border text-xs font-bold transition-all ${
-              location === loc
-                ? 'border-teal bg-teal/10 text-teal'
-                : 'border-white/8 bg-surface2 text-muted hover:border-white/20'
-            }`}
-          >
-            {loc === 'main' ? '🏪 Main Store' : '🏭 Back Godown'}
-          </button>
-        ))}
-      </div>
-
-      <div className="relative mb-2">
-        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gold text-sm">📷</span>
-        <input
-          ref={barcodeRef}
-          type="text"
-          onKeyDown={handleBarcodeKey}
-          placeholder="Scan barcode / type SKU + Enter"
-          autoComplete="off"
-          inputMode="text"
-          className="w-full pl-9 pr-4 py-2.5 bg-gold/5 border border-gold/30 rounded-xl text-sm text-slate-100 placeholder:text-gold/40 outline-none focus:border-gold focus:bg-gold/10 transition-colors font-mono"
-        />
-      </div>
-      {scanMsg && (
-        <div className={`mb-2 px-3 py-1.5 rounded-lg text-xs font-semibold ${scanMsg.ok ? 'bg-success/10 text-success border border-success/20' : 'bg-danger/10 text-danger border border-danger/20'}`}>
-          {scanMsg.ok ? '✓ ' : '✕ '}{scanMsg.text}
+    // Two regions: a non-scrollable filter band on top (location toggle,
+    // barcode, search, categories, count) and a scrollable card list
+    // below. The parent layout in admin/page.tsx hands us flex-1 +
+    // min-h-0 via context so we fill the remaining viewport height.
+    <div className="px-4 flex flex-col flex-1 min-h-0">
+      <div className="shrink-0">
+        <div className="flex gap-2 mb-4">
+          {(['main', 'back'] as Location[]).map((loc) => (
+            <button
+              key={loc}
+              onClick={() => setLocation(loc)}
+              className={`flex-1 py-2.5 rounded-xl border text-xs font-bold transition-all ${
+                location === loc
+                  ? 'border-teal bg-teal/10 text-teal'
+                  : 'border-white/8 bg-surface2 text-muted hover:border-white/20'
+              }`}
+            >
+              {loc === 'main' ? '🏪 Main Store' : '🏭 Back Godown'}
+            </button>
+          ))}
         </div>
-      )}
 
-      <div className="relative mb-3">
-        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted text-sm">🔍</span>
-        <input
-          type="text"
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-          placeholder="Search products…"
-          className="w-full pl-9 pr-4 py-2.5 bg-surface2 border border-white/8 rounded-xl text-sm text-slate-100 placeholder:text-muted/50 outline-none focus:border-teal/40 transition-colors"
-        />
-        {search && (
-          <button
-            onClick={() => setSearch('')}
-            className="absolute right-3 top-1/2 -translate-y-1/2 text-muted hover:text-slate-100 text-lg leading-none"
-          >×</button>
+        <div className="relative mb-2">
+          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gold text-sm">📷</span>
+          <input
+            ref={barcodeRef}
+            type="text"
+            onKeyDown={handleBarcodeKey}
+            placeholder="Scan barcode / type SKU + Enter"
+            autoComplete="off"
+            inputMode="text"
+            className="w-full pl-9 pr-4 py-2.5 bg-gold/5 border border-gold/30 rounded-xl text-sm text-slate-100 placeholder:text-gold/40 outline-none focus:border-gold focus:bg-gold/10 transition-colors font-mono"
+          />
+        </div>
+        {scanMsg && (
+          <div className={`mb-2 px-3 py-1.5 rounded-lg text-xs font-semibold ${scanMsg.ok ? 'bg-success/10 text-success border border-success/20' : 'bg-danger/10 text-danger border border-danger/20'}`}>
+            {scanMsg.ok ? '✓ ' : '✕ '}{scanMsg.text}
+          </div>
         )}
+
+        <div className="relative mb-3">
+          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted text-sm">🔍</span>
+          <input
+            type="text"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="Search products…"
+            className="w-full pl-9 pr-4 py-2.5 bg-surface2 border border-white/8 rounded-xl text-sm text-slate-100 placeholder:text-muted/50 outline-none focus:border-teal/40 transition-colors"
+          />
+          {search && (
+            <button
+              onClick={() => setSearch('')}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-muted hover:text-slate-100 text-lg leading-none"
+            >×</button>
+          )}
+        </div>
+
+        <div className="flex gap-2 overflow-x-auto pb-1 mb-3 scrollbar-none">
+          {categories.map(cat => (
+            <button
+              key={cat}
+              onClick={() => setCategory(cat)}
+              className={`shrink-0 px-3 py-1.5 rounded-lg border text-[11px] font-semibold transition-all whitespace-nowrap ${
+                category === cat
+                  ? 'border-gold bg-gold/10 text-gold'
+                  : 'border-white/8 bg-surface2 text-muted hover:border-white/20'
+              }`}
+            >
+              {cat}
+            </button>
+          ))}
+        </div>
+
+        <p className="text-[11px] text-muted mb-3 font-medium">
+          {visible.length} product{visible.length !== 1 ? 's' : ''}
+          {outCount > 0 && (
+            <span className="ml-2 text-danger">· {outCount} out of stock</span>
+          )}
+        </p>
       </div>
 
-      <div className="flex gap-2 overflow-x-auto pb-1 mb-4 scrollbar-none">
-        {categories.map(cat => (
-          <button
-            key={cat}
-            onClick={() => setCategory(cat)}
-            className={`shrink-0 px-3 py-1.5 rounded-lg border text-[11px] font-semibold transition-all whitespace-nowrap ${
-              category === cat
-                ? 'border-gold bg-gold/10 text-gold'
-                : 'border-white/8 bg-surface2 text-muted hover:border-white/20'
-            }`}
-          >
-            {cat}
-          </button>
-        ))}
-      </div>
-
-      <p className="text-[11px] text-muted mb-3 font-medium">
-        {visible.length} product{visible.length !== 1 ? 's' : ''}
-        {outCount > 0 && (
-          <span className="ml-2 text-danger">· {outCount} out of stock</span>
-        )}
-      </p>
-
-      <div className="flex flex-col gap-2">
+      <div className="flex flex-col gap-2 flex-1 overflow-y-auto min-h-0 pb-6">
         <AnimatePresence mode="popLayout">
           {visible.length === 0 ? (
             <motion.div

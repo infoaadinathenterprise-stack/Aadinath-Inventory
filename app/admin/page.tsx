@@ -707,23 +707,29 @@ function Dashboard() {
   }
 
   return (
-    <div className="min-h-screen bg-navy">
+    // Lock the page to a single viewport-height column. The Navbar +
+    // StatsBar + title row + ProductList's filter bar all live in the
+    // non-scrollable region; only the product card list inside
+    // ProductList scrolls (configured below in that component).
+    <div className="h-dvh bg-navy flex flex-col overflow-hidden">
       <AdminNavbar onLogout={handleLogout} />
 
-      <main className="pt-14 max-w-2xl mx-auto">
-        <StatsBar products={products} backStockMap={backStockMap} mainStockMap={mainStockMap} />
+      <main className="pt-14 max-w-2xl mx-auto w-full flex-1 flex flex-col min-h-0">
+        <div className="shrink-0">
+          <StatsBar products={products} backStockMap={backStockMap} mainStockMap={mainStockMap} />
 
-        <div className="px-4 pt-5 pb-3 flex items-center justify-between">
-          <div>
-            <h2 className="text-base font-bold text-slate-100">Inventory</h2>
-            <p className="text-xs text-muted mt-0.5">{products.length} active products</p>
+          <div className="px-4 pt-5 pb-3 flex items-center justify-between">
+            <div>
+              <h2 className="text-base font-bold text-slate-100">Inventory</h2>
+              <p className="text-xs text-muted mt-0.5">{products.length} active products</p>
+            </div>
+            <button
+              onClick={() => setProductModal({ editing: null })}
+              className="px-4 py-2 rounded-xl bg-teal/10 border border-teal/30 text-teal text-xs font-bold hover:bg-teal/20 transition-all"
+            >
+              + Add Product
+            </button>
           </div>
-          <button
-            onClick={() => setProductModal({ editing: null })}
-            className="px-4 py-2 rounded-xl bg-teal/10 border border-teal/30 text-teal text-xs font-bold hover:bg-teal/20 transition-all"
-          >
-            + Add Product
-          </button>
         </div>
 
         <ProductList
