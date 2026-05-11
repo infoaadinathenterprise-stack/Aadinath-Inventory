@@ -114,11 +114,18 @@ function PurchasesDashboard() {
     const supplierLabel = supplierName(data.purchase.supplier_id);
     const totalLabel = data.purchase.total_amount != null ? `· ${fmtKsh(data.purchase.total_amount)}` : '';
     if (!window.confirm(
-      `Delete this purchase?\n\n${supplierLabel} ${totalLabel}\n${data.items.length} item(s)\n\nStock added by this purchase will be subtracted back from inventory. This cannot be undone.`,
+      `Delete this purchase?\n\n${supplierLabel} ${totalLabel}\n${data.items.length} item(s)\n\nStock added by this purchase will be subtracted back. Any products that were created by this purchase (and aren't used anywhere else) will also be removed from inventory.\n\nThis cannot be undone.`,
     )) return;
 
     setDeleting(true);
     try {
+      // Track products that should be cleaned up after we reverse
+      // stock — anything ONLY referenced by this purchase (i.e. it
+      // was auto-created at save time or hasn't been re-purchased)
+      // gets soft-deleted from inventory so it doesn't linger as a
+      // ghost row.
+      const productsToRetire: number[] = [];
+
       // Reverse stock for every item that hit stock_by_location at
       // save time. product_name_raw rows had no stock impact, so skip
       // those. We can't perfectly know which location was used (we
@@ -148,6 +155,21 @@ function PurchasesDashboard() {
             // (Remainder of qty stays uncovered if no location has
             // enough stock; we don't go negative.)
           }
+        }
+
+        // Does this product exist OUTSIDE of this purchase? Look for
+        // any purchase_items row pointing at it that isn't in this
+        // purchase. If we find none, the product was effectively
+        // created (or kept alive) only because of this purchase, so
+        // retire it.
+        const { data: otherRefs } = await supabase
+          .from('purchase_items')
+          .select('id')
+          .eq('product_id', it.product_id)
+          .neq('purchase_id', data.purchase.purchase_id)
+          .limit(1);
+        if (!otherRefs || otherRefs.length === 0) {
+          productsToRetire.push(it.product_id);
         }
       }
       // Delete child rows first to respect FK constraints. Chain
@@ -180,9 +202,31 @@ function PurchasesDashboard() {
         );
       }
 
+      // Retire products that only existed because of this purchase.
+      // Use UPDATE active_status = false (same pattern as the
+      // Inventory delete) so we don't need a DELETE policy on the
+      // products table — the row drops out of every list that filters
+      // by active_status. Also clear stock_by_location for these so
+      // dashboard totals don't show phantom counts.
+      let retired = 0;
+      for (const pid of productsToRetire) {
+        const { data: upd, error: upErr } = await supabase
+          .from('products')
+          .update({ active_status: false })
+          .eq('product_id', pid)
+          .select('product_id');
+        if (upErr) continue; // best-effort cleanup, don't block the delete
+        if (upd && upd.length > 0) {
+          retired++;
+          await supabase.from('stock_by_location').delete().eq('product_id', pid);
+        }
+      }
+
       setDetail(null);
       load();
-      showToast(`Purchase deleted ✓ (${delItems?.length ?? 0} item${delItems?.length === 1 ? '' : 's'} removed)`, 'success');
+      const itemsLabel = `${delItems?.length ?? 0} item${delItems?.length === 1 ? '' : 's'}`;
+      const retiredLabel = retired > 0 ? ` · ${retired} product${retired === 1 ? '' : 's'} removed from inventory` : '';
+      showToast(`Purchase deleted ✓ (${itemsLabel}${retiredLabel})`, 'success');
     } catch (e) {
       showToast('Could not delete: ' + (e instanceof Error ? e.message : 'Unknown'), 'error');
     } finally {
