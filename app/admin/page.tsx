@@ -714,7 +714,7 @@ function Dashboard() {
     <div className="h-dvh bg-navy flex flex-col overflow-hidden">
       <AdminNavbar onLogout={handleLogout} />
 
-      <main className="pt-14 max-w-2xl mx-auto w-full flex-1 flex flex-col min-h-0">
+      <main className="pt-14 max-w-7xl mx-auto w-full flex-1 flex flex-col min-h-0">
         <div className="shrink-0">
           <StatsBar products={products} backStockMap={backStockMap} mainStockMap={mainStockMap} />
 

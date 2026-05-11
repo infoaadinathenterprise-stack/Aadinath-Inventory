@@ -108,7 +108,7 @@ function SuppliersDashboard() {
   return (
     <div className="min-h-screen bg-navy">
       <AdminNavbar onLogout={handleLogout} />
-      <main className="pt-14 max-w-2xl mx-auto px-4 pb-10">
+      <main className="pt-14 max-w-7xl mx-auto w-full px-4 pb-10">
 
         <div className="flex items-center justify-between pt-5 pb-3">
           <div>
@@ -143,7 +143,7 @@ function SuppliersDashboard() {
             <p className="text-sm">{search ? 'No suppliers found' : 'No suppliers yet. Add your first one.'}</p>
           </div>
         ) : (
-          <div className="flex flex-col gap-2">
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2">
             {filtered.map((s, i) => (
               <motion.div
                 key={s.supplier_id}

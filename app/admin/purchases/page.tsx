@@ -112,7 +112,7 @@ function PurchasesDashboard() {
   return (
     <div className="min-h-screen bg-navy">
       <AdminNavbar onLogout={handleLogout} />
-      <main className="pt-14 max-w-2xl mx-auto px-4 pb-10">
+      <main className="pt-14 max-w-7xl mx-auto w-full px-4 pb-10">
         <div className="flex items-center justify-between pt-5 pb-3">
           <div>
             <h2 className="text-base font-bold text-slate-100">Purchases</h2>
@@ -136,7 +136,7 @@ function PurchasesDashboard() {
             <p className="text-sm">No purchases yet.</p>
           </div>
         ) : (
-          <div className="flex flex-col gap-2">
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2">
             {purchases.map((p, i) => (
               <motion.div
                 key={p.purchase_id}

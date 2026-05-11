@@ -108,7 +108,7 @@ function HistoryDashboard() {
   return (
     <div className="min-h-screen bg-navy">
       <AdminNavbar onLogout={handleLogout} />
-      <main className="pt-14 max-w-2xl mx-auto px-4 pb-10">
+      <main className="pt-14 max-w-7xl mx-auto w-full px-4 pb-10">
 
         <div className="pt-5 pb-3">
           <h2 className="text-base font-bold text-slate-100">Stock Movement History</h2>
@@ -154,7 +154,7 @@ function HistoryDashboard() {
             )}
           </div>
         ) : (
-          <div className="flex flex-col gap-2">
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2">
             {filtered.map((m, i) => {
               const meta = TYPE_META[m.movement_type] ?? { label: m.movement_type, emoji: '•', color: 'text-muted bg-surface2 border-white/10' };
               const isIn = m.movement_type === 'ADJUSTMENT_IN' || m.movement_type === 'PURCHASE_IN';
