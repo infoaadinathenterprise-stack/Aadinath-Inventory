@@ -700,35 +700,70 @@ ${rawText}`;
       if (pErr || !pArr?.[0]) throw new Error(pErr?.message ?? 'Failed to save purchase');
       const purchaseId = (pArr[0] as Purchase).purchase_id;
 
+      let createdProducts = 0;
+      let stockedRows     = 0;
+
       for (const row of validRows) {
+        // ── Auto-create a product for unmatched rows ──────────────
+        // Previously rows with no productId were saved to
+        // purchase_items as text-only (product_name_raw) and the
+        // entire stock + movement block below was skipped, so the
+        // purchase visibly existed but nothing landed in inventory.
+        // Now we create a minimal products row first and use its id
+        // for the rest of the loop. The user can edit/enrich the new
+        // product later from the Inventory page.
+        let productId = row.productId;
+        if (!productId && row.productName.trim()) {
+          const { data: newProd, error: createErr } = await supabase
+            .from('products')
+            .insert({
+              product_name:    row.productName.trim(),
+              type:            'Bill Import',
+              unit_of_measure: 'Piece',
+              unit_type:       'piece',
+              buying_price:    row.unitPrice,
+              reorder_level:   0,
+              active_status:   true,
+            })
+            .select('product_id')
+            .single();
+          if (createErr || !newProd) {
+            throw new Error(`Could not create product "${row.productName.trim()}": ${createErr?.message ?? 'no row returned'}`);
+          }
+          productId = (newProd as { product_id: number }).product_id;
+          createdProducts++;
+        }
+
         const totalPrice = row.unitPrice != null ? row.qty * row.unitPrice : null;
-        // Note: we don't persist location_id on purchase_items — the
-        // user's schema doesn't have that column and we don't need it.
-        // The stock_by_location update below is what actually routes
-        // the goods to the chosen store; the row's locationId only
-        // controls that destination, not history.
         const { error: iErr } = await supabase.from('purchase_items').insert({
           purchase_id:      purchaseId,
-          product_id:       row.productId,
-          product_name_raw: row.productId ? null : row.productName.trim(),
+          product_id:       productId,
+          product_name_raw: productId ? null : row.productName.trim(),
           quantity:         row.qty,
           unit_price:       row.unitPrice,
           total_price:      totalPrice,
         });
         if (iErr) throw new Error(iErr.message);
 
-        if (row.productId) {
+        if (productId) {
           const { data: existing } = await supabase
             .from('stock_by_location').select('id, quantity')
-            .eq('product_id', row.productId).eq('location_id', row.locationId).single();
+            .eq('product_id', productId).eq('location_id', row.locationId).maybeSingle();
           if (existing) {
             await supabase.from('stock_by_location').update({ quantity: (existing.quantity ?? 0) + row.qty }).eq('id', existing.id);
           } else {
-            await supabase.from('stock_by_location').insert({ product_id: row.productId, location_id: row.locationId, quantity: row.qty });
+            await supabase.from('stock_by_location').insert({ product_id: productId, location_id: row.locationId, quantity: row.qty });
           }
-          await logMovement(row.productId, null, row.locationId, row.qty, 'PURCHASE_IN', `Purchase #${purchaseId}`);
+          await logMovement(productId, null, row.locationId, row.qty, 'PURCHASE_IN', `Purchase #${purchaseId}`);
+          stockedRows++;
         }
       }
+
+      const summary =
+        `Saved purchase #${purchaseId}` +
+        (createdProducts > 0 ? ` · ${createdProducts} new product${createdProducts === 1 ? '' : 's'} created` : '') +
+        ` · ${stockedRows} stock entry${stockedRows === 1 ? '' : 'ies'} updated`;
+      console.log(summary);
       onSaved();
     } catch (e) {
       onError('Error: ' + (e instanceof Error ? e.message : 'Unknown'));
