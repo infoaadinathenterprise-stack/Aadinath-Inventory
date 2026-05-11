@@ -244,7 +244,12 @@ function ProductModal({
   const ppb   = parseInt(form.pieces_per_box) || 0;
 
   function autoSKU(f: ProductForm) {
-    if (editing) return f.stock_keeping_unit;
+    // When editing a product that already has a SKU, keep it stable
+    // — regenerating mid-edit could break barcodes printed for the
+    // existing SKU. But products auto-created by the bill-scan flow
+    // arrive with no SKU at all, so if the field is empty we should
+    // freshly generate one from whatever type/brand the user types.
+    if (editing && f.stock_keeping_unit.trim()) return f.stock_keeping_unit;
     return generateSKU(f.type, f.brand, products);
   }
 
