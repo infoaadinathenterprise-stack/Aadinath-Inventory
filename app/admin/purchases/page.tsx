@@ -279,10 +279,14 @@ interface ItemRow {
 // hits this directly so Cloudflare is never in the OCR path. If you want
 // to swap keys, get a new one at https://ocr.space/ocrapi/freekey.
 const OCR_SPACE_KEY = 'K89615870288957';
-// Moved off /api/gemini because that path was returning Cloudflare HTML
-// 502 in <1s with no worker code executing — classic stuck-edge-function
-// symptom that a fresh route name forces past.
-const GEMINI_PROXY_URL = '/api/scan';
+// Use the standalone Cloudflare Worker from the previous
+// Aadinath-Inventory project — it has been running in production for
+// months and has CORS configured for jayaadinathenterprises.com.
+// Every attempt to host the Gemini proxy as a Pages Function in this
+// project (/api/gemini and /api/scan, multiple worker versions) hit
+// Cloudflare-side failures we couldn't fix from code. Side-stepping
+// the Pages-Function path entirely fixes the scan reliably.
+const GEMINI_PROXY_URL = 'https://aadinath-proxy.info-aadinathenterprise.workers.dev/api/gemini';
 
 function NewPurchaseModal({
   suppliers, products, onClose, onSaved, onError,
@@ -457,7 +461,7 @@ Existing products: ${productList}
 BILL TEXT:
 ${rawText}`;
 
-      log(`Calling /api/gemini with ${prompt.length} char prompt…`);
+      log(`Calling proxy ${GEMINI_PROXY_URL} with ${prompt.length} char prompt…`);
       const aiRes = await fetch(GEMINI_PROXY_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -468,7 +472,7 @@ ${rawText}`;
         error?: string;
         detail?: string;
         workerVersion?: string;
-      }>(aiRes, '/api/gemini');
+      }>(aiRes, 'Gemini proxy');
       if (!aiRes.ok || !aiData.result) {
         const detail = aiData.detail ? `: ${aiData.detail}` : '';
         const v = aiData.workerVersion ? ` [worker ${aiData.workerVersion}]` : '';
@@ -534,8 +538,9 @@ ${rawText}`;
     }
   }
 
-  // Pings the worker without involving Gemini. Use it to prove the
-  // /api/scan route is reachable separately from any AI behavior.
+  // Sends a tiny prompt to the Gemini proxy so we can confirm the
+  // end-to-end pipeline (CORS, worker, Gemini, response shape) works
+  // before burning OCR quota or interpreting bill text.
   async function pingWorker() {
     setScanning(true);
     setScanInfo(null);
@@ -544,24 +549,26 @@ ${rawText}`;
     const t0 = Date.now();
     const log = (s: string) => lines.push(`[+${((Date.now() - t0) / 1000).toFixed(2)}s] ${s}`);
     try {
-      log(`POST ${GEMINI_PROXY_URL} { test: true }`);
+      const tinyPrompt = 'Reply with the exact JSON string {"ok":true,"echo":"ping"}';
+      log(`POST ${GEMINI_PROXY_URL}`);
+      log(`Body: { prompt: ${JSON.stringify(tinyPrompt)} }`);
       const res = await fetch(GEMINI_PROXY_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ test: true }),
+        body: JSON.stringify({ prompt: tinyPrompt }),
       });
       const txt = await res.text();
-      log(`HTTP ${res.status} · X-Worker-Version=${res.headers.get('X-Worker-Version') ?? '(none)'}`);
+      log(`HTTP ${res.status}`);
       log(`Body: ${txt.slice(0, 500)}`);
       if (txt.trimStart().startsWith('<')) {
-        setScanInfo({ msg: `Worker UNREACHABLE — got HTML page (HTTP ${res.status}). The route ${GEMINI_PROXY_URL} isn't deployed yet.`, ok: false });
+        setScanInfo({ msg: `Worker UNREACHABLE — got HTML page (HTTP ${res.status}). Either the proxy URL is wrong or CORS is blocking it.`, ok: false });
       } else {
         try {
-          const data = JSON.parse(txt) as { ok?: boolean; workerVersion?: string };
-          if (data.ok) {
-            setScanInfo({ msg: `Worker is alive · ${data.workerVersion ?? 'unknown version'}. Try the scan now.`, ok: true });
+          const data = JSON.parse(txt) as { result?: string; error?: string; detail?: string };
+          if (res.ok && data.result) {
+            setScanInfo({ msg: `Proxy + Gemini are alive. Gemini said: ${data.result.slice(0, 100)}`, ok: true });
           } else {
-            setScanInfo({ msg: `Worker responded but unexpected payload: ${txt.slice(0, 200)}`, ok: false });
+            setScanInfo({ msg: data.error ? `${data.error}${data.detail ? ': ' + data.detail : ''}` : `Unexpected payload: ${txt.slice(0, 200)}`, ok: false });
           }
         } catch {
           setScanInfo({ msg: `Worker non-JSON: ${txt.slice(0, 200)}`, ok: false });
@@ -569,7 +576,7 @@ ${rawText}`;
       }
     } catch (e) {
       log(`ERROR ${e instanceof Error ? e.message : String(e)}`);
-      setScanInfo({ msg: 'Network error pinging worker: ' + (e instanceof Error ? e.message : 'unknown'), ok: false });
+      setScanInfo({ msg: 'Network error pinging worker (CORS or DNS): ' + (e instanceof Error ? e.message : 'unknown'), ok: false });
     } finally {
       setScanLog(lines.join('\n'));
       setShowLog(true);
