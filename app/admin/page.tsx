@@ -634,10 +634,55 @@ function ProductModal({
               {saving ? 'Saving…' : editing ? 'Update Product' : 'Add Product'}
             </button>
           </div>
+
+          {editing && (
+            <div className="mt-4 pt-4 border-t border-white/8">
+              <button
+                onClick={() => deleteProduct(editing)}
+                disabled={saving}
+                className="w-full py-2.5 rounded-xl bg-danger/10 border border-danger/30 text-danger text-xs font-bold hover:bg-danger/20 transition-colors disabled:opacity-50"
+              >
+                🗑 Delete this product
+              </button>
+              <p className="text-[10px] text-muted/70 text-center mt-2 leading-relaxed">
+                Hides the product from inventory and clears its stock rows. Past purchases and movement history are kept for reporting.
+              </p>
+            </div>
+          )}
         </div>
       </motion.div>
     </>
   );
+
+  async function deleteProduct(p: Product) {
+    if (!window.confirm(`Delete "${p.product_name}"?\n\nThe product will be hidden from inventory and its stock rows will be cleared. Past purchases and history are kept. This cannot be undone.`)) return;
+    setSaving(true);
+    try {
+      // Soft-delete the product so historical purchase_items and
+      // stock movements still resolve their product_id. Then clear
+      // its stock rows so totals don't bleed into the dashboard.
+      const { error: upErr } = await supabase
+        .from('products')
+        .update({ active_status: false })
+        .eq('product_id', p.product_id);
+      if (upErr) throw new Error(upErr.message);
+      const { error: stErr } = await supabase
+        .from('stock_by_location')
+        .delete()
+        .eq('product_id', p.product_id);
+      if (stErr) throw new Error(stErr.message);
+      // Also drop product_components rows (the configuration), so if
+      // the user re-adds the product later they're not stuck with
+      // stale component links.
+      await supabase.from('product_components').delete().eq('product_id', p.product_id);
+      await supabase.from('product_components').delete().eq('component_product_id', p.product_id);
+      onSaved('Product deleted ✓');
+    } catch (e) {
+      onError('Could not delete: ' + (e instanceof Error ? e.message : 'Unknown'));
+    } finally {
+      setSaving(false);
+    }
+  }
 }
 
 const inputCls = 'w-full px-3 py-2.5 rounded-xl bg-surface2 border border-white/8 text-slate-100 text-sm placeholder:text-muted/40 outline-none focus:border-teal/40 transition-colors';

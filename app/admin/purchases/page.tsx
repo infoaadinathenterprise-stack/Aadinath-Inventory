@@ -59,6 +59,7 @@ function PurchasesDashboard() {
   const [toast,      setToast]      = useState<ToastState | null>(null);
   const [newOpen,    setNewOpen]    = useState(false);
   const [detail,     setDetail]     = useState<{ purchase: Purchase; items: PurchaseItem[] } | null>(null);
+  const [deleting,   setDeleting]   = useState(false);
   const toastId = useRef(0);
 
   const load = useCallback(async () => {
@@ -106,6 +107,62 @@ function PurchasesDashboard() {
     ]);
     if (pArr.data?.[0]) {
       setDetail({ purchase: pArr.data[0] as Purchase, items: (items.data ?? []) as PurchaseItem[] });
+    }
+  }
+
+  async function deletePurchase(data: { purchase: Purchase; items: PurchaseItem[] }) {
+    const supplierLabel = supplierName(data.purchase.supplier_id);
+    const totalLabel = data.purchase.total_amount != null ? `· ${fmtKsh(data.purchase.total_amount)}` : '';
+    if (!window.confirm(
+      `Delete this purchase?\n\n${supplierLabel} ${totalLabel}\n${data.items.length} item(s)\n\nStock added by this purchase will be subtracted back from inventory. This cannot be undone.`,
+    )) return;
+
+    setDeleting(true);
+    try {
+      // Reverse stock for every item that hit stock_by_location at
+      // save time. product_name_raw rows had no stock impact, so skip
+      // those. We can't perfectly know which location was used (we
+      // dropped that column earlier), so subtract from wherever the
+      // item currently has at least row.qty available, preferring
+      // back godown first then main store.
+      for (const it of data.items) {
+        if (!it.product_id || !it.quantity) continue;
+        const qty = it.quantity;
+        for (const locId of [2, 1] as const) {
+          const { data: row } = await supabase
+            .from('stock_by_location')
+            .select('id, quantity')
+            .eq('product_id', it.product_id)
+            .eq('location_id', locId)
+            .maybeSingle();
+          if (!row) continue;
+          const current = row.quantity ?? 0;
+          if (current >= qty) {
+            await supabase.from('stock_by_location').update({ quantity: current - qty }).eq('id', row.id);
+            break;
+          }
+          // Partial — drain this row and continue with the remainder
+          // on the other location.
+          if (current > 0) {
+            await supabase.from('stock_by_location').update({ quantity: 0 }).eq('id', row.id);
+            // (Remainder of qty stays uncovered if no location has
+            // enough stock; we don't go negative.)
+          }
+        }
+      }
+      // Delete child rows first to respect FK constraints.
+      const { error: iErr } = await supabase.from('purchase_items').delete().eq('purchase_id', data.purchase.purchase_id);
+      if (iErr) throw new Error(iErr.message);
+      const { error: pErr } = await supabase.from('purchases').delete().eq('purchase_id', data.purchase.purchase_id);
+      if (pErr) throw new Error(pErr.message);
+
+      setDetail(null);
+      load();
+      showToast('Purchase deleted ✓', 'success');
+    } catch (e) {
+      showToast('Could not delete: ' + (e instanceof Error ? e.message : 'Unknown'), 'error');
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -184,6 +241,8 @@ function PurchasesDashboard() {
             supplierName={supplierName}
             productName={productName}
             onClose={() => setDetail(null)}
+            onDelete={() => deletePurchase(detail)}
+            deleting={deleting}
           />
         )}
       </AnimatePresence>
@@ -196,12 +255,14 @@ function PurchasesDashboard() {
 // ─── Detail drawer ────────────────────────────────────────────────────────────
 
 function DetailDrawer({
-  data, supplierName, productName, onClose,
+  data, supplierName, productName, onClose, onDelete, deleting,
 }: {
   data: { purchase: Purchase; items: PurchaseItem[] };
   supplierName: (id: number | null) => string;
   productName:  (id: number | null, raw: string | null) => string;
-  onClose: () => void;
+  onClose:  () => void;
+  onDelete: () => void;
+  deleting: boolean;
 }) {
   const urls = parseBillUrls(data.purchase.bill_image_url);
   return (
@@ -253,10 +314,24 @@ function DetailDrawer({
           </div>
         )}
 
-        <button
-          onClick={onClose}
-          className="w-full mt-5 py-2.5 rounded-xl bg-surface2 border border-white/8 text-muted text-sm font-semibold hover:text-slate-100 transition-colors"
-        >Close</button>
+        <div className="mt-5 flex gap-2">
+          <button
+            onClick={onClose}
+            disabled={deleting}
+            className="flex-1 py-2.5 rounded-xl bg-surface2 border border-white/8 text-muted text-sm font-semibold hover:text-slate-100 transition-colors disabled:opacity-50"
+          >Close</button>
+          <button
+            onClick={onDelete}
+            disabled={deleting}
+            className="px-4 py-2.5 rounded-xl bg-danger/10 border border-danger/30 text-danger text-sm font-bold hover:bg-danger/20 transition-colors disabled:opacity-50 flex items-center gap-2"
+          >
+            {deleting && <span className="w-3.5 h-3.5 rounded-full border-2 border-danger border-t-transparent animate-spin" />}
+            🗑 Delete
+          </button>
+        </div>
+        <p className="text-[10px] text-muted/70 text-center mt-2 leading-relaxed">
+          Deleting reverses the stock that this purchase added.
+        </p>
       </motion.div>
     </>
   );
