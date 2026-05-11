@@ -211,6 +211,14 @@ function ProductModal({
   const [imageUrl,     setImageUrl]     = useState<string | null>(editing?.image_url ?? null);
   const imageInputRef = useRef<HTMLInputElement>(null);
 
+  // Captures whether the product had a real SKU at the moment the
+  // modal opened. We use this — not the live form value — to decide
+  // whether to keep the SKU stable or regenerate on each keystroke.
+  // Looking at the live value broke after the first keystroke because
+  // the freshly-generated partial SKU made the field non-empty and
+  // froze further updates.
+  const originallyHadSku = useRef<boolean>(!!editing?.stock_keeping_unit?.trim());
+
   function processImageFile(file: File) {
     if (!file.type.startsWith('image/')) { onError('Please pick an image file'); return; }
     if (file.size > 10 * 1024 * 1024) { onError('Image too large. Max 10MB'); return; }
@@ -244,12 +252,12 @@ function ProductModal({
   const ppb   = parseInt(form.pieces_per_box) || 0;
 
   function autoSKU(f: ProductForm) {
-    // When editing a product that already has a SKU, keep it stable
-    // — regenerating mid-edit could break barcodes printed for the
-    // existing SKU. But products auto-created by the bill-scan flow
-    // arrive with no SKU at all, so if the field is empty we should
-    // freshly generate one from whatever type/brand the user types.
-    if (editing && f.stock_keeping_unit.trim()) return f.stock_keeping_unit;
+    // Keep an existing SKU stable across edits (so printed barcodes
+    // don't break). But if the product had no SKU at all when we
+    // opened the modal (e.g. it was auto-created by the bill scan),
+    // regenerate live every time type or brand changes — even after
+    // the first keystroke produces a partial result.
+    if (originallyHadSku.current) return f.stock_keeping_unit;
     return generateSKU(f.type, f.brand, products);
   }
 
