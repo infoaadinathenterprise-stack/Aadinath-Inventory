@@ -510,16 +510,16 @@ function ProductModal({
           {isBox && (
             <div className="grid grid-cols-2 gap-3">
               <FormField label="Pieces per Box">
-                <input type="number" value={form.pieces_per_box} onChange={e => set('pieces_per_box', e.target.value)} placeholder="e.g. 12" min="1" className={inputCls} />
+                <input type="number" value={form.pieces_per_box} onChange={e => set('pieces_per_box', e.target.value)} onWheel={e => e.currentTarget.blur()} placeholder="e.g. 12" min="1" className={inputCls} />
               </FormField>
               <FormField label="Box Selling Price (Ksh)">
-                <input type="number" value={form.box_selling_price} onChange={e => set('box_selling_price', e.target.value)} placeholder="e.g. 480" min="0" className={inputCls} />
+                <input type="number" value={form.box_selling_price} onChange={e => set('box_selling_price', e.target.value)} onWheel={e => e.currentTarget.blur()} placeholder="e.g. 480" min="0" className={inputCls} />
               </FormField>
             </div>
           )}
 
           <FormField label="Reorder Level">
-            <input type="number" value={form.reorder_level} onChange={e => set('reorder_level', e.target.value)} placeholder="0" min="0" className={inputCls} />
+            <input type="number" value={form.reorder_level} onChange={e => set('reorder_level', e.target.value)} onWheel={e => e.currentTarget.blur()} placeholder="0" min="0" className={inputCls} />
           </FormField>
 
           <FormField label="Location *">
@@ -536,7 +536,7 @@ function ProductModal({
               <div className="flex items-center gap-2">
                 <button onClick={() => set('stock_back', String(Math.max(0, parseInt(form.stock_back) - 1)))}
                   className="w-9 h-9 rounded-lg bg-surface2 border border-white/10 text-slate-100 text-lg font-bold flex items-center justify-center shrink-0">−</button>
-                <input type="number" value={form.stock_back} onChange={e => set('stock_back', e.target.value)} min="0"
+                <input type="number" value={form.stock_back} onChange={e => set('stock_back', e.target.value)} onWheel={e => e.currentTarget.blur()} min="0"
                   className={`${inputCls} text-center text-lg font-bold`} />
                 <button onClick={() => set('stock_back', String((parseInt(form.stock_back) || 0) + 1))}
                   className="w-9 h-9 rounded-lg bg-surface2 border border-white/10 text-slate-100 text-lg font-bold flex items-center justify-center shrink-0">+</button>
@@ -552,7 +552,7 @@ function ProductModal({
               <div className="flex items-center gap-2">
                 <button onClick={() => set('stock_main', String(Math.max(0, parseInt(form.stock_main) - 1)))}
                   className="w-9 h-9 rounded-lg bg-surface2 border border-white/10 text-slate-100 text-lg font-bold flex items-center justify-center shrink-0">−</button>
-                <input type="number" value={form.stock_main} onChange={e => set('stock_main', e.target.value)} min="0"
+                <input type="number" value={form.stock_main} onChange={e => set('stock_main', e.target.value)} onWheel={e => e.currentTarget.blur()} min="0"
                   className={`${inputCls} text-center text-lg font-bold`} />
                 <button onClick={() => set('stock_main', String((parseInt(form.stock_main) || 0) + 1))}
                   className="w-9 h-9 rounded-lg bg-surface2 border border-white/10 text-slate-100 text-lg font-bold flex items-center justify-center shrink-0">+</button>
@@ -638,6 +638,7 @@ function ProductModal({
                       <input
                         type="number" min={1} value={compQty}
                         onChange={e => setCompQty(Math.max(1, parseInt(e.target.value) || 1))}
+                        onWheel={e => e.currentTarget.blur()}
                         className="w-14 text-center px-1 py-1.5 rounded-lg bg-surface2 border border-white/8 text-slate-100 text-sm outline-none focus:border-teal/40"
                       />
                       <button onClick={() => setCompQty(q => q + 1)} className="w-8 h-8 rounded-lg bg-surface2 border border-white/10 text-slate-100 font-bold text-sm flex items-center justify-center">+</button>

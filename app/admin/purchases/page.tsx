@@ -1080,6 +1080,7 @@ function ItemRowEditor({
           <input
             type="number" min={1} value={row.qty}
             onChange={e => onChange({ qty: Math.max(1, parseInt(e.target.value) || 1) })}
+            onWheel={e => e.currentTarget.blur()}
             className="w-full px-2 py-1.5 rounded-lg bg-surface border border-white/8 text-slate-100 text-xs outline-none focus:border-teal/40"
           />
         </div>
@@ -1089,6 +1090,7 @@ function ItemRowEditor({
             type="number" min={0} step="0.01" value={row.unitPrice ?? ''}
             placeholder="0.00"
             onChange={e => onChange({ unitPrice: e.target.value ? parseFloat(e.target.value) : null })}
+            onWheel={e => e.currentTarget.blur()}
             className="w-full px-2 py-1.5 rounded-lg bg-surface border border-white/8 text-slate-100 text-xs outline-none focus:border-teal/40"
           />
         </div>

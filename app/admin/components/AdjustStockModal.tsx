@@ -350,6 +350,7 @@ export default function AdjustStockModal({
             <input
               type="number" min={1} value={qty}
               onChange={e => setQty(Math.max(1, parseInt(e.target.value) || 1))}
+              onWheel={e => e.currentTarget.blur()}
               className="flex-1 text-center text-2xl font-bold bg-surface2 border border-white/10 rounded-xl py-2.5 text-slate-100 outline-none focus:border-teal/50 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
             />
             <button

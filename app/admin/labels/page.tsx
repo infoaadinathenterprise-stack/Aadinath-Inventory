@@ -299,6 +299,7 @@ function LabelsDashboard() {
                         value={copies}
                         min={1}
                         onChange={e => setCopies(p.product_id, e.target.value)}
+                        onWheel={e => e.currentTarget.blur()}
                         className={`w-10 text-center text-xs font-bold rounded-lg border py-1 bg-surface2 text-slate-100 outline-none focus:border-teal/50 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none ${
                           isOver ? 'border-danger/50' : 'border-white/10'
                         }`}
@@ -381,6 +382,7 @@ function LabelsDashboard() {
                   min={1}
                   value={stockQty}
                   onChange={e => setStockQty(Math.max(1, parseInt(e.target.value) || 1))}
+                  onWheel={e => e.currentTarget.blur()}
                   className="flex-1 text-center text-2xl font-bold bg-surface2 border border-white/10 rounded-xl py-2.5 text-slate-100 outline-none focus:border-teal/50 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                 />
                 <button

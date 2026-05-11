@@ -467,6 +467,7 @@ const PriceField = function PriceField(
         min={0}
         step={0.01}
         inputMode="decimal"
+        onWheel={e => e.currentTarget.blur()}
         className="w-full bg-surface2 border border-white/10 rounded-xl text-slate-100 text-lg font-bold px-3 py-2 outline-none focus:border-teal/50 transition-colors [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
       />
     </div>

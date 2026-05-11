@@ -479,6 +479,7 @@ function PosDashboard() {
                             i.product.product_id === item.product.product_id ? { ...i, qty: v } : i
                           ));
                         }}
+                        onWheel={e => e.currentTarget.blur()}
                         className="w-12 text-center text-sm font-bold tabular-nums bg-surface border border-white/10 rounded-md py-0.5 text-slate-100 outline-none focus:border-teal/50 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                       />
                       <button
