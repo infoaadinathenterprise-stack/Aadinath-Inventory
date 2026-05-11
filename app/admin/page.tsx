@@ -46,11 +46,32 @@ const EMPTY_FORM: ProductForm = {
   location: '', stock_back: '0', stock_main: '0',
 };
 
-function generateSKU(type: string, brand: string, existing: Product[]): string {
+function generateSKU(type: string, brand: string, existing: Product[], forProductId?: number): string {
   if (!type && !brand) return '';
-  const maxId = existing.length > 0 ? Math.max(...existing.map(p => p.product_id)) + 1 : 1;
+  // When editing, use the row's actual product_id so the SKU is
+  // stable per product and never collides with maxId+1 of another
+  // edit-in-progress with the same type/brand. For new products
+  // we don't know the id yet, so maxId+1 is the best estimate.
+  const id = forProductId ?? (existing.length > 0 ? Math.max(...existing.map(p => p.product_id)) + 1 : 1);
   const clean = (s: string, len: number) => s.replace(/[ -]/g, '').slice(0, len).toUpperCase();
-  return String(maxId).padStart(4, '0') + '-' + clean(type, 3) + clean(brand, 4);
+  return String(id).padStart(4, '0') + '-' + clean(type, 3) + clean(brand, 4);
+}
+
+// Extract a human-readable message out of whatever the catch block
+// caught — JS Errors, PostgrestError-shaped objects from Supabase
+// (which have .message, .details, .hint, .code), plain strings, etc.
+// String(err) on a Supabase error gives "[object Object]" which is
+// what the user kept seeing.
+function errMessage(e: unknown): string {
+  if (e instanceof Error) return e.message;
+  if (typeof e === 'string') return e;
+  if (e && typeof e === 'object') {
+    const obj = e as { message?: string; details?: string; hint?: string; code?: string };
+    const parts = [obj.message, obj.details, obj.hint, obj.code ? `(${obj.code})` : null].filter(Boolean);
+    if (parts.length) return parts.join(' · ');
+    try { return JSON.stringify(e); } catch { /* circular, fall through */ }
+  }
+  return String(e);
 }
 
 // ── Data loading ─────────────────────────────────────────────────────────────
@@ -256,9 +277,11 @@ function ProductModal({
     // don't break). But if the product had no SKU at all when we
     // opened the modal (e.g. it was auto-created by the bill scan),
     // regenerate live every time type or brand changes — even after
-    // the first keystroke produces a partial result.
+    // the first keystroke produces a partial result. When editing,
+    // base the prefix on the row's real product_id so we don't
+    // collide with the next-to-be-created product's predicted id.
     if (originallyHadSku.current) return f.stock_keeping_unit;
-    return generateSKU(f.type, f.brand, products);
+    return generateSKU(f.type, f.brand, products, editing?.product_id);
   }
 
   function set(key: keyof ProductForm, value: string) {
@@ -376,7 +399,7 @@ function ProductModal({
 
       onSaved(editing ? 'Product updated ✓' : 'Product added ✓');
     } catch (e) {
-      onError('Error: ' + (e instanceof Error ? e.message : String(e)));
+      onError('Error: ' + errMessage(e));
     } finally {
       setSaving(false);
     }
@@ -691,7 +714,7 @@ function ProductModal({
       await supabase.from('product_components').delete().eq('component_product_id', p.product_id);
       onSaved('Product deleted ✓');
     } catch (e) {
-      onError('Could not delete: ' + (e instanceof Error ? e.message : 'Unknown'));
+      onError('Could not delete: ' + errMessage(e));
     } finally {
       setSaving(false);
     }
