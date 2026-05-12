@@ -28,6 +28,20 @@ function formatDate(iso: string) {
   return new Date(iso).toLocaleString('en-KE', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
 
+// Reason strings written by logMovement are prefixed "[User] …" — pull
+// the user out for display and return the rest as the clean reason.
+function parseReason(raw: string | null): { user: string | null; rest: string } {
+  if (!raw) return { user: null, rest: '' };
+  const m = raw.match(/^\[([^\]]+)\]\s*(.*)$/);
+  if (!m) return { user: null, rest: raw };
+  return { user: m[1].trim(), rest: m[2].trim() };
+}
+
+function fmtKsh(n: number | null | undefined) {
+  if (n == null) return '—';
+  return 'Ksh ' + Number(n).toLocaleString('en-KE');
+}
+
 function HistoryDashboard() {
   const [movements, setMovements] = useState<StockMovement[]>([]);
   const [products,  setProducts]  = useState<Product[]>([]);
@@ -36,6 +50,9 @@ function HistoryDashboard() {
   const [typeFilter, setTypeFilter] = useState('ALL');
   const [search,    setSearch]    = useState('');
   const [toast,     setToast]     = useState<ToastState | null>(null);
+  // Which movement row is expanded into the details panel. We allow
+  // one at a time to keep the page scannable.
+  const [expandedId, setExpandedId] = useState<number | null>(null);
   const toastId = useRef(0);
   const router = useRouter();
 
@@ -49,7 +66,9 @@ function HistoryDashboard() {
     const [movRes, reqRes, prodRes] = await Promise.all([
       supabase.from('stock_movements').select('*').order('id', { ascending: false }).limit(200),
       supabase.from('stock_requests').select('*').order('request_id', { ascending: false }).limit(200),
-      supabase.from('products').select('product_id, product_name').eq('active_status', true),
+      // Load enough fields to render unit-of-measure, prices, brand,
+      // model on the detail panel without a follow-up query.
+      supabase.from('products').select('product_id, product_name, brand, model, unit_of_measure, display_unit, pieces_per_box, selling_price, buying_price, box_selling_price'),
     ]);
 
     const fromMovements: StockMovement[] = (movRes.data ?? []) as StockMovement[];
@@ -158,35 +177,107 @@ function HistoryDashboard() {
             {filtered.map((m, i) => {
               const meta = TYPE_META[m.movement_type] ?? { label: m.movement_type, emoji: '•', color: 'text-muted bg-surface2 border-white/10' };
               const isIn = m.movement_type === 'ADJUSTMENT_IN' || m.movement_type === 'PURCHASE_IN';
-              const isTransfer = m.movement_type === 'TRANSFER';
+              const isTransfer = m.movement_type === 'TRANSFER' || m.movement_type === 'TRANSFER_TO_MAIN' || m.movement_type === 'TRANSFER_TO_BACK';
+              const isSale = m.movement_type === 'SALE';
+              const product = products.find(p => p.product_id === m.product_id);
+              const { user, rest: cleanReason } = parseReason(m.reason);
+              const fromLoc = m.from_location_id ? LOC_NAME[m.from_location_id] ?? `Location #${m.from_location_id}` : null;
+              const toLoc   = m.to_location_id   ? LOC_NAME[m.to_location_id]   ?? `Location #${m.to_location_id}`   : null;
+              const ts = m.movement_date ?? m.created_at;
+              const isExpanded = expandedId === m.id;
+
+              // Estimated revenue / cost from product price * qty.
+              const estRevenue = isSale && product?.selling_price ? product.selling_price * m.quantity : null;
+              const estCost    = m.movement_type === 'PURCHASE_IN' && product?.buying_price ? product.buying_price * m.quantity : null;
+
               return (
                 <motion.div
                   key={m.id}
                   initial={{ opacity: 0, y: 6 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: i * 0.02 }}
-                  className="bg-surface border border-white/8 rounded-xl p-3.5 flex items-start gap-3"
+                  onClick={() => setExpandedId(isExpanded ? null : m.id)}
+                  className={`bg-surface border rounded-xl cursor-pointer transition-colors ${isExpanded ? 'border-teal/40' : 'border-white/8 hover:border-white/15'}`}
                 >
-                  <div className={`w-9 h-9 rounded-xl border flex items-center justify-center text-base shrink-0 ${meta.color}`}>
-                    {meta.emoji}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="font-semibold text-sm text-slate-100 truncate">{productName(m.product_id)}</div>
-                    <div className="text-xs text-muted mt-0.5">
-                      {isTransfer
-                        ? `${LOC_NAME[m.from_location_id ?? 0] ?? '?'} → ${LOC_NAME[m.to_location_id ?? 0] ?? '?'}`
-                        : isIn
-                          ? `→ ${LOC_NAME[m.to_location_id ?? 0] ?? 'Unknown'}`
-                          : `← ${LOC_NAME[m.from_location_id ?? 0] ?? 'Unknown'}`}
-                      {m.reason ? ` · ${m.reason}` : ''}
+                  {/* Compact summary row — always visible */}
+                  <div className="p-3.5 flex items-start gap-3">
+                    <div className={`w-9 h-9 rounded-xl border flex items-center justify-center text-base shrink-0 ${meta.color}`}>
+                      {meta.emoji}
                     </div>
-                    {(m.movement_date ?? m.created_at) && (
-                      <div className="text-[10px] text-muted/60 mt-1">{formatDate((m.movement_date ?? m.created_at)!)}</div>
+                    <div className="flex-1 min-w-0">
+                      <div className="font-semibold text-sm text-slate-100 truncate">{productName(m.product_id)}</div>
+                      <div className="text-xs text-muted mt-0.5 truncate">
+                        {isTransfer
+                          ? `${fromLoc ?? '?'} → ${toLoc ?? '?'}`
+                          : isIn
+                            ? `→ ${toLoc ?? 'Unknown'}`
+                            : `← ${fromLoc ?? 'Unknown'}`}
+                        {cleanReason ? ` · ${cleanReason}` : ''}
+                      </div>
+                      {ts && (
+                        <div className="text-[10px] text-muted/60 mt-1">
+                          {formatDate(ts)}
+                          {user && <span className="ml-2 text-gold/80">· {user}</span>}
+                        </div>
+                      )}
+                    </div>
+                    <div className={`flex flex-col items-end shrink-0`}>
+                      <div className={`text-lg font-bold ${isIn ? 'text-success' : isTransfer ? 'text-blue-400' : 'text-danger'}`}>
+                        {isIn ? '+' : isTransfer ? '↔' : '−'}{m.quantity}
+                      </div>
+                      <span className="text-[9px] text-muted/60 mt-0.5">{isExpanded ? '▴ hide' : '▾ details'}</span>
+                    </div>
+                  </div>
+
+                  {/* Expanded detail panel */}
+                  <AnimatePresence initial={false}>
+                    {isExpanded && (
+                      <motion.div
+                        key="detail"
+                        initial={{ opacity: 0, height: 0 }}
+                        animate={{ opacity: 1, height: 'auto' }}
+                        exit={{ opacity: 0, height: 0 }}
+                        transition={{ duration: 0.18 }}
+                        className="overflow-hidden border-t border-white/8"
+                        onClick={e => e.stopPropagation()}
+                      >
+                        <div className="p-3.5 grid grid-cols-2 gap-x-3 gap-y-2 text-xs">
+                          <DetailRow label="Type"     value={`${meta.emoji} ${meta.label}`} />
+                          <DetailRow label="Quantity" value={`${m.quantity}${product?.unit_of_measure ? ' ' + product.unit_of_measure.toLowerCase() + (m.quantity === 1 ? '' : 's') : ''}`} />
+                          {fromLoc && <DetailRow label="From" value={fromLoc} />}
+                          {toLoc   && <DetailRow label="To"   value={toLoc} />}
+                          {!fromLoc && !isTransfer && !isIn && <DetailRow label="From" value="(not recorded)" />}
+                          {!toLoc   && !isTransfer && isIn   && <DetailRow label="To"   value="(not recorded)" />}
+                          {product?.brand &&  <DetailRow label="Brand" value={product.brand} />}
+                          {product?.model &&  <DetailRow label="Model" value={product.model} />}
+                          {product?.pieces_per_box ? (
+                            <DetailRow label={`${product.display_unit || 'Bulk'} size`} value={`${product.pieces_per_box} ${(product.unit_of_measure || 'piece').toLowerCase()}s`} />
+                          ) : null}
+                          {product?.selling_price != null && (
+                            <DetailRow label="Sell price" value={`${fmtKsh(product.selling_price)}${product.unit_of_measure ? ' / ' + product.unit_of_measure.toLowerCase() : ''}`} />
+                          )}
+                          {product?.buying_price != null && (
+                            <DetailRow label="Buy price" value={`${fmtKsh(product.buying_price)}${product.unit_of_measure ? ' / ' + product.unit_of_measure.toLowerCase() : ''}`} />
+                          )}
+                          {estRevenue != null && (
+                            <DetailRow label="Est. revenue" value={fmtKsh(estRevenue)} highlight="text-gold" />
+                          )}
+                          {estCost != null && (
+                            <DetailRow label="Est. cost" value={fmtKsh(estCost)} highlight="text-teal" />
+                          )}
+                          {user && <DetailRow label="By" value={user} />}
+                          {ts &&   <DetailRow label="When" value={formatDate(ts)} />}
+                          {cleanReason && (
+                            <div className="col-span-2 mt-1 pt-2 border-t border-white/5">
+                              <span className="text-[10px] font-bold text-muted uppercase tracking-widest">Reason</span>
+                              <p className="text-slate-300 text-xs mt-1 leading-relaxed break-words">{cleanReason}</p>
+                            </div>
+                          )}
+                          <DetailRow label="Record #" value={String(m.id)} mono />
+                        </div>
+                      </motion.div>
                     )}
-                  </div>
-                  <div className={`text-lg font-bold shrink-0 ${isIn ? 'text-success' : isTransfer ? 'text-blue-400' : 'text-danger'}`}>
-                    {isIn ? '+' : isTransfer ? '↔' : '−'}{m.quantity}
-                  </div>
+                  </AnimatePresence>
                 </motion.div>
               );
             })}
@@ -194,6 +285,17 @@ function HistoryDashboard() {
         )}
       </main>
       <Toast toast={toast} onDismiss={() => setToast(null)} />
+    </div>
+  );
+}
+
+function DetailRow({ label, value, mono, highlight }: { label: string; value: string; mono?: boolean; highlight?: string }) {
+  return (
+    <div className="flex flex-col">
+      <span className="text-[10px] font-bold text-muted uppercase tracking-widest">{label}</span>
+      <span className={`text-xs mt-0.5 break-words ${mono ? 'font-mono' : ''} ${highlight ?? 'text-slate-200'}`}>
+        {value}
+      </span>
     </div>
   );
 }
