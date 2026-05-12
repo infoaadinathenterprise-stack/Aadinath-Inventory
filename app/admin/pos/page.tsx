@@ -7,12 +7,13 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useProducts } from '@/lib/hooks/useProducts';
 import { useProductComponents } from '@/lib/hooks/useProductComponents';
 import { formatStock } from '@/lib/formatStock';
+import { supabase } from '@/lib/supabase';
 import { upsertStock, logMovement } from '@/lib/stockActions';
 import AdjustStockModal from '@/app/admin/components/AdjustStockModal';
 import BarcodeScanner   from '@/app/admin/components/BarcodeScanner';
 import Toast, { type ToastState } from '@/app/admin/components/Toast';
 import type { Product, Location } from '@/lib/types';
-import { SESSION_KEY } from '@/lib/types';
+import { SESSION_KEY, USER_KEY } from '@/lib/types';
 
 // ── Auth guard ─────────────────────────────────────────────────────────────────
 
@@ -346,6 +347,48 @@ function PosDashboard() {
     await logMovement(pid, backId, mainId, movPieces, 'TRANSFER', 'Moved from Back Godown to Main Store');
   }
 
+  // Writes a single `sales` row + N `sale_items` rows so each
+  // POS checkout shows up on the Sales page and can be queried for
+  // daily/weekly/monthly totals without parsing movement notes.
+  async function recordSale(items: CartItem[]) {
+    const total = items.reduce((s, i) => s + (i.sellPrice ?? 0) * i.qty, 0);
+    const itemCount = items.reduce((s, i) => s + i.qty, 0);
+    const performedBy = (typeof window !== 'undefined' && localStorage.getItem(USER_KEY)) || 'Admin';
+    const locId = location === 'back' ? 2 : 1;
+
+    const { data: saleRow, error: saleErr } = await supabase.from('sales').insert({
+      sale_date:    new Date().toISOString().split('T')[0],
+      performed_by: performedBy,
+      location_id:  locId,
+      total_amount: total,
+      item_count:   itemCount,
+      status:       'COMPLETED',
+    }).select('sale_id').single();
+    if (saleErr || !saleRow) {
+      // Don't fail the whole checkout if the sales-table write fails —
+      // the stock + movement already happened. Show a warning instead.
+      showToast('Sale recorded for stock but not the Sales journal: ' + (saleErr?.message ?? 'no row returned'), 'error');
+      return;
+    }
+    const saleId = (saleRow as { sale_id: number }).sale_id;
+
+    // Snapshot product names so the Sales page renders correctly
+    // even if the product is later renamed or soft-deleted.
+    const rows = items.map(i => ({
+      sale_id:      saleId,
+      product_id:   i.product.product_id,
+      product_name: i.product.product_name,
+      quantity:     i.qty,
+      unit:         unitLabel(i.product, i.unit),
+      unit_price:   i.sellPrice ?? null,
+      line_total:   i.sellPrice != null ? i.sellPrice * i.qty : null,
+    }));
+    const { error: itemsErr } = await supabase.from('sale_items').insert(rows);
+    if (itemsErr) {
+      showToast('Sale header saved but line items failed: ' + itemsErr.message, 'error');
+    }
+  }
+
   async function processCart(action: 'sold' | 'to_main') {
     if (cart.length === 0) return;
     if (action === 'to_main') {
@@ -370,6 +413,12 @@ function PosDashboard() {
         } else {
           await transferOneItem(item.product, item.qty, item.unit);
         }
+      }
+      // After all stock + movement writes succeed, snapshot the cart
+      // to the sales journal so the new /admin/sales page can show
+      // daily totals + per-product breakdowns.
+      if (action === 'sold') {
+        await recordSale(cart);
       }
       showToast(`${action === 'sold' ? 'Sold' : 'Moved'} ${cart.length} item(s) ✓`, 'success');
       setCart([]);
@@ -397,6 +446,7 @@ function PosDashboard() {
     try {
       if (action === 'sold') {
         await sellOneItem(item.product, item.qty, item.unit, item.sellPrice);
+        await recordSale([item]);
       } else {
         await transferOneItem(item.product, item.qty, item.unit);
       }

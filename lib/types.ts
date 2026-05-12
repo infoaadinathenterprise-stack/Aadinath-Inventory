@@ -94,3 +94,31 @@ export interface StockMovement {
   created_at?:      string;
   movement_date?:   string;
 }
+
+// One row per checkout in the POS — a group of line items sold
+// together. Designed for clean analytics (no string parsing required)
+// so it's straightforward to feed into an AI agent later for things
+// like "what's my best-selling product this month".
+export interface Sale {
+  sale_id:       number;
+  sale_date:     string;          // YYYY-MM-DD
+  performed_by:  string | null;
+  location_id:   number | null;
+  total_amount:  number;
+  item_count:    number;
+  notes:         string | null;
+  status:        string;          // COMPLETED | VOIDED
+  created_at:    string;
+}
+
+export interface SaleItem {
+  id:           number;
+  sale_id:      number;
+  product_id:   number | null;
+  product_name: string | null;    // snapshot at time of sale
+  quantity:     number;
+  unit:         string;           // 'piece' | the bulk unit name
+  unit_price:   number | null;
+  line_total:   number | null;
+  created_at:   string;
+}
