@@ -32,9 +32,65 @@ export default function PosPage() {
   return <PosDashboard />;
 }
 
+type CartUnit = 'piece' | 'box';
+
 interface CartItem {
   product: Product;
   qty:     number;
+  unit:    CartUnit;  // 'box' means bulk unit (could be box/roll/drum — labeled via display_unit)
+}
+
+// Does this product have a bulk unit (box/roll/etc.)? Gate on
+// pieces_per_box > 0 so it works for any unit_type that has a
+// multi-piece bulk concept, not just the literal word "box".
+function hasBulkUnit(p: Product): boolean {
+  return (p.pieces_per_box ?? 0) > 0;
+}
+
+// Human-readable label for either unit on this product. Uses the
+// product's own unit_of_measure ("Piece" / "Meter" / "Litre") for the
+// small unit and display_unit ("Box" / "Roll" / "Drum") for the bulk.
+function unitLabel(p: Product, u: CartUnit): string {
+  if (u === 'box') return (p.display_unit?.trim()) || 'Box';
+  return (p.unit_of_measure?.trim()) || 'Piece';
+}
+
+// Total available at a single location expressed in the chosen unit.
+// For 'piece' it's pcs + bx*ppb. For 'box' it's floor((pcs + bx*ppb) / ppb).
+function availableAt(pcs: number, bx: number, unit: CartUnit, ppb: number): number {
+  const pool = pcs + bx * ppb;
+  if (unit === 'box' && ppb > 0) return Math.floor(pool / ppb);
+  return pool;
+}
+
+// Compute the new (quantity, box_quantity) for a location after
+// removing `qty` of `unit` from (pcs, bx). Mirrors the deductFrom
+// logic in AdjustStockModal so the box column is touched the same
+// way whether the user sells via POS or adjusts via the inventory
+// modal. Caller must validate there's enough stock; this function
+// will go negative on pcs if asked.
+function deductFromLocation(pcs: number, bx: number, qty: number, unit: CartUnit, ppb: number) {
+  if (unit === 'box') {
+    const boxesFromWhole = Math.min(qty, bx);
+    const remainingBoxes = qty - boxesFromWhole;
+    return {
+      quantity:     pcs - remainingBoxes * ppb,
+      box_quantity: bx - boxesFromWhole,
+    };
+  }
+  // piece mode: drain loose first, only break a box if loose isn't enough
+  const fromLoose     = Math.min(qty, pcs);
+  const fromBoxPieces = qty - fromLoose;
+  const boxesToBreak  = ppb > 0 ? Math.ceil(fromBoxPieces / ppb) : 0;
+  return {
+    quantity:     pcs - fromLoose + boxesToBreak * ppb - fromBoxPieces,
+    box_quantity: bx - boxesToBreak,
+  };
+}
+
+function addToLocation(pcs: number, bx: number, qty: number, unit: CartUnit) {
+  if (unit === 'box') return { quantity: pcs, box_quantity: bx + qty };
+  return { quantity: pcs + qty, box_quantity: bx };
 }
 
 interface ModalState {
@@ -89,13 +145,17 @@ function PosDashboard() {
   const sm = location === 'back' ? backStockMap : mainStockMap;
   const bm = location === 'back' ? backBoxMap   : mainBoxMap;
 
-  // The cart sells loose pieces only (existing deduction logic), so the
-  // max we can put in the cart is the loose-piece count summed across
-  // BOTH locations — sold-pull will dip into the other location if the
-  // current one runs out. Boxes are intentionally excluded from the cap
-  // because the deduction path doesn't unpack them.
-  function maxForProduct(p: Product): number {
-    return (backStockMap[p.product_id] || 0) + (mainStockMap[p.product_id] || 0);
+  // Max quantity we can put in the cart for this product in the
+  // chosen unit. Treats both locations as one piece pool (overflow
+  // pulls from the other location when current runs out) and
+  // converts to the chosen unit if needed.
+  function maxForProduct(p: Product, unit: CartUnit = 'piece'): number {
+    const ppb = p.pieces_per_box ?? 0;
+    const totalPcs = (backStockMap[p.product_id] || 0) + (mainStockMap[p.product_id] || 0);
+    const totalBx  = (backBoxMap[p.product_id]   || 0) + (mainBoxMap[p.product_id]   || 0);
+    const pool = totalPcs + totalBx * ppb;
+    if (unit === 'box' && ppb > 0) return Math.floor(pool / ppb);
+    return pool;
   }
 
   const inStock = products.filter(p => {
@@ -122,22 +182,32 @@ function PosDashboard() {
   }, [inStock, category, search]);
 
   function addToCart(product: Product) {
-    const max = maxForProduct(product);
     let blocked = false;
+    let blockedMax = 0;
+    let blockedUnit: CartUnit = 'piece';
     setCart(prev => {
       const existing = prev.find(c => c.product.product_id === product.product_id);
       if (existing) {
-        if (existing.qty >= max) { blocked = true; return prev; }
+        // Use the existing row's unit when bumping the count.
+        const max = maxForProduct(product, existing.unit);
+        if (existing.qty >= max) {
+          blocked = true; blockedMax = max; blockedUnit = existing.unit;
+          return prev;
+        }
         return prev.map(c =>
           c.product.product_id === product.product_id ? { ...c, qty: c.qty + 1 } : c
         );
       }
-      if (max < 1) { blocked = true; return prev; }
-      return [...prev, { product, qty: 1 }];
+      // Default new rows to 'piece' — most quick scans are individual
+      // items. User can toggle the unit on the row if they're selling
+      // a whole box/roll.
+      const max = maxForProduct(product, 'piece');
+      if (max < 1) { blocked = true; blockedMax = 0; blockedUnit = 'piece'; return prev; }
+      return [...prev, { product, qty: 1, unit: 'piece' }];
     });
     barcodeRef.current?.focus();
     if (blocked) {
-      showToast(`Max ${max} available for ${product.product_name}`, 'error');
+      showToast(`Max ${blockedMax} ${unitLabel(product, blockedUnit).toLowerCase()}${blockedMax === 1 ? '' : 's'} available for ${product.product_name}`, 'error');
     } else {
       showToast(`Added: ${product.product_name}`, 'success');
       setCartOpen(true);
@@ -172,56 +242,109 @@ function PosDashboard() {
     setModal({ product, direction, location });
   }
 
-  // Sell `qty` pieces of `pid`: take from current location first, then
-  // dip into the other location for any shortfall. Logs one or two SALE
-  // movements depending on the split.
-  async function sellOneItem(pid: number, qty: number) {
-    const locName = location === 'back' ? 'Back Godown' : 'Main Store';
-    const otherId = location === 'back' ? 1 : 2;
-    const otherName = location === 'back' ? 'Main Store' : 'Back Godown';
-    const locId = location === 'back' ? 2 : 1;
-    const curQty = (location === 'back' ? backStockMap : mainStockMap)[pid] || 0;
-    const otherQty = (location === 'back' ? mainStockMap : backStockMap)[pid] || 0;
+  // Sell `qty` of `unit` for product `p`: take from current location
+  // first, fall back to the other location for any shortfall. When
+  // unit is 'box' and the whole sale fits in the current location,
+  // we deduct using box-mode (preferentially uses whole boxes from
+  // box_quantity). Cross-location overflow always uses piece mode on
+  // the secondary location since we wouldn't expect whole boxes to
+  // be split across stores.
+  async function sellOneItem(p: Product, qty: number, unit: CartUnit) {
+    const pid = p.product_id;
+    const ppb = p.pieces_per_box ?? 0;
+    const isBoxMode = unit === 'box' && ppb > 0;
+    const movPieces = isBoxMode ? qty * ppb : qty;
 
-    const fromCur = Math.min(qty, curQty);
-    const fromOther = Math.max(0, qty - fromCur);
-    if (fromOther > otherQty) {
-      throw new Error(`Only ${curQty + otherQty} in stock total`);
+    const locId    = location === 'back' ? 2 : 1;
+    const otherId  = location === 'back' ? 1 : 2;
+    const locName  = location === 'back' ? 'Back Godown' : 'Main Store';
+    const otherName = location === 'back' ? 'Main Store' : 'Back Godown';
+
+    const curPcs = (location === 'back' ? backStockMap : mainStockMap)[pid] || 0;
+    const curBx  = (location === 'back' ? backBoxMap   : mainBoxMap  )[pid] || 0;
+    const otherPcs = (location === 'back' ? mainStockMap : backStockMap)[pid] || 0;
+    const otherBx  = (location === 'back' ? mainBoxMap   : backBoxMap )[pid] || 0;
+
+    const totalCur   = curPcs   + curBx   * ppb;
+    const totalOther = otherPcs + otherBx * ppb;
+    if (movPieces > totalCur + totalOther) {
+      throw new Error(`Only ${totalCur + totalOther} ${unitLabel(p, 'piece').toLowerCase()}s in stock total`);
     }
-    if (fromCur > 0) {
-      await upsertStock(pid, locId, { quantity: curQty - fromCur });
-      await logMovement(pid, locId, null, fromCur, 'SALE', `Sold from ${locName}`);
+
+    const fromCurPieces   = Math.min(movPieces, totalCur);
+    const fromOtherPieces = movPieces - fromCurPieces;
+
+    if (fromCurPieces > 0) {
+      let newState: { quantity: number; box_quantity: number };
+      if (isBoxMode && fromCurPieces === movPieces) {
+        // Whole sale fits in current location and user wanted boxes:
+        // use box-mode deduction so we draw from box_quantity first.
+        newState = deductFromLocation(curPcs, curBx, qty, 'box', ppb);
+      } else {
+        // Piece mode (drains loose first, breaks boxes only if needed).
+        newState = deductFromLocation(curPcs, curBx, fromCurPieces, 'piece', ppb);
+      }
+      await upsertStock(pid, locId, newState);
+      await logMovement(pid, locId, null, fromCurPieces, 'SALE', `Sold from ${locName}`);
     }
-    if (fromOther > 0) {
-      await upsertStock(pid, otherId, { quantity: otherQty - fromOther });
-      await logMovement(pid, otherId, null, fromOther, 'SALE', `Sold from ${otherName} (POS overflow)`);
+
+    if (fromOtherPieces > 0) {
+      // Overflow path — always treat the other location's stock as a
+      // piece pool. Breaks boxes if needed.
+      const newState = deductFromLocation(otherPcs, otherBx, fromOtherPieces, 'piece', ppb);
+      await upsertStock(pid, otherId, newState);
+      await logMovement(pid, otherId, null, fromOtherPieces, 'SALE', `Sold from ${otherName} (POS overflow)`);
     }
+  }
+
+  // Transfer `qty` of `unit` for `p` from back godown to main store.
+  // Mirrors AdjustStockModal's transfer logic so box columns move
+  // cleanly between locations.
+  async function transferOneItem(p: Product, qty: number, unit: CartUnit) {
+    const pid = p.product_id;
+    const ppb = p.pieces_per_box ?? 0;
+    const backId = 2, mainId = 1;
+    const backPcs = backStockMap[pid] || 0;
+    const backBx  = backBoxMap[pid]   || 0;
+    const mainPcs = mainStockMap[pid] || 0;
+    const mainBx  = mainBoxMap[pid]   || 0;
+
+    const movPieces = unit === 'box' && ppb > 0 ? qty * ppb : qty;
+    const backTotal = backPcs + backBx * ppb;
+    if (movPieces > backTotal) {
+      throw new Error(`Back Godown only has ${backTotal} ${unitLabel(p, 'piece').toLowerCase()}s of ${p.product_name}`);
+    }
+
+    const newBack = deductFromLocation(backPcs, backBx, qty, unit, ppb);
+    const newMain = addToLocation(mainPcs, mainBx, qty, unit);
+    await upsertStock(pid, backId, newBack);
+    await upsertStock(pid, mainId, newMain);
+    await logMovement(pid, backId, mainId, movPieces, 'TRANSFER', 'Moved from Back Godown to Main Store');
   }
 
   async function processCart(action: 'sold' | 'to_main') {
     if (cart.length === 0) return;
     if (action === 'to_main') {
-      // to_main only moves from Back Godown — validate every cart item fits.
-      const overflows = cart.filter(it => it.qty > (backStockMap[it.product.product_id] || 0));
+      // to_main only moves from Back Godown — validate every cart row
+      // has enough back-godown stock for its qty in its chosen unit.
+      const overflows = cart.filter(it => {
+        const ppb = it.product.pieces_per_box ?? 0;
+        const movPieces = it.unit === 'box' && ppb > 0 ? it.qty * ppb : it.qty;
+        const backTotal = (backStockMap[it.product.product_id] || 0) + (backBoxMap[it.product.product_id] || 0) * ppb;
+        return movPieces > backTotal;
+      });
       if (overflows.length > 0) {
         showToast(`Cannot move more than Back Godown has: ${overflows.map(o => o.product.product_name).join(', ')}`, 'error');
         return;
       }
     }
     setProcessing(true);
-    const mainId = 1;
-    const backId = 2;
     try {
       for (const item of cart) {
-        const pid = item.product.product_id;
         if (action === 'sold') {
-          await sellOneItem(pid, item.qty);
+          await sellOneItem(item.product, item.qty, item.unit);
         } else {
-          const backQty = backStockMap[pid] || 0;
-          const mainQty = mainStockMap[pid] || 0;
-          await upsertStock(pid, backId, { quantity: Math.max(0, backQty - item.qty) });
-          await upsertStock(pid, mainId, { quantity: mainQty + item.qty });
-          await logMovement(pid, backId, mainId, item.qty, 'TRANSFER', 'Moved from Back Godown to Main Store');
+          await transferOneItem(item.product, item.qty, item.unit);
         }
       }
       showToast(`${action === 'sold' ? 'Sold' : 'Moved'} ${cart.length} item(s) ✓`, 'success');
@@ -237,23 +360,21 @@ function PosDashboard() {
   }
 
   async function processItem(item: CartItem, action: 'sold' | 'to_main') {
-    if (action === 'to_main' && item.qty > (backStockMap[item.product.product_id] || 0)) {
-      showToast(`Only ${backStockMap[item.product.product_id] || 0} in Back Godown for ${item.product.product_name}`, 'error');
-      return;
+    if (action === 'to_main') {
+      const ppb = item.product.pieces_per_box ?? 0;
+      const movPieces = item.unit === 'box' && ppb > 0 ? item.qty * ppb : item.qty;
+      const backTotal = (backStockMap[item.product.product_id] || 0) + (backBoxMap[item.product.product_id] || 0) * ppb;
+      if (movPieces > backTotal) {
+        showToast(`Back Godown only has ${backTotal} ${unitLabel(item.product, 'piece').toLowerCase()}s for ${item.product.product_name}`, 'error');
+        return;
+      }
     }
     setProcessing(true);
-    const backId = 2;
-    const mainId = 1;
     try {
-      const pid = item.product.product_id;
       if (action === 'sold') {
-        await sellOneItem(pid, item.qty);
+        await sellOneItem(item.product, item.qty, item.unit);
       } else {
-        const backQty = backStockMap[pid] || 0;
-        const mainQty = mainStockMap[pid] || 0;
-        await upsertStock(pid, backId, { quantity: Math.max(0, backQty - item.qty) });
-        await upsertStock(pid, mainId, { quantity: mainQty + item.qty });
-        await logMovement(pid, backId, mainId, item.qty, 'TRANSFER', 'Moved from Back Godown to Main Store');
+        await transferOneItem(item.product, item.qty, item.unit);
       }
       setCart(c => c.filter(i => i.product.product_id !== item.product.product_id));
       showToast(`${action === 'sold' ? 'Sold' : 'Moved'}: ${item.product.product_name} ✓`, 'success');
@@ -446,8 +567,11 @@ function PosDashboard() {
                   <p className="text-center text-muted text-xs py-8">Scan items to add to cart</p>
                 )}
                 {cart.map(item => {
-                  const max = maxForProduct(item.product);
+                  const hasBulk = hasBulkUnit(item.product);
+                  const ppb = item.product.pieces_per_box ?? 0;
+                  const max = maxForProduct(item.product, item.unit);
                   const atMax = item.qty >= max;
+                  const unitLbl = unitLabel(item.product, item.unit);
                   return (
                   <div key={item.product.product_id} className="bg-surface2 rounded-xl px-3 py-2.5 border border-white/5">
                     <div className="flex items-start justify-between mb-2">
@@ -457,6 +581,38 @@ function PosDashboard() {
                         className="text-muted hover:text-danger text-sm shrink-0 transition-colors"
                       >×</button>
                     </div>
+
+                    {/* Unit toggle — only shown when the product has a bulk
+                        unit configured (pieces_per_box > 0). Switching unit
+                        clamps qty to the new max in that unit. */}
+                    {hasBulk && (
+                      <div className="flex gap-1 mb-2">
+                        {(['piece', 'box'] as CartUnit[]).map(u => {
+                          const isSel = item.unit === u;
+                          return (
+                            <button
+                              key={u}
+                              onClick={() => setCart(c => c.map(i => {
+                                if (i.product.product_id !== item.product.product_id) return i;
+                                const newMax = maxForProduct(i.product, u);
+                                return { ...i, unit: u, qty: Math.max(1, Math.min(i.qty, newMax || 1)) };
+                              }))}
+                              className={`flex-1 py-1 rounded text-[10px] font-bold border transition-all ${
+                                isSel
+                                  ? u === 'piece'
+                                    ? 'border-teal/40 bg-teal/10 text-teal'
+                                    : 'border-gold/40 bg-gold/10 text-gold'
+                                  : 'border-white/10 bg-surface text-muted hover:text-slate-100'
+                              }`}
+                            >
+                              {unitLabel(item.product, u)}
+                              {u === 'box' && ppb > 0 ? ` (${ppb}/ea)` : ''}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+
                     <div className="flex items-center gap-2 mb-2">
                       <button
                         onClick={() => setCart(c => c.map(i =>
@@ -474,7 +630,7 @@ function PosDashboard() {
                         onChange={e => {
                           const raw = parseInt(e.target.value) || 1;
                           const v = Math.max(1, Math.min(raw, max));
-                          if (raw > max) showToast(`Max ${max} available for ${item.product.product_name}`, 'error');
+                          if (raw > max) showToast(`Max ${max} ${unitLbl.toLowerCase()}${max === 1 ? '' : 's'} of ${item.product.product_name}`, 'error');
                           setCart(c => c.map(i =>
                             i.product.product_id === item.product.product_id ? { ...i, qty: v } : i
                           ));
@@ -484,7 +640,7 @@ function PosDashboard() {
                       />
                       <button
                         onClick={() => {
-                          if (atMax) { showToast(`Max ${max} available for ${item.product.product_name}`, 'error'); return; }
+                          if (atMax) { showToast(`Max ${max} ${unitLbl.toLowerCase()}${max === 1 ? '' : 's'} of ${item.product.product_name}`, 'error'); return; }
                           setCart(c => c.map(i =>
                             i.product.product_id === item.product.product_id ? { ...i, qty: i.qty + 1 } : i
                           ));
@@ -493,7 +649,7 @@ function PosDashboard() {
                         className="w-7 h-7 rounded bg-surface border border-white/10 text-slate-300 text-sm font-bold flex items-center justify-center hover:bg-teal/20 hover:text-teal transition-all disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-surface disabled:hover:text-slate-300"
                       >+</button>
                       <span className={`text-[10px] font-mono ml-1 ${atMax ? 'text-gold' : 'text-muted'}`}>
-                        / {max}
+                        {unitLbl.charAt(0).toLowerCase()} / {max}
                       </span>
                     </div>
                     <div className="flex gap-1.5">
