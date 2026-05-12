@@ -5,6 +5,18 @@ import { AnimatePresence, motion } from 'framer-motion';
 import AdminProductCard from './AdminProductCard';
 import type { Product, StockMap, Location } from '@/lib/types';
 
+export type StockFilter = 'all' | 'in_stock' | 'out_of_stock' | 'back_only' | 'main_only';
+
+function filterLabel(f: StockFilter): string {
+  switch (f) {
+    case 'in_stock':     return 'In stock';
+    case 'out_of_stock': return 'Out of stock';
+    case 'back_only':    return 'Back Godown';
+    case 'main_only':    return 'Main Store';
+    default:             return 'All';
+  }
+}
+
 interface Props {
   products:     Product[];
   backStockMap: StockMap;
@@ -13,10 +25,12 @@ interface Props {
   mainBoxMap:   StockMap;
   onAdjust:     (product: Product, direction: 'plus' | 'minus', location: Location) => void;
   onEdit?:      (product: Product) => void;
+  stockFilter?: StockFilter;
 }
 
 export default function ProductList({
   products, backStockMap, mainStockMap, backBoxMap, mainBoxMap, onAdjust, onEdit,
+  stockFilter = 'all',
 }: Props) {
   const [location, setLocation]   = useState<Location>('main');
   const [category, setCategory]   = useState('All');
@@ -90,6 +104,17 @@ export default function ProductList({
   const visible = useMemo(() => {
     const q = search.trim().toLowerCase();
     return products.filter(p => {
+      // Stock-status pre-filter from the /admin/stats page links.
+      if (stockFilter !== 'all') {
+        const ppb = p.pieces_per_box || 0;
+        const backTotal = (backStockMap[p.product_id] || 0) + (backBoxMap[p.product_id] || 0) * ppb;
+        const mainTotal = (mainStockMap[p.product_id] || 0) + (mainBoxMap[p.product_id] || 0) * ppb;
+        const total = backTotal + mainTotal;
+        if (stockFilter === 'in_stock'     && total === 0)        return false;
+        if (stockFilter === 'out_of_stock' && total > 0)          return false;
+        if (stockFilter === 'back_only'    && backTotal === 0)    return false;
+        if (stockFilter === 'main_only'    && mainTotal === 0)    return false;
+      }
       if (category !== 'All' && p.type !== category) return false;
       if (q) {
         const hay = [p.product_name, p.brand, p.model, p.stock_keeping_unit, p.type]
@@ -98,7 +123,7 @@ export default function ProductList({
       }
       return true;
     });
-  }, [products, category, search]);
+  }, [products, category, search, stockFilter, backStockMap, mainStockMap, backBoxMap, mainBoxMap]);
 
   const outCount = useMemo(
     () => visible.filter(p => {
@@ -184,10 +209,18 @@ export default function ProductList({
           ))}
         </div>
 
-        <p className="text-[11px] text-muted mb-3 font-medium">
-          {visible.length} product{visible.length !== 1 ? 's' : ''}
+        <p className="text-[11px] text-muted mb-3 font-medium flex items-center flex-wrap gap-2">
+          <span>{visible.length} product{visible.length !== 1 ? 's' : ''}</span>
           {outCount > 0 && (
-            <span className="ml-2 text-danger">· {outCount} out of stock</span>
+            <span className="text-danger">· {outCount} out of stock</span>
+          )}
+          {stockFilter !== 'all' && (
+            <a
+              href="/admin"
+              className="ml-auto inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-gold/10 border border-gold/30 text-gold text-[10px] font-bold hover:bg-gold/20 transition-all"
+            >
+              Filter: {filterLabel(stockFilter)} ✕
+            </a>
           )}
         </p>
       </div>

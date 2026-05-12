@@ -7,8 +7,9 @@ import type { Product, StockMap, Location } from '@/lib/types';
 import { SESSION_KEY, USER_KEY } from '@/lib/types';
 import { useProductComponents } from '@/lib/hooks/useProductComponents';
 import { logMovement } from '@/lib/stockActions';
+import { useSearchParams } from 'next/navigation';
+import { Suspense } from 'react';
 import AdminNavbar      from './components/AdminNavbar';
-import StatsBar         from './components/StatsBar';
 import ProductList      from './components/ProductList';
 import AdjustStockModal from './components/AdjustStockModal';
 import Toast, { type ToastState } from './components/Toast';
@@ -798,8 +799,6 @@ function Dashboard() {
 
       <main className="pt-14 max-w-7xl mx-auto w-full flex-1 flex flex-col min-h-0">
         <div className="shrink-0">
-          <StatsBar products={products} backStockMap={backStockMap} mainStockMap={mainStockMap} />
-
           <div className="px-4 pt-5 pb-3 flex items-center justify-between">
             <div>
               <h2 className="text-base font-bold text-slate-100">Inventory</h2>
@@ -814,15 +813,17 @@ function Dashboard() {
           </div>
         </div>
 
-        <ProductList
-          products={products}
-          backStockMap={backStockMap}
-          mainStockMap={mainStockMap}
-          backBoxMap={backBoxMap}
-          mainBoxMap={mainBoxMap}
-          onAdjust={handleAdjust}
-          onEdit={product => setProductModal({ editing: product })}
-        />
+        <Suspense fallback={null}>
+          <InventoryListWithFilter
+            products={products}
+            backStockMap={backStockMap}
+            mainStockMap={mainStockMap}
+            backBoxMap={backBoxMap}
+            mainBoxMap={mainBoxMap}
+            onAdjust={handleAdjust}
+            onEdit={product => setProductModal({ editing: product })}
+          />
+        </Suspense>
       </main>
 
       <AnimatePresence>
@@ -877,4 +878,25 @@ export default function AdminPage() {
 
   if (authed === null) return <div className="min-h-screen bg-navy" />;
   return authed ? <Dashboard /> : <LoginForm onSuccess={() => setAuthed(true)} />;
+}
+
+// ── Inventory list wrapper that picks up ?filter= from the URL ───────────────
+// Lives in its own component so it can call useSearchParams (which Next
+// requires be inside a Suspense boundary in static export mode).
+
+type StockFilter = 'all' | 'in_stock' | 'out_of_stock' | 'back_only' | 'main_only';
+
+function InventoryListWithFilter(props: {
+  products:     Product[];
+  backStockMap: StockMap;
+  mainStockMap: StockMap;
+  backBoxMap:   StockMap;
+  mainBoxMap:   StockMap;
+  onAdjust:     (product: Product, direction: 'plus' | 'minus', location: Location) => void;
+  onEdit:       (product: Product) => void;
+}) {
+  const params = useSearchParams();
+  const raw = (params?.get('filter') ?? 'all') as StockFilter;
+  const stockFilter: StockFilter = (['all', 'in_stock', 'out_of_stock', 'back_only', 'main_only'] as StockFilter[]).includes(raw) ? raw : 'all';
+  return <ProductList {...props} stockFilter={stockFilter} />;
 }

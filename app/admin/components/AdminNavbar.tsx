@@ -11,6 +11,7 @@ interface Props {
 
 const ADMIN_LINKS = [
   { emoji: '📦', label: 'Inventory', href: '/admin' },
+  { emoji: '📊', label: 'Stats',     href: '/admin/stats' },
   { emoji: '📋', label: 'History',   href: '/admin/history' },
   { emoji: '🧾', label: 'Purchases', href: '/admin/purchases' },
   { emoji: '🏢', label: 'Suppliers', href: '/admin/suppliers' },
