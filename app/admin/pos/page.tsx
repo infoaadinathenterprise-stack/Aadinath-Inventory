@@ -385,7 +385,19 @@ function PosDashboard() {
       cost_price:   i.product.buying_price ?? null,
       line_total:   i.sellPrice != null ? i.sellPrice * i.qty : null,
     }));
-    const { error: itemsErr } = await supabase.from('sale_items').insert(rows);
+    let { error: itemsErr } = await supabase.from('sale_items').insert(rows);
+    // Older deployments don't have the cost_price column yet. Schema
+    // cache errors come back as "Could not find the 'cost_price'
+    // column of 'sale_items'…" — strip it and retry so line items
+    // still land in the DB and the Sales page shows the breakdown.
+    if (itemsErr && /cost_price/i.test(itemsErr.message)) {
+      const rowsNoCost = rows.map(({ cost_price: _cp, ...rest }) => rest);
+      const retry = await supabase.from('sale_items').insert(rowsNoCost);
+      itemsErr = retry.error;
+      if (!itemsErr) {
+        showToast('Line items saved without cost_price. Run the migration to enable profit tracking.', 'error');
+      }
+    }
     if (itemsErr) {
       showToast('Sale header saved but line items failed: ' + itemsErr.message, 'error');
     }

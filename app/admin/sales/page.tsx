@@ -129,17 +129,36 @@ function SalesDashboard() {
   // Aggregate the day. Profit is computed only on lines where BOTH
   // sell + cost are set; otherwise the line is "incomplete" and we
   // surface that in the UI so the user knows where to fill in prices.
+  //
+  // Fallback: if a sale has no sale_items rows at all (older saves
+  // before the cost_price migration, or a failed item insert), use
+  // the sale's stored total_amount + item_count so the revenue card
+  // doesn't read "—" when there's clearly a sale with a price.
   const summary = useMemo(() => {
     let revenue   = 0;
     let cost      = 0;
     let qtySold   = 0;
-    let knownLines  = 0;
-    let totalLines  = 0;
-    let voidedSales = 0;
+    let knownLines    = 0;
+    let totalLines    = 0;
+    let voidedSales   = 0;
+    let salesNoItems  = 0;  // sales without line items — counted as "incomplete" for profit
 
     for (const s of sales) {
       if (s.status === 'VOIDED') { voidedSales++; continue; }
-      for (const it of (items[s.sale_id] ?? [])) {
+      const its = items[s.sale_id] ?? [];
+      if (its.length === 0) {
+        // No line items found — fall back to the sales row totals so
+        // revenue reflects this sale. Profit can't be computed without
+        // the line breakdown, so it stays incomplete.
+        if (s.total_amount) {
+          revenue += s.total_amount;
+          qtySold += s.item_count;
+          totalLines += Math.max(s.item_count, 1);
+          salesNoItems++;
+        }
+        continue;
+      }
+      for (const it of its) {
         totalLines++;
         qtySold += it.quantity;
         if (it.unit_price != null) revenue += it.unit_price * it.quantity;
@@ -150,10 +169,10 @@ function SalesDashboard() {
       }
     }
     const withdrawTotal = withdrawals.reduce((s, w) => s + (w.amount || 0), 0);
-    const profit = knownLines === totalLines ? revenue - cost : null;
+    const profit = (knownLines === totalLines && totalLines > 0) ? revenue - cost : null;
     const netCash = revenue - withdrawTotal;
 
-    return { revenue, cost, profit, qtySold, knownLines, totalLines, voidedSales, withdrawTotal, netCash };
+    return { revenue, cost, profit, qtySold, knownLines, totalLines, voidedSales, salesNoItems, withdrawTotal, netCash };
   }, [sales, items, withdrawals]);
 
   async function addWithdrawal() {
@@ -440,7 +459,17 @@ function SaleCard({
                 <span className="text-right">Profit</span>
               </div>
               {saleItems.length === 0 ? (
-                <p className="text-xs text-muted py-2">No line items recorded.</p>
+                <div className="py-2 px-3 mt-2 rounded-lg bg-gold/5 border border-gold/20 text-xs text-gold/90">
+                  <p className="font-bold mb-1">No line items recorded for this sale.</p>
+                  <p className="text-[11px] text-muted/80 leading-relaxed">
+                    Likely the <code className="font-mono text-gold">sale_items</code> table is missing the <code className="font-mono text-gold">cost_price</code> column.
+                    Run this SQL in Supabase to enable line-item + profit tracking on future sales:
+                  </p>
+                  <pre className="mt-2 text-[10px] bg-navy/60 border border-white/8 rounded p-2 overflow-x-auto text-slate-300 font-mono">
+ALTER TABLE sale_items
+  ADD COLUMN IF NOT EXISTS cost_price numeric(12, 2);
+                  </pre>
+                </div>
               ) : saleItems.map(it => {
                 const sellLine = it.unit_price != null ? it.unit_price * it.quantity : null;
                 const costLine = it.cost_price != null ? it.cost_price * it.quantity : null;
