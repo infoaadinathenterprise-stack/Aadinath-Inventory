@@ -118,7 +118,19 @@ export interface SaleItem {
   product_name: string | null;    // snapshot at time of sale
   quantity:     number;
   unit:         string;           // 'piece' | the bulk unit name
-  unit_price:   number | null;
-  line_total:   number | null;
+  unit_price:   number | null;    // SELL price per unit (what we charged)
+  cost_price:   number | null;    // BUY price per unit at time of sale (snapshot)
+  line_total:   number | null;    // qty * unit_price
   created_at:   string;
+}
+
+// Cash drawn out of the till during a day — bills paid, owner take,
+// etc. Day "net cash" = sum(sales.total_amount) − sum(withdrawals.amount).
+export interface Withdrawal {
+  withdrawal_id:   number;
+  withdrawal_date: string;        // YYYY-MM-DD
+  amount:          number;
+  reason:          string | null;
+  performed_by:    string | null;
+  created_at:      string;
 }

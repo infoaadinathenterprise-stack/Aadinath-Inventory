@@ -372,8 +372,9 @@ function PosDashboard() {
     }
     const saleId = (saleRow as { sale_id: number }).sale_id;
 
-    // Snapshot product names so the Sales page renders correctly
-    // even if the product is later renamed or soft-deleted.
+    // Snapshot product names AND cost prices so the Sales page can
+    // compute profit-at-time-of-sale correctly even if the product's
+    // buying_price is updated later.
     const rows = items.map(i => ({
       sale_id:      saleId,
       product_id:   i.product.product_id,
@@ -381,6 +382,7 @@ function PosDashboard() {
       quantity:     i.qty,
       unit:         unitLabel(i.product, i.unit),
       unit_price:   i.sellPrice ?? null,
+      cost_price:   i.product.buying_price ?? null,
       line_total:   i.sellPrice != null ? i.sellPrice * i.qty : null,
     }));
     const { error: itemsErr } = await supabase.from('sale_items').insert(rows);

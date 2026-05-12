@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import { supabase } from '@/lib/supabase';
-import type { Sale, SaleItem } from '@/lib/types';
+import type { Sale, SaleItem, Withdrawal } from '@/lib/types';
 import { SESSION_KEY, USER_KEY } from '@/lib/types';
 import AdminNavbar from '../components/AdminNavbar';
 import Toast, { type ToastState } from '../components/Toast';
@@ -24,22 +24,29 @@ export default function SalesPage() {
 }
 
 const LOC_NAME: Record<number, string> = { 1: 'Main Store', 2: 'Back Godown' };
+const DASH = '—';
 
 function fmtKsh(n: number | null | undefined) {
-  if (n == null) return '—';
-  return 'Ksh ' + Number(n).toLocaleString('en-KE');
+  if (n == null) return DASH;
+  return 'Ksh ' + Number(n).toLocaleString('en-KE', { maximumFractionDigits: 2 });
 }
 
-function fmtDayHeader(iso: string) {
-  // Display as e.g. "Sat, 9 May 2026". Compares against today/yesterday
-  // for friendlier labels.
-  const d = new Date(iso);
-  const today = new Date();
-  const yesterday = new Date();
-  yesterday.setDate(today.getDate() - 1);
+function fmtSignedKsh(n: number) {
+  const sign = n < 0 ? '−' : '';
+  return sign + 'Ksh ' + Math.abs(n).toLocaleString('en-KE', { maximumFractionDigits: 2 });
+}
+
+function todayISO() {
+  return new Date().toISOString().split('T')[0];
+}
+
+function fmtDay(iso: string) {
+  const d = new Date(iso + 'T00:00:00');
+  const today = new Date(); today.setHours(0,0,0,0);
+  const yesterday = new Date(today); yesterday.setDate(today.getDate() - 1);
   const sameDay = (a: Date, b: Date) =>
     a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
-  const friendly = d.toLocaleDateString('en-KE', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
+  const friendly = d.toLocaleDateString('en-KE', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
   if (sameDay(d, today))     return `Today · ${friendly}`;
   if (sameDay(d, yesterday)) return `Yesterday · ${friendly}`;
   return friendly;
@@ -51,21 +58,19 @@ function fmtTime(iso: string) {
 
 // ── Dashboard ────────────────────────────────────────────────────────────────
 
-interface DayGroup {
-  date:    string;            // YYYY-MM-DD
-  sales:   Sale[];
-  total:   number;
-  items:   number;
-}
-
 function SalesDashboard() {
-  const [sales,   setSales]   = useState<Sale[]>([]);
-  const [items,   setItems]   = useState<Record<number, SaleItem[]>>({});
-  const [loading, setLoading] = useState(true);
-  const [error,   setError]   = useState<string | null>(null);
-  const [toast,   setToast]   = useState<ToastState | null>(null);
+  const [day,         setDay]         = useState<string>(todayISO());
+  const [sales,       setSales]       = useState<Sale[]>([]);
+  const [items,       setItems]       = useState<Record<number, SaleItem[]>>({});
+  const [withdrawals, setWithdrawals] = useState<Withdrawal[]>([]);
+  const [loading,     setLoading]     = useState(true);
+  const [error,       setError]       = useState<string | null>(null);
+  const [toast,       setToast]       = useState<ToastState | null>(null);
   const [expandedSaleId, setExpandedSaleId] = useState<number | null>(null);
-  const [days,    setDays]    = useState<7 | 30 | 90 | 0>(30);   // 0 = all
+  const [wOpen,       setWOpen]       = useState(false);
+  const [wAmount,     setWAmount]     = useState('');
+  const [wReason,     setWReason]     = useState('');
+  const [wSaving,     setWSaving]     = useState(false);
   const toastId = useRef(0);
 
   function showToast(msg: string, type: ToastState['type']) {
@@ -76,19 +81,25 @@ function SalesDashboard() {
     setLoading(true);
     setError(null);
 
-    let salesQuery = supabase.from('sales').select('*').order('created_at', { ascending: false });
-    if (days > 0) {
-      const cutoff = new Date();
-      cutoff.setDate(cutoff.getDate() - days);
-      salesQuery = salesQuery.gte('sale_date', cutoff.toISOString().split('T')[0]);
-    }
-    const { data: salesData, error: salesErr } = await salesQuery;
-    if (salesErr) {
-      setError(salesErr.message);
+    const [salesRes, withdrawRes] = await Promise.all([
+      supabase.from('sales').select('*').eq('sale_date', day).order('created_at', { ascending: false }),
+      supabase.from('withdrawals').select('*').eq('withdrawal_date', day).order('created_at', { ascending: false }),
+    ]);
+
+    if (salesRes.error) {
+      setError('Sales: ' + salesRes.error.message);
       setLoading(false);
       return;
     }
-    const salesRows = (salesData ?? []) as Sale[];
+    // Withdrawals table may not exist yet — soft-fail so the sales
+    // section still renders even before the user runs the SQL.
+    if (withdrawRes.error) {
+      setWithdrawals([]);
+    } else {
+      setWithdrawals((withdrawRes.data ?? []) as Withdrawal[]);
+    }
+
+    const salesRows = (salesRes.data ?? []) as Sale[];
     setSales(salesRows);
 
     if (salesRows.length > 0) {
@@ -106,7 +117,7 @@ function SalesDashboard() {
       setItems({});
     }
     setLoading(false);
-  }, [days]);
+  }, [day]);
   useEffect(() => { load(); }, [load]);
 
   function handleLogout() {
@@ -115,30 +126,63 @@ function SalesDashboard() {
     window.location.href = '/admin';
   }
 
-  // Group sales by sale_date for the daily-journal layout.
-  const dayGroups: DayGroup[] = useMemo(() => {
-    const byDate = new Map<string, Sale[]>();
-    for (const s of sales) {
-      const d = s.sale_date;
-      if (!byDate.has(d)) byDate.set(d, []);
-      byDate.get(d)!.push(s);
-    }
-    return [...byDate.entries()]
-      .map(([date, rows]) => ({
-        date,
-        sales: rows,
-        total: rows.reduce((a, r) => a + (r.total_amount || 0), 0),
-        items: rows.reduce((a, r) => a + (r.item_count || 0), 0),
-      }))
-      .sort((a, b) => b.date.localeCompare(a.date));
-  }, [sales]);
+  // Aggregate the day. Profit is computed only on lines where BOTH
+  // sell + cost are set; otherwise the line is "incomplete" and we
+  // surface that in the UI so the user knows where to fill in prices.
+  const summary = useMemo(() => {
+    let revenue   = 0;
+    let cost      = 0;
+    let qtySold   = 0;
+    let knownLines  = 0;
+    let totalLines  = 0;
+    let voidedSales = 0;
 
-  // Aggregate totals across whatever's in view.
-  const overall = useMemo(() => {
-    const total = sales.reduce((s, r) => s + (r.total_amount || 0), 0);
-    const items = sales.reduce((s, r) => s + (r.item_count || 0), 0);
-    return { total, items, count: sales.length };
-  }, [sales]);
+    for (const s of sales) {
+      if (s.status === 'VOIDED') { voidedSales++; continue; }
+      for (const it of (items[s.sale_id] ?? [])) {
+        totalLines++;
+        qtySold += it.quantity;
+        if (it.unit_price != null) revenue += it.unit_price * it.quantity;
+        if (it.unit_price != null && it.cost_price != null) {
+          knownLines++;
+          cost += it.cost_price * it.quantity;
+        }
+      }
+    }
+    const withdrawTotal = withdrawals.reduce((s, w) => s + (w.amount || 0), 0);
+    const profit = knownLines === totalLines ? revenue - cost : null;
+    const netCash = revenue - withdrawTotal;
+
+    return { revenue, cost, profit, qtySold, knownLines, totalLines, voidedSales, withdrawTotal, netCash };
+  }, [sales, items, withdrawals]);
+
+  async function addWithdrawal() {
+    const amt = parseFloat(wAmount);
+    if (!amt || amt <= 0) { showToast('Enter a positive amount', 'error'); return; }
+    setWSaving(true);
+    const { error: e } = await supabase.from('withdrawals').insert({
+      withdrawal_date: day,
+      amount:          amt,
+      reason:          wReason.trim() || null,
+      performed_by:    (typeof window !== 'undefined' && localStorage.getItem(USER_KEY)) || 'Admin',
+    });
+    setWSaving(false);
+    if (e) { showToast('Could not record: ' + e.message, 'error'); return; }
+    setWAmount(''); setWReason(''); setWOpen(false);
+    load();
+    showToast('Withdrawal recorded ✓', 'success');
+  }
+
+  async function deleteWithdrawal(id: number) {
+    if (!window.confirm('Delete this withdrawal?')) return;
+    const { error: e, data } = await supabase.from('withdrawals').delete().eq('withdrawal_id', id).select();
+    if (e) { showToast('Could not delete: ' + e.message, 'error'); return; }
+    if (!data || data.length === 0) {
+      showToast('Delete blocked by RLS — run: CREATE POLICY "Allow public delete" ON withdrawals FOR DELETE TO anon USING (true);', 'error');
+      return;
+    }
+    load();
+  }
 
   async function voidSale(sale: Sale) {
     if (!window.confirm(`Void this sale?\n\nTotal: ${fmtKsh(sale.total_amount)}\n${sale.item_count} item(s)\n\nThis marks the sale as voided in the journal. It does NOT restock the items — adjust inventory manually if needed.`)) return;
@@ -148,30 +192,120 @@ function SalesDashboard() {
     load();
   }
 
+  // Step the day picker by N days.
+  function shiftDay(deltaDays: number) {
+    const d = new Date(day + 'T00:00:00');
+    d.setDate(d.getDate() + deltaDays);
+    setDay(d.toISOString().split('T')[0]);
+  }
+
   return (
     <div className="min-h-screen bg-navy">
       <AdminNavbar onLogout={handleLogout} />
       <main className="pt-14 max-w-7xl mx-auto w-full px-4 pb-10">
+
+        {/* ── Day picker strip ── */}
         <div className="pt-5 pb-3 flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h2 className="text-base font-bold text-slate-100">Sales Journal</h2>
-            <p className="text-xs text-muted mt-0.5">{overall.count} sale{overall.count === 1 ? '' : 's'} · {overall.items} item{overall.items === 1 ? '' : 's'} · {fmtKsh(overall.total)} total</p>
+            <h2 className="text-base font-bold text-slate-100">Sales · {fmtDay(day)}</h2>
+            <p className="text-xs text-muted mt-0.5">
+              {sales.length} sale{sales.length === 1 ? '' : 's'}
+              {summary.voidedSales > 0 && ` · ${summary.voidedSales} voided`}
+              {' · '}{summary.qtySold} item{summary.qtySold === 1 ? '' : 's'}
+            </p>
           </div>
-          <div className="flex gap-1.5">
-            {([[7, '7d'], [30, '30d'], [90, '90d'], [0, 'All']] as const).map(([d, label]) => (
-              <button
-                key={label}
-                onClick={() => setDays(d)}
-                className={`px-3 py-1.5 rounded-lg border text-[11px] font-bold transition-all ${
-                  days === d
-                    ? 'border-teal/40 bg-teal/10 text-teal'
-                    : 'border-white/8 bg-surface text-muted hover:text-slate-100'
-                }`}
-              >{label}</button>
-            ))}
+          <div className="flex items-center gap-1.5">
+            <button onClick={() => shiftDay(-1)} className="w-8 h-8 rounded-lg border border-white/8 bg-surface2 text-slate-200 text-sm hover:border-teal/30">‹</button>
+            <input
+              type="date"
+              value={day}
+              max={todayISO()}
+              onChange={e => setDay(e.target.value)}
+              className="px-3 py-1.5 rounded-lg border border-white/8 bg-surface2 text-slate-100 text-xs font-bold outline-none focus:border-teal/40"
+            />
+            <button onClick={() => shiftDay(1)} disabled={day >= todayISO()} className="w-8 h-8 rounded-lg border border-white/8 bg-surface2 text-slate-200 text-sm hover:border-teal/30 disabled:opacity-30 disabled:cursor-not-allowed">›</button>
+            <button onClick={() => setDay(todayISO())} className="px-3 py-1.5 rounded-lg border border-teal/30 bg-teal/10 text-teal text-[11px] font-bold hover:bg-teal/20">Today</button>
           </div>
         </div>
 
+        {/* ── Day summary card ── */}
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-2 mb-4">
+          <SummaryCell label="Revenue"      value={summary.revenue > 0 ? fmtKsh(summary.revenue) : DASH} tone="teal" />
+          <SummaryCell label="Cost"         value={summary.totalLines === 0 ? DASH : (summary.knownLines === summary.totalLines ? fmtKsh(summary.cost) : `${fmtKsh(summary.cost)} (partial)`)} tone="muted" />
+          <SummaryCell
+            label="Profit / Loss"
+            value={summary.profit == null ? DASH : fmtSignedKsh(summary.profit)}
+            tone={summary.profit == null ? 'muted' : summary.profit >= 0 ? 'success' : 'danger'}
+            sub={summary.profit == null && summary.totalLines > 0 ? `Add prices on ${summary.totalLines - summary.knownLines} line${summary.totalLines - summary.knownLines === 1 ? '' : 's'}` : undefined}
+          />
+          <SummaryCell label="Withdrawals" value={summary.withdrawTotal > 0 ? fmtKsh(summary.withdrawTotal) : DASH} tone="gold" />
+          <SummaryCell label="Net cash"    value={summary.revenue === 0 && summary.withdrawTotal === 0 ? DASH : fmtSignedKsh(summary.netCash)} tone={summary.netCash >= 0 ? 'success' : 'danger'} sub="Revenue − Withdrawals" />
+        </div>
+
+        {/* ── Withdrawals strip ── */}
+        <div className="mb-4 rounded-xl bg-surface border border-white/8 p-3">
+          <div className="flex items-center justify-between mb-2">
+            <h3 className="text-xs font-bold text-slate-100 uppercase tracking-widest">💸 Withdrawals · {withdrawals.length}</h3>
+            <button
+              onClick={() => setWOpen(o => !o)}
+              className="px-3 py-1.5 rounded-lg bg-gold/10 border border-gold/30 text-gold text-[11px] font-bold hover:bg-gold/20 transition-colors"
+            >{wOpen ? '× Cancel' : '+ Add'}</button>
+          </div>
+
+          <AnimatePresence initial={false}>
+            {wOpen && (
+              <motion.div
+                initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }}
+                className="overflow-hidden mb-3"
+              >
+                <div className="grid grid-cols-1 sm:grid-cols-[160px_1fr_auto] gap-2 items-end pt-1">
+                  <div>
+                    <label className="text-[10px] font-bold text-muted uppercase tracking-widest block mb-1">Amount (Ksh)</label>
+                    <input
+                      type="number" min={0} step="0.01" value={wAmount}
+                      onChange={e => setWAmount(e.target.value)}
+                      onWheel={e => e.currentTarget.blur()}
+                      placeholder="0.00"
+                      className="w-full px-3 py-2 rounded-lg bg-surface2 border border-white/10 text-slate-100 text-sm outline-none focus:border-gold/40"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-bold text-muted uppercase tracking-widest block mb-1">Reason (optional)</label>
+                    <input
+                      value={wReason} onChange={e => setWReason(e.target.value)}
+                      placeholder="e.g. supplier payment, salary, owner take"
+                      className="w-full px-3 py-2 rounded-lg bg-surface2 border border-white/10 text-slate-100 text-sm outline-none focus:border-gold/40"
+                    />
+                  </div>
+                  <button
+                    onClick={addWithdrawal}
+                    disabled={wSaving || !wAmount}
+                    className="px-4 py-2 rounded-lg bg-gold/15 border border-gold/30 text-gold text-xs font-bold disabled:opacity-50 hover:bg-gold/25"
+                  >{wSaving ? 'Saving…' : 'Record'}</button>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {withdrawals.length === 0 ? (
+            <p className="text-xs text-muted/70">No withdrawals recorded for this day.</p>
+          ) : (
+            <div className="flex flex-col gap-1">
+              {withdrawals.map(w => (
+                <div key={w.withdrawal_id} className="flex items-center justify-between gap-3 px-3 py-2 rounded-lg bg-surface2 border border-white/5 text-xs">
+                  <div className="flex-1 min-w-0">
+                    <div className="text-slate-200 font-semibold">{w.reason || 'Cash out'}</div>
+                    <div className="text-[10px] text-muted/70">{fmtTime(w.created_at)}{w.performed_by ? ' · ' + w.performed_by : ''}</div>
+                  </div>
+                  <span className="font-bold text-gold tabular-nums">{fmtKsh(w.amount)}</span>
+                  <button onClick={() => deleteWithdrawal(w.withdrawal_id)} className="text-muted hover:text-danger text-sm">×</button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* ── Sales list ── */}
         {loading ? (
           <div className="flex justify-center py-20">
             <div className="w-8 h-8 rounded-full border-2 border-teal border-t-transparent animate-spin" />
@@ -181,25 +315,25 @@ function SalesDashboard() {
             <p className="font-bold mb-2">Could not load sales:</p>
             <p className="break-words">{error}</p>
             <p className="mt-3 text-xs text-muted">
-              Likely the <code className="font-mono">sales</code> and <code className="font-mono">sale_items</code> tables don&apos;t exist yet. Run the SQL block at the bottom of this page&apos;s PR description in Supabase to create them.
+              If the message mentions <code className="font-mono">sales</code> or <code className="font-mono">withdrawals</code>, run the SQL block from the latest commit description in Supabase to create the missing tables/columns.
             </p>
           </div>
-        ) : dayGroups.length === 0 ? (
-          <div className="text-center py-20 text-muted">
+        ) : sales.length === 0 ? (
+          <div className="text-center py-16 text-muted">
             <div className="text-4xl mb-3">🧾</div>
-            <p className="text-sm">No sales recorded in this window.</p>
-            <p className="text-xs mt-2 text-muted/70">Sales from the POS page will appear here grouped by day.</p>
+            <p className="text-sm">No sales for this day.</p>
+            <p className="text-xs mt-2 text-muted/70">Pick a different date or head to POS to record one.</p>
           </div>
         ) : (
-          <div className="flex flex-col gap-6">
-            {dayGroups.map(g => (
-              <DayBlock
-                key={g.date}
-                group={g}
-                items={items}
-                expandedSaleId={expandedSaleId}
-                onToggleSale={id => setExpandedSaleId(prev => prev === id ? null : id)}
-                onVoid={voidSale}
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2">
+            {sales.map(s => (
+              <SaleCard
+                key={s.sale_id}
+                sale={s}
+                saleItems={items[s.sale_id] ?? []}
+                expanded={expandedSaleId === s.sale_id}
+                onToggle={() => setExpandedSaleId(prev => prev === s.sale_id ? null : s.sale_id)}
+                onVoid={() => voidSale(s)}
               />
             ))}
           </div>
@@ -210,40 +344,26 @@ function SalesDashboard() {
   );
 }
 
-// ── Day block — header + list of sales for one date ──────────────────────────
+// ── Summary cell ─────────────────────────────────────────────────────────────
 
-function DayBlock({
-  group, items, expandedSaleId, onToggleSale, onVoid,
-}: {
-  group: DayGroup;
-  items: Record<number, SaleItem[]>;
-  expandedSaleId: number | null;
-  onToggleSale: (id: number) => void;
-  onVoid: (sale: Sale) => void;
-}) {
+function SummaryCell({ label, value, sub, tone }: { label: string; value: string; sub?: string; tone: 'teal' | 'gold' | 'success' | 'danger' | 'muted' }) {
+  const colorMap: Record<typeof tone, string> = {
+    teal:    'text-teal',
+    gold:    'text-gold',
+    success: 'text-success',
+    danger:  'text-danger',
+    muted:   'text-slate-200',
+  };
   return (
-    <section>
-      <div className="flex items-baseline justify-between mb-2">
-        <h3 className="text-sm font-bold text-slate-100">{fmtDayHeader(group.date)}</h3>
-        <span className="text-xs font-mono text-teal">{fmtKsh(group.total)} · {group.items} item{group.items === 1 ? '' : 's'} · {group.sales.length} sale{group.sales.length === 1 ? '' : 's'}</span>
-      </div>
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2">
-        {group.sales.map(s => (
-          <SaleCard
-            key={s.sale_id}
-            sale={s}
-            saleItems={items[s.sale_id] ?? []}
-            expanded={expandedSaleId === s.sale_id}
-            onToggle={() => onToggleSale(s.sale_id)}
-            onVoid={() => onVoid(s)}
-          />
-        ))}
-      </div>
-    </section>
+    <div className="rounded-xl bg-surface border border-white/8 p-3">
+      <div className="text-[10px] font-bold text-muted uppercase tracking-widest">{label}</div>
+      <div className={`text-base font-bold tabular-nums mt-1 ${colorMap[tone]}`}>{value}</div>
+      {sub && <div className="text-[10px] text-muted/70 mt-0.5">{sub}</div>}
+    </div>
   );
 }
 
-// ── Single-sale card with expandable item list ───────────────────────────────
+// ── Single sale card ─────────────────────────────────────────────────────────
 
 function SaleCard({
   sale, saleItems, expanded, onToggle, onVoid,
@@ -255,6 +375,15 @@ function SaleCard({
   onVoid: () => void;
 }) {
   const voided = sale.status === 'VOIDED';
+
+  // Line-level profit summary for the collapsed view.
+  let lineRevenue = 0, lineCost = 0, knownLines = 0;
+  for (const it of saleItems) {
+    if (it.unit_price != null) lineRevenue += it.unit_price * it.quantity;
+    if (it.unit_price != null && it.cost_price != null) { knownLines++; lineCost += it.cost_price * it.quantity; }
+  }
+  const cardProfit = knownLines === saleItems.length && saleItems.length > 0 ? lineRevenue - lineCost : null;
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }}
@@ -283,6 +412,11 @@ function SaleCard({
           <div className={`text-lg font-bold ${voided ? 'text-muted line-through' : 'text-gold'}`}>
             {fmtKsh(sale.total_amount)}
           </div>
+          {!voided && cardProfit != null && (
+            <div className={`text-[10px] font-mono mt-0.5 ${cardProfit >= 0 ? 'text-success' : 'text-danger'}`}>
+              {cardProfit >= 0 ? '+' : '−'}{fmtKsh(Math.abs(cardProfit)).replace('Ksh ', 'Ksh ')}
+            </div>
+          )}
           <span className="text-[9px] text-muted/60 mt-0.5">{expanded ? '▴ hide' : '▾ details'}</span>
         </div>
       </div>
@@ -291,45 +425,58 @@ function SaleCard({
         {expanded && (
           <motion.div
             key="detail"
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: 'auto' }}
-            exit={{ opacity: 0, height: 0 }}
+            initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }}
             transition={{ duration: 0.18 }}
             className="overflow-hidden border-t border-white/8"
             onClick={e => e.stopPropagation()}
           >
-            <div className="p-3.5 flex flex-col gap-2">
+            <div className="p-3.5">
+              {/* Line-items table */}
+              <div className="grid grid-cols-[1fr_60px_75px_75px_75px] gap-2 text-[10px] font-bold text-muted uppercase tracking-widest pb-2 border-b border-white/5">
+                <span>Item</span>
+                <span className="text-right">Qty</span>
+                <span className="text-right">Buy</span>
+                <span className="text-right">Sell</span>
+                <span className="text-right">Profit</span>
+              </div>
               {saleItems.length === 0 ? (
-                <p className="text-xs text-muted">No line items recorded.</p>
-              ) : saleItems.map(it => (
-                <div key={it.id} className="flex items-start justify-between gap-3 text-xs">
-                  <div className="min-w-0">
-                    <div className="font-semibold text-slate-100 truncate">{it.product_name || `#${it.product_id ?? '?'}`}</div>
-                    <div className="text-[10px] text-muted mt-0.5">
-                      {it.quantity} {it.unit.toLowerCase()}{it.quantity === 1 ? '' : 's'}
-                      {it.unit_price != null && ` · @ ${fmtKsh(it.unit_price)}`}
+                <p className="text-xs text-muted py-2">No line items recorded.</p>
+              ) : saleItems.map(it => {
+                const sellLine = it.unit_price != null ? it.unit_price * it.quantity : null;
+                const costLine = it.cost_price != null ? it.cost_price * it.quantity : null;
+                const profit = sellLine != null && costLine != null ? sellLine - costLine : null;
+                return (
+                  <div key={it.id} className="grid grid-cols-[1fr_60px_75px_75px_75px] gap-2 py-2 border-b border-white/5 last:border-0 text-xs items-start">
+                    <div className="min-w-0">
+                      <div className="font-semibold text-slate-100 truncate">{it.product_name || `#${it.product_id ?? '?'}`}</div>
+                      <div className="text-[10px] text-muted/70">{it.unit.toLowerCase()}</div>
                     </div>
+                    <span className="text-right text-slate-200 tabular-nums">{it.quantity}</span>
+                    <span className="text-right tabular-nums text-muted">{it.cost_price != null ? fmtKsh(it.cost_price) : DASH}</span>
+                    <span className="text-right tabular-nums text-teal">{it.unit_price != null ? fmtKsh(it.unit_price) : DASH}</span>
+                    <span className={`text-right tabular-nums font-bold ${profit == null ? 'text-muted' : profit >= 0 ? 'text-success' : 'text-danger'}`}>
+                      {profit == null ? DASH : (profit >= 0 ? '+' : '−') + fmtKsh(Math.abs(profit))}
+                    </span>
                   </div>
-                  {it.line_total != null && (
-                    <span className="text-teal font-bold tabular-nums shrink-0">{fmtKsh(it.line_total)}</span>
-                  )}
-                </div>
-              ))}
+                );
+              })}
+
+              {/* Totals row */}
+              <div className="grid grid-cols-[1fr_60px_75px_75px_75px] gap-2 pt-2 mt-1 border-t border-white/8 text-xs font-bold items-center">
+                <span className="text-slate-100">Total</span>
+                <span className="text-right text-slate-200 tabular-nums">{saleItems.reduce((s, i) => s + i.quantity, 0)}</span>
+                <span className="text-right tabular-nums text-muted">{knownLines > 0 ? fmtKsh(lineCost) : DASH}</span>
+                <span className="text-right tabular-nums text-teal">{lineRevenue > 0 ? fmtKsh(lineRevenue) : DASH}</span>
+                <span className={`text-right tabular-nums ${cardProfit == null ? 'text-muted' : cardProfit >= 0 ? 'text-success' : 'text-danger'}`}>
+                  {cardProfit == null ? DASH : (cardProfit >= 0 ? '+' : '−') + fmtKsh(Math.abs(cardProfit))}
+                </span>
+              </div>
 
               {!voided && (
                 <button
                   onClick={onVoid}
-                  className="mt-2 px-3 py-1.5 rounded-lg bg-danger/10 border border-danger/30 text-danger text-[11px] font-bold hover:bg-danger/20 transition-colors self-end"
-                >
-                  🚫 Void this sale
-                </button>
-              )}
-
-              {sale.notes && (
-                <div className="mt-2 pt-2 border-t border-white/5">
-                  <span className="text-[10px] font-bold text-muted uppercase tracking-widest">Notes</span>
-                  <p className="text-slate-300 text-xs mt-1 break-words">{sale.notes}</p>
-                </div>
+                  className="mt-3 px-3 py-1.5 rounded-lg bg-danger/10 border border-danger/30 text-danger text-[11px] font-bold hover:bg-danger/20 transition-colors"
+                >🚫 Void this sale</button>
               )}
             </div>
           </motion.div>
