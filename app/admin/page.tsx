@@ -32,6 +32,8 @@ interface ProductForm {
   unit_type:         'piece' | 'box';
   pieces_per_box:    string;
   display_unit:      string;
+  buying_price:      string;
+  selling_price:     string;
   box_selling_price: string;
   reorder_level:     string;
   location:          '' | '1' | '2' | 'both';
@@ -43,6 +45,7 @@ const EMPTY_FORM: ProductForm = {
   product_name: '', type: '', brand: '', model: '',
   stock_keeping_unit: '', unit_of_measure: 'Piece',
   unit_type: 'piece', pieces_per_box: '', display_unit: '',
+  buying_price: '', selling_price: '',
   box_selling_price: '', reorder_level: '0',
   location: '', stock_back: '0', stock_main: '0',
 };
@@ -216,6 +219,8 @@ function ProductModal({
       unit_type:         (editing.unit_type === 'box' ? 'box' : 'piece') as 'piece' | 'box',
       pieces_per_box:    editing.pieces_per_box != null ? String(editing.pieces_per_box) : '',
       display_unit:      editing.display_unit ?? '',
+      buying_price:      editing.buying_price  != null ? String(editing.buying_price)  : '',
+      selling_price:     editing.selling_price != null ? String(editing.selling_price) : '',
       box_selling_price: editing.box_selling_price != null ? String(editing.box_selling_price) : '',
       reorder_level:     String(editing.reorder_level ?? 0),
       location:          hasBack && hasMain ? 'both' : hasBack ? '2' : hasMain ? '1' : '',
@@ -362,6 +367,8 @@ function ProductModal({
       unit_type:          form.unit_type,
       pieces_per_box:     isBox ? (parseInt(form.pieces_per_box) || 1) : null,
       display_unit:       isBox ? (form.display_unit.trim() || null) : null,
+      buying_price:       form.buying_price.trim()  !== '' ? (parseFloat(form.buying_price)  || null) : null,
+      selling_price:      form.selling_price.trim() !== '' ? (parseFloat(form.selling_price) || null) : null,
       box_selling_price:  isBox ? (parseFloat(form.box_selling_price) || null) : null,
       reorder_level:      parseInt(form.reorder_level) || 0,
       active_status:      true,
@@ -518,6 +525,18 @@ function ProductModal({
               </FormField>
             </div>
           )}
+
+          {/* Pricing — per unit. Sell price is the default the POS
+              will pre-fill when this product is sold; user can still
+              override per sale. */}
+          <div className="grid grid-cols-2 gap-3">
+            <FormField label="Buying Price (Ksh / unit)">
+              <input type="number" value={form.buying_price} onChange={e => set('buying_price', e.target.value)} onWheel={e => e.currentTarget.blur()} placeholder="e.g. 120" min="0" step="0.01" className={inputCls} />
+            </FormField>
+            <FormField label="Selling Price (Ksh / unit)">
+              <input type="number" value={form.selling_price} onChange={e => set('selling_price', e.target.value)} onWheel={e => e.currentTarget.blur()} placeholder="e.g. 180" min="0" step="0.01" className={inputCls} />
+            </FormField>
+          </div>
 
           <FormField label="Reorder Level">
             <input type="number" value={form.reorder_level} onChange={e => set('reorder_level', e.target.value)} onWheel={e => e.currentTarget.blur()} placeholder="0" min="0" className={inputCls} />

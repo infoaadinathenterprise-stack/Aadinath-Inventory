@@ -15,7 +15,6 @@ const ADMIN_LINKS = [
   { emoji: '📋', label: 'History',   href: '/admin/history' },
   { emoji: '🧾', label: 'Purchases', href: '/admin/purchases' },
   { emoji: '🏢', label: 'Suppliers', href: '/admin/suppliers' },
-  { emoji: '💰', label: 'Pricing',   href: '/admin/pricing' },
   { emoji: '🏷️', label: 'Labels',    href: '/admin/labels' },
   { emoji: '🏭', label: 'POS',       href: '/admin/pos' },
 ];

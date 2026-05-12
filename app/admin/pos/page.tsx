@@ -35,9 +35,10 @@ export default function PosPage() {
 type CartUnit = 'piece' | 'box';
 
 interface CartItem {
-  product: Product;
-  qty:     number;
-  unit:    CartUnit;  // 'box' means bulk unit (could be box/roll/drum — labeled via display_unit)
+  product:   Product;
+  qty:       number;
+  unit:      CartUnit;        // 'box' means bulk unit (could be box/roll/drum — labeled via display_unit)
+  sellPrice: number | null;   // per-unit sell price for THIS sale; null = give-away / not recorded
 }
 
 // Does this product have a bulk unit (box/roll/etc.)? Gate on
@@ -181,6 +182,16 @@ function PosDashboard() {
     });
   }, [inStock, category, search]);
 
+  // Pick a default sell price based on the chosen unit. For 'piece'
+  // we use products.selling_price; for the bulk unit we use
+  // box_selling_price (which is named for boxes but applies to any
+  // bulk unit like roll/drum). Either may be null — in that case the
+  // user fills it in on the cart row before hitting Sold.
+  function defaultSellPrice(p: Product, unit: CartUnit): number | null {
+    if (unit === 'box') return p.box_selling_price ?? null;
+    return p.selling_price ?? null;
+  }
+
   function addToCart(product: Product) {
     let blocked = false;
     let blockedMax = 0;
@@ -203,7 +214,7 @@ function PosDashboard() {
       // a whole box/roll.
       const max = maxForProduct(product, 'piece');
       if (max < 1) { blocked = true; blockedMax = 0; blockedUnit = 'piece'; return prev; }
-      return [...prev, { product, qty: 1, unit: 'piece' }];
+      return [...prev, { product, qty: 1, unit: 'piece', sellPrice: defaultSellPrice(product, 'piece') }];
     });
     barcodeRef.current?.focus();
     if (blocked) {
@@ -249,7 +260,12 @@ function PosDashboard() {
   // box_quantity). Cross-location overflow always uses piece mode on
   // the secondary location since we wouldn't expect whole boxes to
   // be split across stores.
-  async function sellOneItem(p: Product, qty: number, unit: CartUnit) {
+  //
+  // `sellPrice` is the per-unit price for this specific sale (may
+  // differ from the catalog selling_price due to a discount or markup
+  // at checkout). It's appended to the movement note so the History
+  // page can show what each line actually sold for.
+  async function sellOneItem(p: Product, qty: number, unit: CartUnit, sellPrice: number | null) {
     const pid = p.product_id;
     const ppb = p.pieces_per_box ?? 0;
     const isBoxMode = unit === 'box' && ppb > 0;
@@ -274,6 +290,14 @@ function PosDashboard() {
     const fromCurPieces   = Math.min(movPieces, totalCur);
     const fromOtherPieces = movPieces - fromCurPieces;
 
+    // Build the price suffix once — appended to every movement note
+    // for this sale so each line in History carries the price the
+    // item actually sold for.
+    const unitLbl = unitLabel(p, unit).toLowerCase();
+    const priceSuffix = sellPrice != null
+      ? ` · ${qty} ${unitLbl}${qty === 1 ? '' : 's'} @ Ksh ${sellPrice} = Ksh ${(qty * sellPrice).toLocaleString('en-KE')}`
+      : '';
+
     if (fromCurPieces > 0) {
       let newState: { quantity: number; box_quantity: number };
       if (isBoxMode && fromCurPieces === movPieces) {
@@ -285,7 +309,7 @@ function PosDashboard() {
         newState = deductFromLocation(curPcs, curBx, fromCurPieces, 'piece', ppb);
       }
       await upsertStock(pid, locId, newState);
-      await logMovement(pid, locId, null, fromCurPieces, 'SALE', `Sold from ${locName}`);
+      await logMovement(pid, locId, null, fromCurPieces, 'SALE', `Sold from ${locName}${priceSuffix}`);
     }
 
     if (fromOtherPieces > 0) {
@@ -293,7 +317,7 @@ function PosDashboard() {
       // piece pool. Breaks boxes if needed.
       const newState = deductFromLocation(otherPcs, otherBx, fromOtherPieces, 'piece', ppb);
       await upsertStock(pid, otherId, newState);
-      await logMovement(pid, otherId, null, fromOtherPieces, 'SALE', `Sold from ${otherName} (POS overflow)`);
+      await logMovement(pid, otherId, null, fromOtherPieces, 'SALE', `Sold from ${otherName} (POS overflow)${priceSuffix}`);
     }
   }
 
@@ -342,7 +366,7 @@ function PosDashboard() {
     try {
       for (const item of cart) {
         if (action === 'sold') {
-          await sellOneItem(item.product, item.qty, item.unit);
+          await sellOneItem(item.product, item.qty, item.unit, item.sellPrice);
         } else {
           await transferOneItem(item.product, item.qty, item.unit);
         }
@@ -372,7 +396,7 @@ function PosDashboard() {
     setProcessing(true);
     try {
       if (action === 'sold') {
-        await sellOneItem(item.product, item.qty, item.unit);
+        await sellOneItem(item.product, item.qty, item.unit, item.sellPrice);
       } else {
         await transferOneItem(item.product, item.qty, item.unit);
       }
@@ -595,7 +619,16 @@ function PosDashboard() {
                               onClick={() => setCart(c => c.map(i => {
                                 if (i.product.product_id !== item.product.product_id) return i;
                                 const newMax = maxForProduct(i.product, u);
-                                return { ...i, unit: u, qty: Math.max(1, Math.min(i.qty, newMax || 1)) };
+                                // Keep a custom price if the user already
+                                // overrode it; otherwise pick up the
+                                // catalog default for the new unit.
+                                const wasDefault = i.sellPrice == null || i.sellPrice === defaultSellPrice(i.product, i.unit);
+                                return {
+                                  ...i,
+                                  unit: u,
+                                  qty: Math.max(1, Math.min(i.qty, newMax || 1)),
+                                  sellPrice: wasDefault ? defaultSellPrice(i.product, u) : i.sellPrice,
+                                };
                               }))}
                               className={`flex-1 py-1 rounded text-[10px] font-bold border transition-all ${
                                 isSel
@@ -652,6 +685,34 @@ function PosDashboard() {
                         {unitLbl.charAt(0).toLowerCase()} / {max}
                       </span>
                     </div>
+
+                    {/* Sell price — pre-filled from product.selling_price
+                        (or box_selling_price when unit is bulk). User can
+                        override per sale. Live line total shown on the
+                        right. */}
+                    <div className="flex items-center gap-2 mb-2">
+                      <span className="text-[9px] font-bold text-muted uppercase tracking-widest shrink-0">@ Ksh</span>
+                      <input
+                        type="number"
+                        min={0}
+                        step="0.01"
+                        value={item.sellPrice ?? ''}
+                        placeholder="0.00"
+                        onChange={e => {
+                          const v = e.target.value === '' ? null : parseFloat(e.target.value);
+                          setCart(c => c.map(i => i.product.product_id === item.product.product_id ? { ...i, sellPrice: Number.isNaN(v) ? null : v } : i));
+                        }}
+                        onWheel={e => e.currentTarget.blur()}
+                        className="flex-1 px-2 py-1 rounded-md bg-surface border border-white/10 text-slate-100 text-xs font-bold tabular-nums outline-none focus:border-teal/50 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                      />
+                      <span className="text-[10px] text-muted shrink-0">/ {unitLbl}</span>
+                    </div>
+                    {item.sellPrice != null && item.sellPrice > 0 && (
+                      <div className="text-[10px] text-teal text-right mb-2 font-mono">
+                        Total: Ksh {(item.qty * item.sellPrice).toLocaleString('en-KE')}
+                      </div>
+                    )}
+
                     <div className="flex gap-1.5">
                       <button
                         onClick={() => processItem(item, 'sold')}
@@ -673,6 +734,19 @@ function PosDashboard() {
 
               {cart.length > 0 && (
                 <div className="p-3 border-t border-white/8 flex flex-col gap-2 shrink-0">
+                  {/* Grand total — sum of qty*sellPrice across rows
+                      that have a price set. Useful as a quick
+                      bill-total sanity check before tapping Sold. */}
+                  {(() => {
+                    const total = cart.reduce((s, i) => s + (i.sellPrice ?? 0) * i.qty, 0);
+                    if (total <= 0) return null;
+                    return (
+                      <div className="flex items-center justify-between bg-surface2 border border-teal/20 rounded-xl px-3 py-2">
+                        <span className="text-[10px] font-bold text-muted uppercase tracking-widest">Total</span>
+                        <span className="text-sm font-bold text-teal tabular-nums">Ksh {total.toLocaleString('en-KE')}</span>
+                      </div>
+                    );
+                  })()}
                   <button
                     onClick={() => processCart('sold')}
                     disabled={processing}
