@@ -251,6 +251,16 @@ function PosDashboard() {
   }
 
   function openModal(product: Product, direction: 'plus' | 'minus') {
+    // Manual selection (tapping a product card or the − button) used
+    // to pop the AdjustStockModal here and commit a sale directly.
+    // Route 'minus' to the cart instead so the cashier can still edit
+    // qty, unit, and sell price before confirming. The + button stays
+    // routed through the modal because that's a stock-IN action and
+    // doesn't belong in the cart.
+    if (direction === 'minus') {
+      addToCart(product);
+      return;
+    }
     setModal({ product, direction, location });
   }
 
