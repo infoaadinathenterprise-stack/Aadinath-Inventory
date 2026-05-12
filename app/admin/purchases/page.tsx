@@ -800,6 +800,17 @@ ${rawText}`;
           }
           await logMovement(productId, null, row.locationId, row.qty, 'PURCHASE_IN', `Purchase #${purchaseId}`);
           stockedRows++;
+
+          // Push the unit price from this purchase into
+          // products.buying_price so future sales snapshot the right
+          // cost and the Sales page profit math works without any
+          // manual sync.
+          if (row.unitPrice != null && row.unitPrice > 0) {
+            await supabase
+              .from('products')
+              .update({ buying_price: row.unitPrice })
+              .eq('product_id', productId);
+          }
         }
       }
 

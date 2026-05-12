@@ -63,6 +63,12 @@ function SalesDashboard() {
   const [sales,       setSales]       = useState<Sale[]>([]);
   const [items,       setItems]       = useState<Record<number, SaleItem[]>>({});
   const [withdrawals, setWithdrawals] = useState<Withdrawal[]>([]);
+  // Map of product_id → current buying_price, used to back-fill the
+  // cost column for sales saved before the Purchases page started
+  // pushing buying_price into products. Live value, not snapshot — if
+  // the user updates a buying price later, past sales' profit
+  // numbers will reflect the new cost.
+  const [buyMap,      setBuyMap]      = useState<Record<number, number>>({});
   const [loading,     setLoading]     = useState(true);
   const [error,       setError]       = useState<string | null>(null);
   const [toast,       setToast]       = useState<ToastState | null>(null);
@@ -113,8 +119,31 @@ function SalesDashboard() {
         (map[it.sale_id] ||= []).push(it);
       }
       setItems(map);
+
+      // Fetch current buying prices for every product referenced by
+      // these sales — used as a fallback when sale_items.cost_price
+      // wasn't snapshotted (older sales / pre-migration data).
+      const productIds = Array.from(new Set(
+        (itemsData ?? [])
+          .map(it => (it as SaleItem).product_id)
+          .filter((id): id is number => id != null),
+      ));
+      if (productIds.length > 0) {
+        const { data: prods } = await supabase
+          .from('products')
+          .select('product_id, buying_price')
+          .in('product_id', productIds);
+        const bm: Record<number, number> = {};
+        for (const p of (prods ?? []) as { product_id: number; buying_price: number | null }[]) {
+          if (p.buying_price != null) bm[p.product_id] = p.buying_price;
+        }
+        setBuyMap(bm);
+      } else {
+        setBuyMap({});
+      }
     } else {
       setItems({});
+      setBuyMap({});
     }
     setLoading(false);
   }, [day]);
@@ -162,9 +191,13 @@ function SalesDashboard() {
         totalLines++;
         qtySold += it.quantity;
         if (it.unit_price != null) revenue += it.unit_price * it.quantity;
-        if (it.unit_price != null && it.cost_price != null) {
+        // Cost preference: snapshot on the line (most accurate at time
+        // of sale) → fall back to the product's current buying_price
+        // when the snapshot is missing.
+        const effectiveCost = it.cost_price ?? (it.product_id != null ? buyMap[it.product_id] : null) ?? null;
+        if (it.unit_price != null && effectiveCost != null) {
           knownLines++;
-          cost += it.cost_price * it.quantity;
+          cost += effectiveCost * it.quantity;
         }
       }
     }
@@ -173,7 +206,7 @@ function SalesDashboard() {
     const netCash = revenue - withdrawTotal;
 
     return { revenue, cost, profit, qtySold, knownLines, totalLines, voidedSales, salesNoItems, withdrawTotal, netCash };
-  }, [sales, items, withdrawals]);
+  }, [sales, items, withdrawals, buyMap]);
 
   async function addWithdrawal() {
     const amt = parseFloat(wAmount);
@@ -350,6 +383,7 @@ function SalesDashboard() {
                 key={s.sale_id}
                 sale={s}
                 saleItems={items[s.sale_id] ?? []}
+                buyMap={buyMap}
                 expanded={expandedSaleId === s.sale_id}
                 onToggle={() => setExpandedSaleId(prev => prev === s.sale_id ? null : s.sale_id)}
                 onVoid={() => voidSale(s)}
@@ -385,21 +419,30 @@ function SummaryCell({ label, value, sub, tone }: { label: string; value: string
 // ── Single sale card ─────────────────────────────────────────────────────────
 
 function SaleCard({
-  sale, saleItems, expanded, onToggle, onVoid,
+  sale, saleItems, buyMap, expanded, onToggle, onVoid,
 }: {
   sale: Sale;
   saleItems: SaleItem[];
+  buyMap: Record<number, number>;
   expanded: boolean;
   onToggle: () => void;
   onVoid: () => void;
 }) {
   const voided = sale.status === 'VOIDED';
 
+  // Effective cost per line: snapshot on the row first, then the
+  // product's current buying_price (so sales saved before the
+  // Purchases page started populating buying_price still get a cost
+  // figure as soon as the user records the buy).
+  const effectiveCost = (it: SaleItem): number | null =>
+    it.cost_price ?? (it.product_id != null ? (buyMap[it.product_id] ?? null) : null);
+
   // Line-level profit summary for the collapsed view.
   let lineRevenue = 0, lineCost = 0, knownLines = 0;
   for (const it of saleItems) {
     if (it.unit_price != null) lineRevenue += it.unit_price * it.quantity;
-    if (it.unit_price != null && it.cost_price != null) { knownLines++; lineCost += it.cost_price * it.quantity; }
+    const ec = effectiveCost(it);
+    if (it.unit_price != null && ec != null) { knownLines++; lineCost += ec * it.quantity; }
   }
   const cardProfit = knownLines === saleItems.length && saleItems.length > 0 ? lineRevenue - lineCost : null;
 
@@ -471,9 +514,15 @@ ALTER TABLE sale_items
                   </pre>
                 </div>
               ) : saleItems.map(it => {
+                const ec = effectiveCost(it);
                 const sellLine = it.unit_price != null ? it.unit_price * it.quantity : null;
-                const costLine = it.cost_price != null ? it.cost_price * it.quantity : null;
+                const costLine = ec != null ? ec * it.quantity : null;
                 const profit = sellLine != null && costLine != null ? sellLine - costLine : null;
+                // Asterisk when the cost came from the catalog fallback
+                // (sale_items.cost_price was null but product.buying_price
+                // is set) — gives the user a visual cue this row was
+                // back-filled from current data, not the at-sale snapshot.
+                const costFromFallback = it.cost_price == null && ec != null;
                 return (
                   <div key={it.id} className="grid grid-cols-[1fr_60px_75px_75px_75px] gap-2 py-2 border-b border-white/5 last:border-0 text-xs items-start">
                     <div className="min-w-0">
@@ -481,7 +530,9 @@ ALTER TABLE sale_items
                       <div className="text-[10px] text-muted/70">{it.unit.toLowerCase()}</div>
                     </div>
                     <span className="text-right text-slate-200 tabular-nums">{it.quantity}</span>
-                    <span className="text-right tabular-nums text-muted">{it.cost_price != null ? fmtKsh(it.cost_price) : DASH}</span>
+                    <span className="text-right tabular-nums text-muted" title={costFromFallback ? 'From current catalog buying price' : 'Snapshot at time of sale'}>
+                      {ec != null ? fmtKsh(ec) + (costFromFallback ? '*' : '') : DASH}
+                    </span>
                     <span className="text-right tabular-nums text-teal">{it.unit_price != null ? fmtKsh(it.unit_price) : DASH}</span>
                     <span className={`text-right tabular-nums font-bold ${profit == null ? 'text-muted' : profit >= 0 ? 'text-success' : 'text-danger'}`}>
                       {profit == null ? DASH : (profit >= 0 ? '+' : '−') + fmtKsh(Math.abs(profit))}
