@@ -145,15 +145,16 @@ function InventoryAuditDashboard() {
         .from('stock_by_location')
         .select('product_id, quantity, box_quantity')
         .eq('location_id', locId);
-      if (stockErr) throw stockErr;
+      if (stockErr) throw new Error(stockErr.message);
 
       // 2. Products that have ever been transferred involving this location
+      //    NB: actual DB column is request_type, not movement_type
       const { data: transferData, error: txErr } = await supabase
         .from('stock_requests')
         .select('product_id')
-        .eq('movement_type', 'TRANSFER')
+        .eq('request_type', 'TRANSFER')
         .or(`from_location_id.eq.${locId},to_location_id.eq.${locId}`);
-      if (txErr) throw txErr;
+      if (txErr) throw new Error(txErr.message);
 
       // Build a stock map: product_id → { quantity, box_quantity }
       const stockMap: Record<number, { quantity: number; box_quantity: number }> = {};
@@ -210,13 +211,23 @@ function InventoryAuditDashboard() {
     const locId = LOC_ID[location];
     const { data, error } = await supabase
       .from('stock_requests')
-      .select('*')
+      .select('request_id, request_type, quantity, from_location_id, to_location_id, notes, requested_at')
       .eq('product_id', row.product.product_id)
       .or(`from_location_id.eq.${locId},to_location_id.eq.${locId}`)
-      .order('created_at', { ascending: false })
+      .order('requested_at', { ascending: false })
       .limit(200);
     if (error) showToast('Could not load history: ' + error.message, 'error');
-    setHistory((data ?? []) as Movement[]);
+    // Normalise stock_requests columns → Movement interface
+    const movements: Movement[] = (data ?? []).map((r) => ({
+      id:               (r as Record<string,unknown>).request_id as number,
+      created_at:       (r as Record<string,unknown>).requested_at as string,
+      movement_type:    (r as Record<string,unknown>).request_type as string,
+      quantity:         (r as Record<string,unknown>).quantity as number,
+      from_location_id: (r as Record<string,unknown>).from_location_id as number | null,
+      to_location_id:   (r as Record<string,unknown>).to_location_id as number | null,
+      reason:           (r as Record<string,unknown>).notes as string | null,
+    }));
+    setHistory(movements);
     setHistLoading(false);
   }
 

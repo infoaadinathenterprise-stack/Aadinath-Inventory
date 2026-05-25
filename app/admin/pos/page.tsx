@@ -125,8 +125,10 @@ function PosDashboard() {
   const [scannerOpen, setScannerOpen] = useState(false);
   const [cart,        setCart]        = useState<CartItem[]>([]);
   const [cartOpen,    setCartOpen]    = useState(false);
-  const [processing,  setProcessing]  = useState(false);
-  const [toast,       setToast]       = useState<ToastState | null>(null);
+  const [processing,        setProcessing]        = useState(false);
+  const [toast,             setToast]             = useState<ToastState | null>(null);
+  const [restockBannerOpen, setRestockBannerOpen] = useState(true);
+  const [restockSaleAlert,  setRestockSaleAlert]  = useState<string[]>([]);
   const toastId    = useRef(0);
   const barcodeRef = useRef<HTMLInputElement>(null);
 
@@ -135,6 +137,12 @@ function PosDashboard() {
     const t = setTimeout(() => barcodeRef.current?.focus(), 300);
     return () => clearTimeout(t);
   }, []);
+
+  // Reset restock alerts when the operator switches between locations
+  useEffect(() => {
+    setRestockSaleAlert([]);
+    setRestockBannerOpen(true);
+  }, [location]);
 
   // Global keydown redirect — USB scanner types then sends Enter; if focus
   // has drifted to a non-input element, snap it back to the barcode field
@@ -192,6 +200,19 @@ function PosDashboard() {
       return true;
     });
   }, [inStock, category, search]);
+
+  // Products at or below reorder level in Main Store that still have
+  // stock in Back Godown — the shelf needs restocking.
+  const restockNeeded = useMemo(() => {
+    if (location !== 'main') return [];
+    return products.filter(p => {
+      const ppb     = p.pieces_per_box ?? 0;
+      const mainTot = (mainStockMap[p.product_id] || 0) + (mainBoxMap[p.product_id] || 0) * ppb;
+      const backTot = (backStockMap[p.product_id] || 0) + (backBoxMap[p.product_id] || 0) * ppb;
+      const reorder = p.reorder_level ?? 2;
+      return mainTot <= reorder && backTot > 0;
+    });
+  }, [location, products, mainStockMap, mainBoxMap, backStockMap, backBoxMap]);
 
   // Pick a default sell price based on the chosen unit. For 'piece'
   // we use products.selling_price; for the bulk unit we use
@@ -524,6 +545,19 @@ function PosDashboard() {
         await recordSale(cart);
       }
       showToast(`${action === 'sold' ? 'Sold' : 'Moved'} ${cart.length} item(s) ✓`, 'success');
+      // After a Main Store sale, surface any items that have stock
+      // waiting in Back Godown so the operator knows to restock.
+      if (action === 'sold' && location === 'main') {
+        const names = cart
+          .filter(item => {
+            const ppb     = item.product.pieces_per_box ?? 0;
+            const backTot = (backStockMap[item.product.product_id] || 0)
+                          + (backBoxMap[item.product.product_id]   || 0) * ppb;
+            return backTot > 0;
+          })
+          .map(item => item.product.product_name);
+        if (names.length > 0) setRestockSaleAlert(names);
+      }
       setCart([]);
       setCartOpen(false);
       refresh();
@@ -561,6 +595,13 @@ function PosDashboard() {
       }
       setCart(c => c.filter(i => i.product.product_id !== item.product.product_id));
       showToast(`${action === 'sold' ? 'Sold' : 'Moved'}: ${item.product.product_name} ✓`, 'success');
+      // Restock alert for single-item sale from Main Store
+      if (action === 'sold' && location === 'main') {
+        const ppb     = item.product.pieces_per_box ?? 0;
+        const backTot = (backStockMap[item.product.product_id] || 0)
+                      + (backBoxMap[item.product.product_id]   || 0) * ppb;
+        if (backTot > 0) setRestockSaleAlert([item.product.product_name]);
+      }
       refresh();
     } catch (e) {
       showToast(e instanceof Error ? e.message : 'Error', 'error');
@@ -662,6 +703,73 @@ function PosDashboard() {
         ))}
       </div>
 
+      {/* ── Restock notification strip ─────────────────────────────────
+          Shown only when viewing Main Store and some products are at or
+          below their reorder level but still have stock in Back Godown. */}
+      <AnimatePresence>
+        {location === 'main' && restockNeeded.length > 0 && (
+          <motion.div
+            key="restock-strip"
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            className="shrink-0 overflow-hidden bg-surface border-b border-gold/20"
+          >
+            <div className="px-3 pt-2 pb-2">
+              <button
+                onClick={() => setRestockBannerOpen(o => !o)}
+                className="w-full flex items-center gap-2 px-3 py-2 rounded-xl bg-gold/10 border border-gold/25 text-gold text-xs font-bold hover:bg-gold/15 active:scale-[0.98] transition-all"
+              >
+                <span>📦</span>
+                <span className="flex-1 text-left">
+                  {restockNeeded.length} product{restockNeeded.length > 1 ? 's' : ''} to restock from Back Godown
+                </span>
+                <span className="w-4 h-4 rounded-full bg-gold/20 border border-gold/40 text-[9px] font-black flex items-center justify-center">
+                  {restockBannerOpen ? '▴' : '▾'}
+                </span>
+              </button>
+
+              <AnimatePresence>
+                {restockBannerOpen && (
+                  <motion.div
+                    key="restock-list"
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: 'auto', opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    className="overflow-hidden"
+                  >
+                    <div className="mt-1.5 bg-gold/5 border border-gold/15 rounded-xl px-3 py-2 max-h-40 overflow-y-auto flex flex-col gap-1.5">
+                      {restockNeeded.map(p => {
+                        const ppb     = p.pieces_per_box ?? 0;
+                        const mainTot = (mainStockMap[p.product_id] || 0) + (mainBoxMap[p.product_id] || 0) * ppb;
+                        const backTot = (backStockMap[p.product_id] || 0) + (backBoxMap[p.product_id] || 0) * ppb;
+                        return (
+                          <div key={p.product_id} className="flex items-center justify-between gap-2">
+                            <span className="text-xs text-slate-200 truncate flex-1">{p.product_name}</span>
+                            <div className="flex items-center gap-2 shrink-0 text-[10px] font-mono font-bold tabular-nums">
+                              <span className={`px-1.5 py-0.5 rounded border ${
+                                mainTot === 0
+                                  ? 'bg-danger/10 border-danger/30 text-danger'
+                                  : 'bg-gold/10 border-gold/30 text-gold'
+                              }`}>
+                                🏪 {mainTot}
+                              </span>
+                              <span className="px-1.5 py-0.5 rounded border bg-success/10 border-success/30 text-success">
+                                📦 {backTot}
+                              </span>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       <div className="shrink-0 flex gap-2 px-3 py-2 overflow-x-auto border-b border-white/5 bg-surface">
         {categories.map(cat => (
           <button
@@ -708,6 +816,8 @@ function PosDashboard() {
               stockMap={sm}
               boxMap={bm}
               onAdjust={openModal}
+              backStockMap={backStockMap}
+              backBoxMap={backBoxMap}
             />
           ))}
         </AnimatePresence>
@@ -1044,27 +1154,88 @@ function PosDashboard() {
         )}
       </AnimatePresence>
 
+      {/* ── Post-sale restock reminder ──────────────────────────────────
+          Floats above the toast; persists until dismissed or location
+          switches.  "Go to Back →" shortcut swaps the location so the
+          operator can immediately use "→ Main" buttons to move stock. */}
+      <AnimatePresence>
+        {restockSaleAlert.length > 0 && (
+          <motion.div
+            key="restock-alert"
+            initial={{ y: 80, opacity: 0, scale: 0.95 }}
+            animate={{ y: 0,  opacity: 1, scale: 1    }}
+            exit={{   y: 80, opacity: 0, scale: 0.95 }}
+            transition={{ type: 'spring', damping: 22, stiffness: 280 }}
+            className="fixed bottom-16 inset-x-0 z-[150] px-4 pointer-events-none"
+          >
+            <div className="max-w-xs mx-auto pointer-events-auto bg-navy border border-gold/40 rounded-2xl p-3.5 shadow-2xl shadow-black/60">
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-2">
+                  <span className="text-lg leading-none">📦</span>
+                  <span className="text-xs font-bold text-gold">Move from Back Godown</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    onClick={() => {
+                      setLocation('back');
+                      setRestockSaleAlert([]);
+                      setCartOpen(false);
+                      setTimeout(() => barcodeRef.current?.focus(), 100);
+                    }}
+                    className="text-[10px] font-bold px-2.5 py-1 rounded-lg bg-teal/15 border border-teal/30 text-teal hover:bg-teal/25 active:scale-95 transition-all"
+                  >
+                    Go to Back →
+                  </button>
+                  <button
+                    onClick={() => setRestockSaleAlert([])}
+                    className="w-5 h-5 flex items-center justify-center text-muted hover:text-slate-100 text-base transition-colors"
+                  >×</button>
+                </div>
+              </div>
+              <ul className="flex flex-col gap-1">
+                {restockSaleAlert.map((name, i) => (
+                  <li key={i} className="text-[11px] text-slate-200 flex items-center gap-1.5">
+                    <span className="text-gold/50 text-base leading-none">•</span>
+                    <span className="truncate">{name}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       <Toast toast={toast} onDismiss={() => setToast(null)} />
     </div>
   );
 }
 
 interface CardProps {
-  product:  Product;
-  index:    number;
-  location: Location;
-  stockMap: Record<number, number>;
-  boxMap:   Record<number, number>;
-  onAdjust: (product: Product, direction: 'plus' | 'minus') => void;
+  product:      Product;
+  index:        number;
+  location:     Location;
+  stockMap:     Record<number, number>;
+  boxMap:       Record<number, number>;
+  onAdjust:     (product: Product, direction: 'plus' | 'minus') => void;
+  // Passed when viewing Main Store so the card can show a "In Back" badge
+  backStockMap?: Record<number, number>;
+  backBoxMap?:   Record<number, number>;
 }
 
-function PosProductCard({ product: p, index, location, stockMap, boxMap, onAdjust }: CardProps) {
+function PosProductCard({ product: p, index, location, stockMap, boxMap, onAdjust, backStockMap, backBoxMap }: CardProps) {
   const ppb   = p.pieces_per_box || 0;
   const qty   = stockMap[p.product_id] || 0;
   const bx    = boxMap[p.product_id]   || 0;
   const total = qty + bx * (ppb || 1);
   const fmt   = formatStock(total, p.unit_type, p.unit_of_measure, ppb);
   const reorder = p.reorder_level ?? 2;
+
+  // Back godown availability — show badge only when at Main Store and
+  // stock here is low/zero while back still has some.
+  const backTot = location === 'main'
+    ? (backStockMap?.[p.product_id] ?? 0) + (backBoxMap?.[p.product_id] ?? 0) * ppb
+    : 0;
+  const showBackBadge = location === 'main' && backTot > 0 && total <= reorder;
 
   const stockCls =
     total === 0      ? 'text-danger' :
@@ -1099,6 +1270,11 @@ function PosProductCard({ product: p, index, location, stockMap, boxMap, onAdjus
           {[p.brand, p.model].filter(Boolean).join(' · ') || p.stock_keeping_unit || '—'}
         </p>
         <p className={`text-[10px] font-semibold mt-1 ${stockCls}`}>{stockTxt}</p>
+        {showBackBadge && (
+          <span className="inline-flex items-center gap-1 mt-1 text-[9px] font-bold px-1.5 py-0.5 rounded-full border bg-gold/10 border-gold/30 text-gold leading-none">
+            📦 {backTot} in Back
+          </span>
+        )}
       </div>
 
       <div className="flex items-center gap-1.5 shrink-0" onClick={e => e.stopPropagation()}>
