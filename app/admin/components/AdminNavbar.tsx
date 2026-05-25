@@ -18,6 +18,7 @@ const ADMIN_LINKS = [
   { emoji: '🏢', label: 'Suppliers', href: '/admin/suppliers' },
   { emoji: '🏷️', label: 'Labels',    href: '/admin/labels' },
   { emoji: '🏭', label: 'POS',       href: '/admin/pos' },
+  { emoji: '🗂️', label: 'Audit',     href: '/admin/inventory-audit' },
 ];
 
 export default function AdminNavbar({ onLogout }: Props) {

@@ -21,6 +21,13 @@ function fmtKsh(n: number | null | undefined) {
   return 'Ksh ' + Number(n).toLocaleString('en-KE');
 }
 
+// Kenya VAT 16% — prices in DB are already tax-inclusive.
+function splitVAT(totalIncl: number) {
+  const vat  = Math.round(totalIncl * 16 / 116);
+  const base = totalIncl - vat;
+  return { base, vat };
+}
+
 // bill_image_url stores either a JSON-stringified array (new) or a single URL
 // (old). Parse defensively so old purchases still display.
 function parseBillUrls(s: string | null): string[] {
@@ -52,14 +59,15 @@ export default function PurchasesPage() {
 // ─── Dashboard ────────────────────────────────────────────────────────────────
 
 function PurchasesDashboard() {
-  const [purchases,  setPurchases]  = useState<Purchase[]>([]);
-  const [suppliers,  setSuppliers]  = useState<Supplier[]>([]);
-  const [products,   setProducts]   = useState<Product[]>([]);
-  const [loading,    setLoading]    = useState(true);
-  const [toast,      setToast]      = useState<ToastState | null>(null);
-  const [newOpen,    setNewOpen]    = useState(false);
-  const [detail,     setDetail]     = useState<{ purchase: Purchase; items: PurchaseItem[] } | null>(null);
-  const [deleting,   setDeleting]   = useState(false);
+  const [purchases,    setPurchases]    = useState<Purchase[]>([]);
+  const [suppliers,    setSuppliers]    = useState<Supplier[]>([]);
+  const [products,     setProducts]     = useState<Product[]>([]);
+  const [loading,      setLoading]      = useState(true);
+  const [toast,        setToast]        = useState<ToastState | null>(null);
+  const [newOpen,      setNewOpen]      = useState(false);
+  const [detail,       setDetail]       = useState<{ purchase: Purchase; items: PurchaseItem[] } | null>(null);
+  const [deleting,     setDeleting]     = useState(false);
+  const [editTarget,   setEditTarget]   = useState<{ purchase: Purchase; items: PurchaseItem[] } | null>(null);
   const toastId = useRef(0);
 
   const load = useCallback(async () => {
@@ -311,6 +319,20 @@ function PurchasesDashboard() {
             onClose={() => setDetail(null)}
             onDelete={() => deletePurchase(detail)}
             deleting={deleting}
+            onEdit={() => { setEditTarget(detail); setDetail(null); }}
+          />
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {editTarget && (
+          <EditPurchaseModal
+            data={editTarget}
+            suppliers={suppliers}
+            products={products}
+            onClose={() => setEditTarget(null)}
+            onSaved={(msg) => { setEditTarget(null); load(); showToast(msg, 'success'); }}
+            onError={(msg) => showToast(msg, 'error')}
           />
         )}
       </AnimatePresence>
@@ -323,7 +345,7 @@ function PurchasesDashboard() {
 // ─── Detail drawer ────────────────────────────────────────────────────────────
 
 function DetailDrawer({
-  data, supplierName, productName, onClose, onDelete, deleting,
+  data, supplierName, productName, onClose, onDelete, deleting, onEdit,
 }: {
   data: { purchase: Purchase; items: PurchaseItem[] };
   supplierName: (id: number | null) => string;
@@ -331,6 +353,7 @@ function DetailDrawer({
   onClose:  () => void;
   onDelete: () => void;
   deleting: boolean;
+  onEdit:   () => void;
 }) {
   const urls = parseBillUrls(data.purchase.bill_image_url);
   return (
@@ -361,12 +384,26 @@ function DetailDrawer({
           </div>
         ))}
 
-        {data.purchase.total_amount != null && (
-          <div className="flex justify-between pt-3 font-bold text-base">
-            <span className="text-slate-100">Total</span>
-            <span className="text-teal">{fmtKsh(data.purchase.total_amount)}</span>
-          </div>
-        )}
+        {data.purchase.total_amount != null && (() => {
+          const total = data.purchase.total_amount!;
+          const { base, vat } = splitVAT(total);
+          return (
+            <div className="mt-3 rounded-xl bg-surface2 border border-white/8 px-4 py-3 flex flex-col gap-1">
+              <div className="flex items-center justify-between text-xs text-muted">
+                <span>Excl. VAT</span>
+                <span className="tabular-nums">{fmtKsh(base)}</span>
+              </div>
+              <div className="flex items-center justify-between text-xs text-muted">
+                <span>VAT (16%)</span>
+                <span className="tabular-nums">{fmtKsh(vat)}</span>
+              </div>
+              <div className="flex items-center justify-between border-t border-white/8 pt-2 mt-0.5">
+                <span className="text-sm font-bold text-slate-100">Total (incl. VAT)</span>
+                <span className="text-sm font-bold text-teal tabular-nums">{fmtKsh(total)}</span>
+              </div>
+            </div>
+          );
+        })()}
 
         {urls.length > 0 && (
           <div className="mt-4">
@@ -389,17 +426,280 @@ function DetailDrawer({
             className="flex-1 py-2.5 rounded-xl bg-surface2 border border-white/8 text-muted text-sm font-semibold hover:text-slate-100 transition-colors disabled:opacity-50"
           >Close</button>
           <button
+            onClick={onEdit}
+            disabled={deleting}
+            className="px-4 py-2.5 rounded-xl bg-teal/10 border border-teal/30 text-teal text-sm font-bold hover:bg-teal/20 transition-colors disabled:opacity-50"
+          >✏️ Edit</button>
+          <button
             onClick={onDelete}
             disabled={deleting}
             className="px-4 py-2.5 rounded-xl bg-danger/10 border border-danger/30 text-danger text-sm font-bold hover:bg-danger/20 transition-colors disabled:opacity-50 flex items-center gap-2"
           >
             {deleting && <span className="w-3.5 h-3.5 rounded-full border-2 border-danger border-t-transparent animate-spin" />}
-            🗑 Delete
+            🗑
           </button>
         </div>
         <p className="text-[10px] text-muted/70 text-center mt-2 leading-relaxed">
           Deleting reverses the stock that this purchase added.
         </p>
+      </motion.div>
+    </>
+  );
+}
+
+// ─── Edit purchase modal ──────────────────────────────────────────────────────
+
+interface EditItemRow {
+  id:          number;  // purchase_items.id — used for UPDATE
+  productId:   number | null;
+  productName: string;
+  qty:         number;
+  oldQty:      number;  // snapshot to compute stock delta
+  unitPrice:   number | null;
+}
+
+function EditPurchaseModal({
+  data, suppliers, products, onClose, onSaved, onError,
+}: {
+  data:      { purchase: Purchase; items: PurchaseItem[] };
+  suppliers: Supplier[];
+  products:  Product[];
+  onClose:   () => void;
+  onSaved:   (msg: string) => void;
+  onError:   (msg: string) => void;
+}) {
+  const [supplierId, setSupplierId] = useState(String(data.purchase.supplier_id ?? ''));
+  const [date,  setDate]  = useState(data.purchase.purchase_date ?? '');
+  const [notes, setNotes] = useState(data.purchase.notes ?? '');
+  const [rows,  setRows]  = useState<EditItemRow[]>(() =>
+    data.items.map(it => ({
+      id:          it.id,
+      productId:   it.product_id,
+      productName: it.product_id
+        ? (products.find(p => p.product_id === it.product_id)?.product_name ?? it.product_name_raw ?? '')
+        : (it.product_name_raw ?? ''),
+      qty:         it.quantity ?? 1,
+      oldQty:      it.quantity ?? 1,
+      unitPrice:   it.unit_price ?? null,
+    }))
+  );
+  const [saving, setSaving] = useState(false);
+
+  const computedTotal = useMemo(() => {
+    let sum = 0;
+    for (const r of rows) {
+      if (r.qty > 0 && r.unitPrice != null) sum += r.qty * r.unitPrice;
+    }
+    return sum;
+  }, [rows]);
+
+  function updateRow(id: number, patch: Partial<EditItemRow>) {
+    setRows(rs => rs.map(r => r.id === id ? { ...r, ...patch } : r));
+  }
+
+  async function save() {
+    setSaving(true);
+    try {
+      const purchaseId = data.purchase.purchase_id;
+
+      // ── Update purchase header ─────────────────────────────────────────
+      const { error: hErr } = await supabase.from('purchases').update({
+        supplier_id:   supplierId ? parseInt(supplierId) : null,
+        purchase_date: date || null,
+        notes:         notes.trim() || null,
+        total_amount:  computedTotal > 0 ? computedTotal : null,
+      }).eq('purchase_id', purchaseId);
+      if (hErr) throw new Error(hErr.message);
+
+      // ── Update each line item + adjust stock for qty changes ───────────
+      for (const row of rows) {
+        const totalPrice = row.unitPrice != null ? row.qty * row.unitPrice : null;
+        const { error: iErr } = await supabase.from('purchase_items').update({
+          quantity:    row.qty,
+          unit_price:  row.unitPrice,
+          total_price: totalPrice,
+        }).eq('id', row.id);
+        if (iErr) throw new Error(iErr.message);
+
+        // Stock delta adjustment when qty changed
+        if (row.productId && row.qty !== row.oldQty) {
+          const delta = row.qty - row.oldQty;
+          if (delta > 0) {
+            // Add stock to back godown (loc 2) by default
+            const { data: stockRow } = await supabase
+              .from('stock_by_location').select('id, quantity')
+              .eq('product_id', row.productId).eq('location_id', 2).maybeSingle();
+            if (stockRow) {
+              await supabase.from('stock_by_location').update({ quantity: (stockRow.quantity ?? 0) + delta }).eq('id', stockRow.id);
+            } else {
+              await supabase.from('stock_by_location').insert({ product_id: row.productId, location_id: 2, quantity: delta });
+            }
+            await logMovement(row.productId, null, 2, delta, 'PURCHASE_IN', `Purchase #${purchaseId} edited`);
+          } else {
+            // Remove stock — drain from wherever available (back first, then main)
+            const removeQty = -delta;
+            for (const locId of [2, 1] as const) {
+              const { data: stockRow } = await supabase
+                .from('stock_by_location').select('id, quantity')
+                .eq('product_id', row.productId).eq('location_id', locId).maybeSingle();
+              if (!stockRow) continue;
+              const current = stockRow.quantity ?? 0;
+              if (current >= removeQty) {
+                await supabase.from('stock_by_location').update({ quantity: current - removeQty }).eq('id', stockRow.id);
+                break;
+              }
+              if (current > 0) {
+                await supabase.from('stock_by_location').update({ quantity: 0 }).eq('id', stockRow.id);
+              }
+            }
+            await logMovement(row.productId, null, null, removeQty, 'ADJUSTMENT_OUT', `Purchase #${purchaseId} edited`);
+          }
+        }
+
+        // Keep buying_price in sync when unit price changes
+        if (row.productId && row.unitPrice != null && row.unitPrice > 0) {
+          const original = data.items.find(i => i.id === row.id);
+          if (!original || original.unit_price !== row.unitPrice) {
+            await supabase.from('products').update({ buying_price: row.unitPrice }).eq('product_id', row.productId);
+          }
+        }
+      }
+
+      onSaved(`Purchase #${purchaseId} updated ✓`);
+    } catch (e) {
+      onError('Error: ' + (e instanceof Error ? e.message : 'Unknown'));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <>
+      <motion.div key="ebd" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+        className="fixed inset-0 z-40 bg-black/70 backdrop-blur-sm" onClick={onClose} />
+      <motion.div key="emd" initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }}
+        transition={{ type: 'spring', damping: 28, stiffness: 220 }}
+        className="fixed bottom-0 inset-x-0 z-50 max-w-lg mx-auto bg-surface border border-white/8 rounded-t-2xl p-5 pb-8 max-h-[95vh] overflow-y-auto"
+      >
+        <div className="w-8 h-1 rounded-full bg-white/10 mx-auto mb-4" />
+        <h3 className="text-base font-bold text-slate-100 mb-4">✏️ Edit Purchase #{data.purchase.purchase_id}</h3>
+
+        <div className="flex flex-col gap-3">
+          {/* Supplier */}
+          <div>
+            <label className="text-[10px] font-bold text-muted uppercase tracking-widest block mb-1">Supplier</label>
+            <select value={supplierId} onChange={e => setSupplierId(e.target.value)}
+              className="w-full px-3 py-2.5 rounded-xl bg-surface2 border border-white/8 text-slate-100 text-sm outline-none focus:border-teal/40">
+              <option value="">— Select supplier (optional) —</option>
+              {suppliers.map(s => <option key={s.supplier_id} value={s.supplier_id}>{s.supplier_name}</option>)}
+            </select>
+          </div>
+
+          {/* Date */}
+          <div>
+            <label className="text-[10px] font-bold text-muted uppercase tracking-widest block mb-1">Purchase Date</label>
+            <input type="date" value={date} onChange={e => setDate(e.target.value)}
+              className="w-full px-3 py-2.5 rounded-xl bg-surface2 border border-white/8 text-slate-100 text-sm outline-none focus:border-teal/40" />
+          </div>
+
+          {/* Items */}
+          <div>
+            <span className="text-[10px] font-bold text-muted uppercase tracking-widest">Items ({rows.length})</span>
+            <div className="flex flex-col gap-2 mt-2">
+              {rows.map((row, idx) => (
+                <div key={row.id} className="rounded-xl border border-white/8 bg-surface2 p-3">
+                  <div className="text-[10px] font-bold text-muted uppercase tracking-widest mb-2">
+                    #{idx + 1} · {row.productName || '—'}
+                  </div>
+                  <div className="grid grid-cols-[1fr_1fr_auto] gap-2 items-end">
+                    <div>
+                      <label className="text-[9px] font-bold text-muted uppercase block mb-0.5">Qty</label>
+                      <input
+                        type="number" min={1} value={row.qty}
+                        onChange={e => updateRow(row.id, { qty: Math.max(1, parseInt(e.target.value) || 1) })}
+                        onWheel={e => e.currentTarget.blur()}
+                        className="w-full px-2 py-1.5 rounded-lg bg-surface border border-white/8 text-slate-100 text-xs outline-none focus:border-teal/40"
+                      />
+                      {row.qty !== row.oldQty && (
+                        <p className="text-[9px] text-gold mt-0.5">
+                          {row.qty > row.oldQty ? `+${row.qty - row.oldQty} stock ↑` : `${row.qty - row.oldQty} stock ↓`}
+                        </p>
+                      )}
+                    </div>
+                    <div>
+                      <label className="text-[9px] font-bold text-muted uppercase block mb-0.5">Unit Price (Ksh)</label>
+                      <input
+                        type="number" min={0} step="0.01" value={row.unitPrice ?? ''}
+                        placeholder="0.00"
+                        onChange={e => updateRow(row.id, { unitPrice: e.target.value ? parseFloat(e.target.value) : null })}
+                        onWheel={e => e.currentTarget.blur()}
+                        className="w-full px-2 py-1.5 rounded-lg bg-surface border border-white/8 text-slate-100 text-xs outline-none focus:border-teal/40"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[9px] font-bold text-muted uppercase block mb-0.5">Line</label>
+                      <div className="px-2 py-1.5 rounded-lg bg-surface border border-white/8 text-teal text-xs font-bold tabular-nums min-w-20 text-right">
+                        {row.unitPrice != null ? Number(row.qty * row.unitPrice).toLocaleString('en-KE') : '—'}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Notes */}
+          <div>
+            <label className="text-[10px] font-bold text-muted uppercase tracking-widest block mb-1">Notes</label>
+            <input value={notes} onChange={e => setNotes(e.target.value)} placeholder="Optional"
+              className="w-full px-3 py-2.5 rounded-xl bg-surface2 border border-white/8 text-slate-100 text-sm outline-none focus:border-teal/40" />
+          </div>
+
+          {/* Updated total with VAT breakdown */}
+          <div className="rounded-xl bg-surface2 border border-white/8 px-4 py-3">
+            {computedTotal > 0 ? (
+              <div className="flex flex-col gap-1">
+                {(() => {
+                  const { base, vat } = splitVAT(computedTotal);
+                  return (
+                    <>
+                      <div className="flex items-center justify-between text-xs text-muted">
+                        <span>Excl. VAT</span>
+                        <span className="tabular-nums">{fmtKsh(base)}</span>
+                      </div>
+                      <div className="flex items-center justify-between text-xs text-muted">
+                        <span>VAT (16%)</span>
+                        <span className="tabular-nums">{fmtKsh(vat)}</span>
+                      </div>
+                      <div className="flex items-center justify-between border-t border-white/8 pt-2 mt-0.5">
+                        <span className="text-xs font-bold text-muted uppercase tracking-widest">Total (incl. VAT)</span>
+                        <span className="text-base font-bold text-teal tabular-nums">{fmtKsh(computedTotal)}</span>
+                      </div>
+                    </>
+                  );
+                })()}
+              </div>
+            ) : (
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-muted uppercase tracking-widest">Total</span>
+                <span className="text-base font-bold text-teal tabular-nums">{fmtKsh(computedTotal)}</span>
+              </div>
+            )}
+          </div>
+
+          {/* Actions */}
+          <div className="flex gap-3 mt-2">
+            <button onClick={onClose} disabled={saving}
+              className="flex-1 py-2.5 rounded-xl bg-surface2 border border-white/8 text-muted text-sm font-semibold hover:text-slate-100 disabled:opacity-50">
+              Cancel
+            </button>
+            <button onClick={save} disabled={saving}
+              className="flex-1 py-2.5 rounded-xl bg-teal/15 border border-teal/30 text-teal text-sm font-bold disabled:opacity-50 flex items-center justify-center gap-2">
+              {saving && <span className="w-3.5 h-3.5 rounded-full border-2 border-teal border-t-transparent animate-spin" />}
+              ✓ Save Changes
+            </button>
+          </div>
+        </div>
       </motion.div>
     </>
   );
@@ -987,10 +1287,36 @@ ${rawText}`;
               className="w-full px-3 py-2.5 rounded-xl bg-surface2 border border-white/8 text-slate-100 text-sm outline-none focus:border-teal/40" />
           </div>
 
-          {/* Computed total */}
-          <div className="flex items-center justify-between bg-surface2 border border-white/8 rounded-xl px-4 py-3">
-            <span className="text-xs font-bold text-muted uppercase tracking-widest">Total</span>
-            <span className="text-base font-bold text-teal tabular-nums">{fmtKsh(computedTotal)}</span>
+          {/* Computed total with Kenya VAT 16% breakdown */}
+          <div className="rounded-xl bg-surface2 border border-white/8 px-4 py-3">
+            {computedTotal > 0 ? (
+              <div className="flex flex-col gap-1">
+                {(() => {
+                  const { base, vat } = splitVAT(computedTotal);
+                  return (
+                    <>
+                      <div className="flex items-center justify-between text-xs text-muted">
+                        <span>Excl. VAT</span>
+                        <span className="tabular-nums">{fmtKsh(base)}</span>
+                      </div>
+                      <div className="flex items-center justify-between text-xs text-muted">
+                        <span>VAT (16%)</span>
+                        <span className="tabular-nums">{fmtKsh(vat)}</span>
+                      </div>
+                      <div className="flex items-center justify-between border-t border-white/8 pt-2 mt-0.5">
+                        <span className="text-xs font-bold text-muted uppercase tracking-widest">Total (incl. VAT)</span>
+                        <span className="text-base font-bold text-teal tabular-nums">{fmtKsh(computedTotal)}</span>
+                      </div>
+                    </>
+                  );
+                })()}
+              </div>
+            ) : (
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-muted uppercase tracking-widest">Total</span>
+                <span className="text-base font-bold text-teal tabular-nums">{fmtKsh(computedTotal)}</span>
+              </div>
+            )}
           </div>
 
           {/* Actions */}

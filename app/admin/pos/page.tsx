@@ -36,10 +36,11 @@ export default function PosPage() {
 type CartUnit = 'piece' | 'box';
 
 interface CartItem {
-  product:   Product;
-  qty:       number;
-  unit:      CartUnit;        // 'box' means bulk unit (could be box/roll/drum — labeled via display_unit)
-  sellPrice: number | null;   // per-unit sell price for THIS sale; null = give-away / not recorded
+  product:      Product;
+  qty:          number;
+  unit:         CartUnit;
+  sellPrice:    number | null;
+  groupChoices: Record<string, number>;  // component_product_id keyed by choice_group name
 }
 
 // Does this product have a bulk unit (box/roll/etc.)? Gate on
@@ -93,6 +94,15 @@ function deductFromLocation(pcs: number, bx: number, qty: number, unit: CartUnit
 function addToLocation(pcs: number, bx: number, qty: number, unit: CartUnit) {
   if (unit === 'box') return { quantity: pcs, box_quantity: bx + qty };
   return { quantity: pcs + qty, box_quantity: bx };
+}
+
+// Kenya VAT 16% — prices in DB are already tax-inclusive.
+// Returns the VAT portion and the pre-tax base so we can display the
+// breakdown without adding any extra charge.
+function splitVAT(totalIncl: number) {
+  const vat  = Math.round(totalIncl * 16 / 116);
+  const base = totalIncl - vat;
+  return { base, vat };
 }
 
 interface ModalState {
@@ -215,7 +225,7 @@ function PosDashboard() {
       // a whole box/roll.
       const max = maxForProduct(product, 'piece');
       if (max < 1) { blocked = true; blockedMax = 0; blockedUnit = 'piece'; return prev; }
-      return [...prev, { product, qty: 1, unit: 'piece', sellPrice: defaultSellPrice(product, 'piece') }];
+      return [...prev, { product, qty: 1, unit: 'piece', sellPrice: defaultSellPrice(product, 'piece'), groupChoices: {} }];
     });
     barcodeRef.current?.focus();
     if (blocked) {
@@ -276,7 +286,13 @@ function PosDashboard() {
   // differ from the catalog selling_price due to a discount or markup
   // at checkout). It's appended to the movement note so the History
   // page can show what each line actually sold for.
-  async function sellOneItem(p: Product, qty: number, unit: CartUnit, sellPrice: number | null) {
+  async function sellOneItem(
+    p: Product,
+    qty: number,
+    unit: CartUnit,
+    sellPrice: number | null,
+    groupChoices: Record<string, number> = {},
+  ) {
     const pid = p.product_id;
     const ppb = p.pieces_per_box ?? 0;
     const isBoxMode = unit === 'box' && ppb > 0;
@@ -301,9 +317,6 @@ function PosDashboard() {
     const fromCurPieces   = Math.min(movPieces, totalCur);
     const fromOtherPieces = movPieces - fromCurPieces;
 
-    // Build the price suffix once — appended to every movement note
-    // for this sale so each line in History carries the price the
-    // item actually sold for.
     const unitLbl = unitLabel(p, unit).toLowerCase();
     const priceSuffix = sellPrice != null
       ? ` · ${qty} ${unitLbl}${qty === 1 ? '' : 's'} @ Ksh ${sellPrice} = Ksh ${(qty * sellPrice).toLocaleString('en-KE')}`
@@ -312,11 +325,8 @@ function PosDashboard() {
     if (fromCurPieces > 0) {
       let newState: { quantity: number; box_quantity: number };
       if (isBoxMode && fromCurPieces === movPieces) {
-        // Whole sale fits in current location and user wanted boxes:
-        // use box-mode deduction so we draw from box_quantity first.
         newState = deductFromLocation(curPcs, curBx, qty, 'box', ppb);
       } else {
-        // Piece mode (drains loose first, breaks boxes only if needed).
         newState = deductFromLocation(curPcs, curBx, fromCurPieces, 'piece', ppb);
       }
       await upsertStock(pid, locId, newState);
@@ -324,18 +334,45 @@ function PosDashboard() {
     }
 
     if (fromOtherPieces > 0) {
-      // Overflow path — always treat the other location's stock as a
-      // piece pool. Breaks boxes if needed.
       const newState = deductFromLocation(otherPcs, otherBx, fromOtherPieces, 'piece', ppb);
       await upsertStock(pid, otherId, newState);
       await logMovement(pid, otherId, null, fromOtherPieces, 'SALE', `Sold from ${otherName} (POS overflow)${priceSuffix}`);
     }
+
+    // Deduct components when selling. Uses the same box-aware logic as
+    // AdjustStockModal: deductFromLocation handles box_quantity properly.
+    const productComps = componentMap[pid] ?? [];
+    if (productComps.length > 0) {
+      const alwaysComps = productComps.filter(c => !c.choice_group);
+      const cgMap: Record<string, typeof productComps> = {};
+      for (const c of productComps) {
+        if (c.choice_group) (cgMap[c.choice_group] ??= []).push(c);
+      }
+      const pickedFromGroups = Object.keys(cgMap)
+        .map(g => cgMap[g].find(c => c.component_product_id === groupChoices[g]))
+        .filter((c): c is NonNullable<typeof c> => Boolean(c));
+      for (const comp of [...alwaysComps, ...pickedFromGroups]) {
+        const cid    = comp.component_product_id;
+        const cPpb   = products.find(pr => pr.product_id === cid)?.pieces_per_box ?? 0;
+        const srcPcs = (location === 'back' ? backStockMap : mainStockMap)[cid] || 0;
+        const srcBx  = (location === 'back' ? backBoxMap   : mainBoxMap  )[cid] || 0;
+        const movComp = movPieces * comp.quantity;
+        const raw = deductFromLocation(srcPcs, srcBx, movComp, 'piece', cPpb);
+        await upsertStock(cid, locId, { quantity: Math.max(0, raw.quantity), box_quantity: Math.max(0, raw.box_quantity) });
+        await logMovement(cid, locId, null, movComp, 'AUTO_DEDUCT', 'Auto: component of ' + p.product_name);
+      }
+    }
   }
 
   // Transfer `qty` of `unit` for `p` from back godown to main store.
-  // Mirrors AdjustStockModal's transfer logic so box columns move
-  // cleanly between locations.
-  async function transferOneItem(p: Product, qty: number, unit: CartUnit) {
+  // Also transfers all components (always-deducted + chosen group picks)
+  // so the component stock in each location stays accurate.
+  async function transferOneItem(
+    p: Product,
+    qty: number,
+    unit: CartUnit,
+    groupChoices: Record<string, number> = {},
+  ) {
     const pid = p.product_id;
     const ppb = p.pieces_per_box ?? 0;
     const backId = 2, mainId = 1;
@@ -350,11 +387,40 @@ function PosDashboard() {
       throw new Error(`Back Godown only has ${backTotal} ${unitLabel(p, 'piece').toLowerCase()}s of ${p.product_name}`);
     }
 
+    // Move main product
     const newBack = deductFromLocation(backPcs, backBx, qty, unit, ppb);
     const newMain = addToLocation(mainPcs, mainBx, qty, unit);
     await upsertStock(pid, backId, newBack);
     await upsertStock(pid, mainId, newMain);
     await logMovement(pid, backId, mainId, movPieces, 'TRANSFER', 'Moved from Back Godown to Main Store');
+
+    // Move components with the product
+    const productComps = componentMap[pid] ?? [];
+    if (productComps.length > 0) {
+      const alwaysComps = productComps.filter(c => !c.choice_group);
+      const cgMap: Record<string, typeof productComps> = {};
+      for (const c of productComps) {
+        if (c.choice_group) (cgMap[c.choice_group] ??= []).push(c);
+      }
+      const pickedFromGroups = Object.keys(cgMap)
+        .map(g => cgMap[g].find(c => c.component_product_id === groupChoices[g]))
+        .filter((c): c is NonNullable<typeof c> => Boolean(c));
+      for (const comp of [...alwaysComps, ...pickedFromGroups]) {
+        const cid     = comp.component_product_id;
+        const cPpb    = products.find(pr => pr.product_id === cid)?.pieces_per_box ?? 0;
+        const movComp = movPieces * comp.quantity;
+        const cBackPcs = backStockMap[cid] || 0;
+        const cBackBx  = backBoxMap[cid]   || 0;
+        const cMainPcs = mainStockMap[cid] || 0;
+        const cMainBx  = mainBoxMap[cid]   || 0;
+        // Box-aware deduction from back
+        const rawBack = deductFromLocation(cBackPcs, cBackBx, movComp, 'piece', cPpb);
+        await upsertStock(cid, backId, { quantity: Math.max(0, rawBack.quantity), box_quantity: Math.max(0, rawBack.box_quantity) });
+        // Add to main as loose pieces
+        await upsertStock(cid, mainId, { quantity: cMainPcs + movComp, box_quantity: cMainBx });
+        await logMovement(cid, backId, mainId, movComp, 'TRANSFER', 'Auto: component of ' + p.product_name);
+      }
+    }
   }
 
   // Writes a single `sales` row + N `sale_items` rows so each
@@ -413,11 +479,24 @@ function PosDashboard() {
     }
   }
 
+  function getMissingChoices(item: CartItem): string[] {
+    const comps = componentMap[item.product.product_id] ?? [];
+    const groups = [...new Set(comps.filter(c => c.choice_group).map(c => c.choice_group!))];
+    return groups.filter(g => item.groupChoices[g] == null);
+  }
+
   async function processCart(action: 'sold' | 'to_main') {
     if (cart.length === 0) return;
+    // Validate choice-group components for both sell and transfer
+    for (const item of cart) {
+      const missing = getMissingChoices(item);
+      if (missing.length > 0) {
+        showToast(`Pick a ${missing[0]} for ${item.product.product_name}`, 'error');
+        setCartOpen(true);
+        return;
+      }
+    }
     if (action === 'to_main') {
-      // to_main only moves from Back Godown — validate every cart row
-      // has enough back-godown stock for its qty in its chosen unit.
       const overflows = cart.filter(it => {
         const ppb = it.product.pieces_per_box ?? 0;
         const movPieces = it.unit === 'box' && ppb > 0 ? it.qty * ppb : it.qty;
@@ -433,9 +512,9 @@ function PosDashboard() {
     try {
       for (const item of cart) {
         if (action === 'sold') {
-          await sellOneItem(item.product, item.qty, item.unit, item.sellPrice);
+          await sellOneItem(item.product, item.qty, item.unit, item.sellPrice, item.groupChoices);
         } else {
-          await transferOneItem(item.product, item.qty, item.unit);
+          await transferOneItem(item.product, item.qty, item.unit, item.groupChoices);
         }
       }
       // After all stock + movement writes succeed, snapshot the cart
@@ -457,6 +536,12 @@ function PosDashboard() {
   }
 
   async function processItem(item: CartItem, action: 'sold' | 'to_main') {
+    // Validate choice-group components for both sell and transfer
+    const missing = getMissingChoices(item);
+    if (missing.length > 0) {
+      showToast(`Pick a ${missing[0]} for ${item.product.product_name}`, 'error');
+      return;
+    }
     if (action === 'to_main') {
       const ppb = item.product.pieces_per_box ?? 0;
       const movPieces = item.unit === 'box' && ppb > 0 ? item.qty * ppb : item.qty;
@@ -469,10 +554,10 @@ function PosDashboard() {
     setProcessing(true);
     try {
       if (action === 'sold') {
-        await sellOneItem(item.product, item.qty, item.unit, item.sellPrice);
+        await sellOneItem(item.product, item.qty, item.unit, item.sellPrice, item.groupChoices);
         await recordSale([item]);
       } else {
-        await transferOneItem(item.product, item.qty, item.unit);
+        await transferOneItem(item.product, item.qty, item.unit, item.groupChoices);
       }
       setCart(c => c.filter(i => i.product.product_id !== item.product.product_id));
       showToast(`${action === 'sold' ? 'Sold' : 'Moved'}: ${item.product.product_name} ✓`, 'success');
@@ -693,9 +778,6 @@ function PosDashboard() {
                               onClick={() => setCart(c => c.map(i => {
                                 if (i.product.product_id !== item.product.product_id) return i;
                                 const newMax = maxForProduct(i.product, u);
-                                // Keep a custom price if the user already
-                                // overrode it; otherwise pick up the
-                                // catalog default for the new unit.
                                 const wasDefault = i.sellPrice == null || i.sellPrice === defaultSellPrice(i.product, i.unit);
                                 return {
                                   ...i,
@@ -704,7 +786,7 @@ function PosDashboard() {
                                   sellPrice: wasDefault ? defaultSellPrice(i.product, u) : i.sellPrice,
                                 };
                               }))}
-                              className={`flex-1 py-1 rounded text-[10px] font-bold border transition-all ${
+                              className={`flex-1 py-1.5 rounded flex flex-col items-center text-[10px] font-bold border transition-all ${
                                 isSel
                                   ? u === 'piece'
                                     ? 'border-teal/40 bg-teal/10 text-teal'
@@ -712,13 +794,81 @@ function PosDashboard() {
                                   : 'border-white/10 bg-surface text-muted hover:text-slate-100'
                               }`}
                             >
-                              {unitLabel(item.product, u)}
-                              {u === 'box' && ppb > 0 ? ` (${ppb}/ea)` : ''}
+                              <span>{unitLabel(item.product, u)}</span>
+                              <span className="text-[8px] font-normal opacity-70 leading-tight">
+                                {u === 'box' ? `×${ppb} pcs` : '×1 pc'}
+                              </span>
                             </button>
                           );
                         })}
                       </div>
                     )}
+
+                    {/* Component deduction info + choice group pickers */}
+                    {(() => {
+                      const comps = componentMap[item.product.product_id] ?? [];
+                      if (comps.length === 0) return null;
+                      const always = comps.filter(c => !c.choice_group);
+                      const groups: Record<string, typeof comps> = {};
+                      for (const c of comps) {
+                        if (c.choice_group) (groups[c.choice_group] ??= []).push(c);
+                      }
+                      const groupNames = Object.keys(groups);
+                      return (
+                        <div className="mb-2 flex flex-col gap-1.5">
+                          {always.length > 0 && (
+                            <div className="rounded-lg bg-surface border border-white/8 px-2.5 py-2">
+                              <p className="text-[9px] font-bold text-muted uppercase tracking-widest mb-1">🔧 Deducts:</p>
+                              <ul className="flex flex-col gap-0.5">
+                                {always.map(c => {
+                                  const name = products.find(pr => pr.product_id === c.component_product_id)?.product_name ?? `#${c.component_product_id}`;
+                                  return (
+                                    <li key={c.component_product_id} className="text-[10px] text-slate-300">
+                                      • {name} ×{c.quantity * item.qty}
+                                    </li>
+                                  );
+                                })}
+                              </ul>
+                            </div>
+                          )}
+                          {groupNames.map(groupName => {
+                            const members = groups[groupName];
+                            const picked  = item.groupChoices[groupName];
+                            return (
+                              <div key={groupName} className="rounded-lg bg-gold/5 border border-gold/30 px-2.5 py-2">
+                                <p className="text-[9px] font-bold text-gold uppercase tracking-widest mb-1.5">
+                                  Pick {groupName}
+                                </p>
+                                <div className="flex flex-col gap-1">
+                                  {members.map(c => {
+                                    const name     = products.find(pr => pr.product_id === c.component_product_id)?.product_name ?? `#${c.component_product_id}`;
+                                    const isPicked = picked === c.component_product_id;
+                                    return (
+                                      <button
+                                        key={c.component_product_id}
+                                        onClick={() => setCart(prev => prev.map(i =>
+                                          i.product.product_id !== item.product.product_id ? i : {
+                                            ...i,
+                                            groupChoices: { ...i.groupChoices, [groupName]: c.component_product_id },
+                                          }
+                                        ))}
+                                        className={`text-left px-2 py-1.5 rounded border text-[10px] font-semibold transition-all ${
+                                          isPicked
+                                            ? 'border-gold bg-gold/15 text-gold'
+                                            : 'border-white/8 bg-surface2 text-slate-300 hover:border-gold/40'
+                                        }`}
+                                      >
+                                        {isPicked && '✓ '}{name} <span className="text-muted font-normal">×{c.quantity}/unit</span>
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      );
+                    })()}
 
                     <div className="flex items-center gap-2 mb-2">
                       <button
@@ -787,10 +937,16 @@ function PosDashboard() {
                       </div>
                     )}
 
+                    {(() => {
+                      const missing = getMissingChoices(item);
+                      return missing.length > 0 ? (
+                        <p className="text-[9px] text-gold mb-1.5">⚠ Pick {missing.join(', ')} to sell</p>
+                      ) : null;
+                    })()}
                     <div className="flex gap-1.5">
                       <button
                         onClick={() => processItem(item, 'sold')}
-                        disabled={processing}
+                        disabled={processing || getMissingChoices(item).length > 0}
                         className="flex-1 py-1 rounded-lg bg-danger/10 border border-danger/20 text-danger text-[10px] font-bold hover:bg-danger/20 disabled:opacity-50 transition-all"
                       >Sold</button>
                       {location === 'back' && (
@@ -808,16 +964,27 @@ function PosDashboard() {
 
               {cart.length > 0 && (
                 <div className="p-3 border-t border-white/8 flex flex-col gap-2 shrink-0">
-                  {/* Grand total — sum of qty*sellPrice across rows
-                      that have a price set. Useful as a quick
-                      bill-total sanity check before tapping Sold. */}
+                  {/* Grand total with Kenya VAT 16% breakdown.
+                      Prices are stored tax-inclusive — no extra charge,
+                      just split the already-included VAT for display. */}
                   {(() => {
                     const total = cart.reduce((s, i) => s + (i.sellPrice ?? 0) * i.qty, 0);
                     if (total <= 0) return null;
+                    const { base, vat } = splitVAT(total);
                     return (
-                      <div className="flex items-center justify-between bg-surface2 border border-teal/20 rounded-xl px-3 py-2">
-                        <span className="text-[10px] font-bold text-muted uppercase tracking-widest">Total</span>
-                        <span className="text-sm font-bold text-teal tabular-nums">Ksh {total.toLocaleString('en-KE')}</span>
+                      <div className="bg-surface2 border border-teal/20 rounded-xl px-3 py-2 flex flex-col gap-0.5">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[9px] text-muted">Excl. VAT</span>
+                          <span className="text-[10px] text-muted tabular-nums">Ksh {base.toLocaleString('en-KE')}</span>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <span className="text-[9px] text-muted">VAT (16%)</span>
+                          <span className="text-[10px] text-muted tabular-nums">Ksh {vat.toLocaleString('en-KE')}</span>
+                        </div>
+                        <div className="flex items-center justify-between border-t border-white/8 pt-1 mt-0.5">
+                          <span className="text-[10px] font-bold text-muted uppercase tracking-widest">Total (incl. VAT)</span>
+                          <span className="text-sm font-bold text-teal tabular-nums">Ksh {total.toLocaleString('en-KE')}</span>
+                        </div>
                       </div>
                     );
                   })()}
@@ -942,8 +1109,8 @@ function PosProductCard({ product: p, index, location, stockMap, boxMap, onAdjus
 
         <div className="flex flex-col items-center min-w-8.5">
           <span className="text-lg font-bold text-slate-200 tabular-nums leading-none">{bigNum}</span>
-          {fmt.unitBadge === 'BOX' && ppb > 0 && (
-            <span className="text-[8px] text-muted leading-none">{`${bigNum}bx+${total % ppb}pc`}</span>
+          {fmt.unitBadge === 'BOX' && ppb > 0 && total % ppb > 0 && (
+            <span className="text-[8px] text-muted leading-none">{`+${total % ppb}pc`}</span>
           )}
           <span className="text-[8px] font-bold text-muted/60 uppercase tracking-wider">{fmt.unitBadge}</span>
         </div>

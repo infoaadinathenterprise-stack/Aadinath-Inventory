@@ -176,31 +176,53 @@ export default function AdjustStockModal({
         await logMovement(product.product_id, null, locId, movQty, TYPE_MAP[selectedAction], NOTE_MAP[selectedAction]);
       }
 
-      // Deduct components for outbound actions (movQty is already in pieces).
-      // Always-deducted comps + the user's pick from each choice group.
+      // Apply components for outbound actions.
+      // Sold   → deduct from source only (components consumed).
+      // to_front / to_back → deduct from source AND add to destination
+      //                      (components travel with the product).
+      // Box-aware: uses the component's own pieces_per_box so
+      // box_quantity is properly decremented when whole boxes break.
       if (['sold', 'to_front', 'to_back'].includes(selectedAction)) {
+        const isTransferAction = selectedAction === 'to_front' || selectedAction === 'to_back';
         const pickedFromGroups = choiceGroupNames
           .map(g => choiceGroupMap[g].find(c => c.component_product_id === groupChoices[g]))
           .filter((c): c is NonNullable<typeof c> => Boolean(c));
         const components = [...alwaysComps, ...pickedFromGroups];
+
+        // Box-aware piece deduction helper (mirrors deductFrom but for an
+        // arbitrary piece count and a different ppb than the parent product).
+        function deductCompPieces(pcs: number, bx: number, pieces: number, cPpb: number) {
+          const fromLoose     = Math.min(pieces, pcs);
+          const fromBoxPieces = pieces - fromLoose;
+          const boxesToBreak  = cPpb > 0 ? Math.ceil(fromBoxPieces / cPpb) : 0;
+          return {
+            quantity:     Math.max(0, pcs - fromLoose + boxesToBreak * cPpb - fromBoxPieces),
+            box_quantity: Math.max(0, bx - boxesToBreak),
+          };
+        }
+
         for (const comp of components) {
-          const compCurQty = location === 'back'
-            ? (backStockMap[comp.component_product_id] || 0)
-            : (mainStockMap[comp.component_product_id] || 0);
-          const deductQty = movQty * comp.quantity;
-          await upsertStock(
-            comp.component_product_id,
-            locId,
-            { quantity: Math.max(0, compCurQty - deductQty) },
-          );
-          await logMovement(
-            comp.component_product_id,
-            locId,
-            null,
-            deductQty,
-            TYPE_MAP[selectedAction],
-            'Auto: component of ' + product.product_name,
-          );
+          const cid    = comp.component_product_id;
+          const cPpb   = allProducts.find(p => p.product_id === cid)?.pieces_per_box ?? 0;
+          const movComp = movQty * comp.quantity;   // pieces of this component to handle
+
+          // Source stock
+          const srcPcs = location === 'back' ? (backStockMap[cid] || 0) : (mainStockMap[cid] || 0);
+          const srcBx  = location === 'back' ? (backBoxMap[cid]   || 0) : (mainBoxMap[cid]   || 0);
+
+          // Deduct from source (box-aware)
+          await upsertStock(cid, locId, deductCompPieces(srcPcs, srcBx, movComp, cPpb));
+
+          if (isTransferAction) {
+            // Add to destination as loose pieces
+            const dstPcs = location === 'back' ? (mainStockMap[cid] || 0) : (backStockMap[cid] || 0);
+            const dstBx  = location === 'back' ? (mainBoxMap[cid]   || 0) : (backBoxMap[cid]   || 0);
+            await upsertStock(cid, otherId, { quantity: dstPcs + movComp, box_quantity: dstBx });
+            await logMovement(cid, locId, otherId, movComp, 'TRANSFER', 'Auto: component of ' + product.product_name);
+          } else {
+            // Sold — components consumed, not moved
+            await logMovement(cid, locId, null, movComp, 'AUTO_DEDUCT', 'Auto: component of ' + product.product_name);
+          }
         }
       }
 

@@ -395,12 +395,17 @@ function ProductModal({
 
       for (const { locId, qty } of locs) {
         const { data: ex } = await supabase.from('stock_by_location').select('id, quantity').eq('product_id', productId).eq('location_id', locId).single();
+        const oldQty = ex?.quantity ?? 0;
         if (ex) {
           await supabase.from('stock_by_location').update({ quantity: qty }).eq('id', ex.id);
         } else {
           await supabase.from('stock_by_location').insert({ product_id: productId, location_id: locId, quantity: qty });
         }
-        if (!editing && qty > 0) {
+        if (editing) {
+          const delta = qty - oldQty;
+          if (delta > 0)  await logMovement(productId, null, locId,  delta, 'ADJUSTMENT_IN',  'Stock adjusted via product form');
+          if (delta < 0)  await logMovement(productId, locId, null, -delta, 'ADJUSTMENT_OUT', 'Stock adjusted via product form');
+        } else if (qty > 0) {
           await logMovement(productId, null, locId, qty, 'ADJUSTMENT_IN', 'Initial stock');
         }
       }
