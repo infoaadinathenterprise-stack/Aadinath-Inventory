@@ -290,41 +290,31 @@ function InventoryAuditDashboard() {
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '10.5px' }}>
             <thead>
               <tr style={{ backgroundColor: '#e8e8e8' }}>
-                <th style={{ border: '1px solid #bbb', padding: '5px 6px', textAlign: 'left',   width: '28px'  }}>#</th>
+                <th style={{ border: '1px solid #bbb', padding: '5px 6px', textAlign: 'left',  width: '28px'  }}>#</th>
                 <th style={{ border: '1px solid #bbb', padding: '5px 6px', textAlign: 'left'                  }}>Product Name</th>
-                <th style={{ border: '1px solid #bbb', padding: '5px 6px', textAlign: 'left',   width: '90px'  }}>Category</th>
-                <th style={{ border: '1px solid #bbb', padding: '5px 6px', textAlign: 'center', width: '72px'  }}>System Stock</th>
-                <th style={{ border: '1px solid #bbb', padding: '5px 6px', textAlign: 'center', width: '80px'  }}>Physical Count</th>
-                <th style={{ border: '1px solid #bbb', padding: '5px 6px', textAlign: 'left',   width: '100px' }}>Notes</th>
+                <th style={{ border: '1px solid #bbb', padding: '5px 6px', textAlign: 'left',  width: '100px' }}>Category</th>
+                <th style={{ border: '1px solid #bbb', padding: '5px 6px', textAlign: 'center',width: '100px' }}>Physical Count</th>
+                <th style={{ border: '1px solid #bbb', padding: '5px 6px', textAlign: 'left',  width: '140px' }}>Notes</th>
               </tr>
             </thead>
             <tbody>
-              {filtered.map((row, i) => {
-                const ppb  = row.product.pieces_per_box ?? 0;
-                const tot  = row.quantity + row.box_quantity * ppb;
-                const zero = tot === 0;
-                return (
-                  <tr key={row.product.product_id}
-                    style={{ backgroundColor: i % 2 === 0 ? '#fff' : '#f8f8f8', pageBreakInside: 'avoid' }}>
-                    <td style={{ border: '1px solid #ccc', padding: '4px 6px', color: '#666' }}>{i + 1}</td>
-                    <td style={{ border: '1px solid #ccc', padding: '4px 6px' }}>
-                      <span style={{ fontWeight: 600 }}>{row.product.product_name}</span>
-                      {row.product.brand
-                        ? <span style={{ color: '#777', fontSize: '9.5px' }}> · {row.product.brand}</span>
-                        : null}
-                    </td>
-                    <td style={{ border: '1px solid #ccc', padding: '4px 6px', color: '#555' }}>
-                      {row.product.type ?? '—'}
-                    </td>
-                    <td style={{ border: '1px solid #ccc', padding: '4px 6px', textAlign: 'center',
-                      fontWeight: 600, color: zero ? '#cc0000' : '#111' }}>
-                      {zero ? '0' : stockPrint(row)}
-                    </td>
-                    <td style={{ border: '1px solid #ccc', padding: '4px 6px' }}>&nbsp;</td>
-                    <td style={{ border: '1px solid #ccc', padding: '4px 6px' }}>&nbsp;</td>
-                  </tr>
-                );
-              })}
+              {filtered.map((row, i) => (
+                <tr key={row.product.product_id}
+                  style={{ backgroundColor: i % 2 === 0 ? '#fff' : '#f8f8f8', pageBreakInside: 'avoid' }}>
+                  <td style={{ border: '1px solid #ccc', padding: '4px 6px', color: '#666' }}>{i + 1}</td>
+                  <td style={{ border: '1px solid #ccc', padding: '4px 6px' }}>
+                    <span style={{ fontWeight: 600 }}>{row.product.product_name}</span>
+                    {row.product.brand
+                      ? <span style={{ color: '#777', fontSize: '9.5px' }}> · {row.product.brand}</span>
+                      : null}
+                  </td>
+                  <td style={{ border: '1px solid #ccc', padding: '4px 6px', color: '#555' }}>
+                    {row.product.type ?? '—'}
+                  </td>
+                  <td style={{ border: '1px solid #ccc', padding: '4px 6px' }}>&nbsp;</td>
+                  <td style={{ border: '1px solid #ccc', padding: '4px 6px' }}>&nbsp;</td>
+                </tr>
+              ))}
             </tbody>
           </table>
 
