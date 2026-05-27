@@ -818,7 +818,7 @@ function Dashboard() {
     // StatsBar + title row + ProductList's filter bar all live in the
     // non-scrollable region; only the product card list inside
     // ProductList scrolls (configured below in that component).
-    <div className="h-dvh bg-navy flex flex-col overflow-hidden">
+    <div className="h-dvh landscape:h-auto bg-navy flex flex-col overflow-hidden landscape:overflow-y-auto">
       <AdminNavbar onLogout={handleLogout} />
 
       <main className="pt-14 max-w-7xl mx-auto w-full flex-1 flex flex-col min-h-0">

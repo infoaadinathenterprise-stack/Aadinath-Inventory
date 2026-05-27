@@ -225,7 +225,7 @@ export default function ProductList({
         </p>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 flex-1 overflow-y-auto min-h-0 pb-6 auto-rows-min">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 flex-1 landscape:flex-none overflow-y-auto landscape:overflow-visible min-h-0 pb-6 auto-rows-min">
         <AnimatePresence mode="popLayout">
           {visible.length === 0 ? (
             <motion.div
