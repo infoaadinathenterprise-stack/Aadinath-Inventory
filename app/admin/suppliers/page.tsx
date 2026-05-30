@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import { supabase } from '@/lib/supabase';
 import type { Supplier } from '@/lib/types';
-import { SESSION_KEY } from '@/lib/types';
+import { SESSION_KEY, ROLE_KEY } from '@/lib/types';
 import AdminNavbar from '../components/AdminNavbar';
 import Toast, { type ToastState } from '../components/Toast';
 
@@ -31,7 +31,9 @@ function SuppliersDashboard() {
   const router = useRouter();
 
   useEffect(() => {
-    if (typeof window === 'undefined' || localStorage.getItem(SESSION_KEY) !== '1') router.replace('/admin');
+    const ok   = typeof window !== 'undefined' && localStorage.getItem(SESSION_KEY) === '1';
+    const role = typeof window !== 'undefined' ? localStorage.getItem(ROLE_KEY) : null;
+    if (!ok || role !== 'admin') router.replace('/admin');
   }, [router]);
 
   const load = useCallback(async () => {

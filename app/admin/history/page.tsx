@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import { supabase } from '@/lib/supabase';
 import type { StockMovement, Product } from '@/lib/types';
-import { SESSION_KEY } from '@/lib/types';
+import { SESSION_KEY, ROLE_KEY } from '@/lib/types';
 import AdminNavbar from '../components/AdminNavbar';
 import Toast, { type ToastState } from '../components/Toast';
 
@@ -80,7 +80,9 @@ function HistoryDashboard() {
   const router = useRouter();
 
   useEffect(() => {
-    if (typeof window === 'undefined' || localStorage.getItem(SESSION_KEY) !== '1') router.replace('/admin');
+    const ok   = typeof window !== 'undefined' && localStorage.getItem(SESSION_KEY) === '1';
+    const role = typeof window !== 'undefined' ? localStorage.getItem(ROLE_KEY) : null;
+    if (!ok || role !== 'admin') router.replace('/admin');
   }, [router]);
 
   const load = useCallback(async () => {
@@ -88,7 +90,7 @@ function HistoryDashboard() {
     setLoadError(null);
     const [movRes, reqRes, prodRes] = await Promise.all([
       supabase.from('stock_movements').select('*').order('id', { ascending: false }).limit(500),
-      supabase.from('stock_requests').select('*').order('request_id', { ascending: false }).limit(500),
+      supabase.from('stock_requests').select('*').neq('status', 'PENDING').order('request_id', { ascending: false }).limit(500),
       // Load enough fields to render unit-of-measure, prices, brand,
       // model on the detail panel without a follow-up query.
       supabase.from('products').select('product_id, product_name, brand, model, unit_of_measure, display_unit, pieces_per_box, selling_price, buying_price, box_selling_price'),

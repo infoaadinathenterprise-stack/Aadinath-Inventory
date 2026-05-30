@@ -7,7 +7,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useProducts } from '@/lib/hooks/useProducts';
 import { upsertStock, logMovement } from '@/lib/stockActions';
 import type { Product, Location } from '@/lib/types';
-import { SESSION_KEY, LOC_ID } from '@/lib/types';
+import { SESSION_KEY, LOC_ID, ROLE_KEY } from '@/lib/types';
 
 const LABELS_PER_PAGE = 24;
 type SortBy = 'recent' | 'name';
@@ -19,7 +19,9 @@ export default function LabelsPage() {
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    if (typeof window === 'undefined' || localStorage.getItem(SESSION_KEY) !== '1') {
+    const ok   = typeof window !== 'undefined' && localStorage.getItem(SESSION_KEY) === '1';
+    const role = typeof window !== 'undefined' ? localStorage.getItem(ROLE_KEY) : null;
+    if (!ok || role !== 'admin') {
       router.replace('/admin');
     } else {
       setReady(true);

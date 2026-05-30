@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import { supabase } from '@/lib/supabase';
 import type { Purchase, PurchaseItem, Supplier, Product } from '@/lib/types';
-import { SESSION_KEY } from '@/lib/types';
+import { SESSION_KEY, ROLE_KEY } from '@/lib/types';
 import { logMovement } from '@/lib/stockActions';
 import AdminNavbar from '../components/AdminNavbar';
 import Toast, { type ToastState } from '../components/Toast';
@@ -48,8 +48,9 @@ export default function PurchasesPage() {
   const [authed, setAuthed] = useState<boolean | null>(null);
   const router = useRouter();
   useEffect(() => {
-    const ok = typeof window !== 'undefined' && localStorage.getItem(SESSION_KEY) === '1';
-    if (!ok) router.replace('/admin');
+    const ok   = typeof window !== 'undefined' && localStorage.getItem(SESSION_KEY) === '1';
+    const role = typeof window !== 'undefined' ? localStorage.getItem(ROLE_KEY) : null;
+    if (!ok || role !== 'admin') router.replace('/admin');
     else setAuthed(true);
   }, [router]);
   if (authed === null) return <div className="min-h-screen bg-navy" />;

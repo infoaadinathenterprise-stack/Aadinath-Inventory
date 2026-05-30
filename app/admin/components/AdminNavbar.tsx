@@ -1,29 +1,40 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
+import { ROLE_KEY, type UserRole } from '@/lib/types';
 
 interface Props {
   onLogout: () => void;
 }
 
-const ADMIN_LINKS = [
-  { emoji: '📦', label: 'Inventory', href: '/admin' },
-  { emoji: '📊', label: 'Stats',     href: '/admin/stats' },
-  { emoji: '🛒', label: 'Sales',     href: '/admin/sales' },
-  { emoji: '📋', label: 'History',   href: '/admin/history' },
-  { emoji: '🧾', label: 'Purchases', href: '/admin/purchases' },
-  { emoji: '🏢', label: 'Suppliers', href: '/admin/suppliers' },
-  { emoji: '🏷️', label: 'Labels',    href: '/admin/labels' },
-  { emoji: '🏭', label: 'POS',       href: '/admin/pos' },
-  { emoji: '🗂️', label: 'Audit',     href: '/admin/inventory-audit' },
+const ALL_LINKS = [
+  { emoji: '📦', label: 'Inventory', href: '/admin',                   roles: ['admin', 'employee'] as UserRole[] },
+  { emoji: '📊', label: 'Stats',     href: '/admin/stats',             roles: ['admin'] as UserRole[] },
+  { emoji: '🛒', label: 'Sales',     href: '/admin/sales',             roles: ['admin'] as UserRole[] },
+  { emoji: '📋', label: 'History',   href: '/admin/history',           roles: ['admin'] as UserRole[] },
+  { emoji: '🧾', label: 'Purchases', href: '/admin/purchases',         roles: ['admin'] as UserRole[] },
+  { emoji: '🏢', label: 'Suppliers', href: '/admin/suppliers',         roles: ['admin'] as UserRole[] },
+  { emoji: '🏷️', label: 'Labels',    href: '/admin/labels',            roles: ['admin'] as UserRole[] },
+  { emoji: '🏭', label: 'POS',       href: '/admin/pos',               roles: ['admin', 'employee'] as UserRole[] },
+  { emoji: '🗂️', label: 'Audit',     href: '/admin/inventory-audit',   roles: ['admin', 'employee'] as UserRole[] },
+  { emoji: '✅', label: 'Approvals', href: '/admin/approvals',         roles: ['admin'] as UserRole[] },
+  { emoji: '👥', label: 'Staff',     href: '/admin/staff',             roles: ['admin'] as UserRole[] },
 ];
 
 export default function AdminNavbar({ onLogout }: Props) {
-  const [open, setOpen] = useState(false);
-  const pathname = usePathname();
+  const [open, setOpen]   = useState(false);
+  const [role, setRole]   = useState<UserRole>('admin');
+  const pathname          = usePathname();
+
+  useEffect(() => {
+    setRole((localStorage.getItem(ROLE_KEY) as UserRole) || 'admin');
+  }, []);
+
+  const links = ALL_LINKS.filter(l => l.roles.includes(role));
+  const isAdmin = role === 'admin';
 
   return (
     <>
@@ -33,13 +44,17 @@ export default function AdminNavbar({ onLogout }: Props) {
             <span className="font-bold text-base text-teal tracking-tight leading-none">
               Jay Aadinath<span className="text-gold">·</span>
             </span>
-            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-gold/15 border border-gold/30 text-gold uppercase tracking-widest">
-              Admin
+            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border uppercase tracking-widest ${
+              isAdmin
+                ? 'bg-gold/15 border-gold/30 text-gold'
+                : 'bg-teal/15 border-teal/30 text-teal'
+            }`}>
+              {isAdmin ? 'Admin' : 'Employee'}
             </span>
           </div>
 
           <div className="hidden md:flex items-center gap-1">
-            {ADMIN_LINKS.map(({ emoji, label, href }) => {
+            {links.map(({ emoji, label, href }) => {
               const active = pathname === href;
               return (
                 <Link
@@ -97,13 +112,19 @@ export default function AdminNavbar({ onLogout }: Props) {
               <div className="flex items-center justify-between px-5 h-14 border-b border-white/5">
                 <div className="flex items-center gap-2">
                   <span className="font-bold text-teal text-sm">Jay Aadinath<span className="text-gold">·</span></span>
-                  <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-gold/15 border border-gold/30 text-gold uppercase tracking-widest">Admin</span>
+                  <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full border uppercase tracking-widest ${
+                    isAdmin
+                      ? 'bg-gold/15 border-gold/30 text-gold'
+                      : 'bg-teal/15 border-teal/30 text-teal'
+                  }`}>
+                    {isAdmin ? 'Admin' : 'Employee'}
+                  </span>
                 </div>
                 <button onClick={() => setOpen(false)} className="w-7 h-7 flex items-center justify-center rounded-lg bg-surface2 text-muted hover:text-slate-100 transition-colors text-lg">×</button>
               </div>
 
-              <nav className="flex-1 px-3 py-5 flex flex-col gap-1">
-                {ADMIN_LINKS.map(({ emoji, label, href }) => {
+              <nav className="flex-1 px-3 py-5 flex flex-col gap-1 overflow-y-auto">
+                {links.map(({ emoji, label, href }) => {
                   const active = pathname === href;
                   return (
                     <Link

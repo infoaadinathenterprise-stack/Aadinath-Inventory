@@ -3,8 +3,8 @@
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { formatStock } from '@/lib/formatStock';
-import { upsertStock, logMovement } from '@/lib/stockActions';
-import type { Product, StockMap, AdjAction, Location, ComponentMap } from '@/lib/types';
+import { upsertStock, logMovement, submitPendingRequest } from '@/lib/stockActions';
+import type { Product, StockMap, AdjAction, Location, ComponentMap, UserRole } from '@/lib/types';
 import { LOC_ID } from '@/lib/types';
 
 interface Props {
@@ -17,6 +17,7 @@ interface Props {
   mainBoxMap:   StockMap;
   componentMap?: ComponentMap;
   allProducts?:  Product[];
+  userRole?:    UserRole;
   onClose:      () => void;
   onSuccess:    (msg: string) => void;
   onError:      (msg: string) => void;
@@ -45,6 +46,7 @@ export default function AdjustStockModal({
   product, location, direction,
   backStockMap, mainStockMap, backBoxMap, mainBoxMap,
   componentMap = {}, allProducts = [],
+  userRole = 'admin',
   onClose, onSuccess, onError, onDone,
 }: Props) {
   const [selectedAction, setSelectedAction] = useState<AdjAction | null>(null);
@@ -55,6 +57,41 @@ export default function AdjustStockModal({
   const [groupChoices, setGroupChoices] = useState<Record<string, number>>({});
 
   if (!product || !direction) return null;
+
+  // ── Employee: cannot subtract stock manually ─────────────────────────
+  if (userRole === 'employee' && direction === 'minus') {
+    return (
+      <AnimatePresence>
+        <motion.div
+          className="fixed inset-0 z-100 flex items-end sm:items-center justify-center bg-black/65 backdrop-blur-sm"
+          initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+          onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+        >
+          <motion.div
+            initial={{ opacity: 0, y: 60 }} animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 60 }}
+            transition={{ type: 'spring', damping: 20, stiffness: 260 }}
+            className="w-full max-w-sm bg-surface border border-white/8 rounded-t-3xl sm:rounded-2xl p-6 pb-8 sm:pb-6 shadow-2xl text-center"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="w-9 h-1 bg-white/15 rounded-full mx-auto mb-5 sm:hidden" />
+            <div className="text-4xl mb-3">🔒</div>
+            <p className="font-bold text-slate-100 text-base mb-2">Not Authorized</p>
+            <p className="text-xs text-muted leading-relaxed mb-6">
+              Only admins can reduce inventory.<br />
+              Contact your admin to make adjustments.
+            </p>
+            <button
+              onClick={onClose}
+              className="w-full py-3 rounded-xl border border-white/8 bg-surface2 text-muted text-sm font-semibold hover:border-white/20 transition-colors"
+            >
+              Close
+            </button>
+          </motion.div>
+        </motion.div>
+      </AnimatePresence>
+    );
+  }
 
   const ppb       = product.pieces_per_box || 0;
   const backQty   = backStockMap[product.product_id] || 0;
@@ -186,6 +223,21 @@ export default function AdjustStockModal({
 
     setSaving(true);
     try {
+      // ── Employee stock-in: submit for admin approval, don't touch stock ──
+      if (userRole === 'employee') {
+        const locName = location === 'back' ? 'Back Godown' : 'Main Store';
+        await submitPendingRequest(
+          product.product_id,
+          locId,
+          movQty,
+          `Stock-in request · ${locName}`,
+        );
+        onSuccess('Submitted for admin approval ✓');
+        onClose();
+        onDone();
+        return;
+      }
+
       // Rule: logMovement ALWAYS runs BEFORE upsertStock.
       // If logMovement throws (e.g. DB constraint), stock is untouched — no partial writes.
       if (selectedAction === 'sold') {
@@ -445,7 +497,7 @@ export default function AdjustStockModal({
                   : 'bg-linear-to-r from-teal to-teal/70 shadow-[0_4px_14px_rgba(0,212,255,0.3)]'
               }`}
             >
-              {saving ? 'Saving…' : 'Confirm'}
+              {saving ? 'Saving…' : userRole === 'employee' ? 'Submit for Approval' : 'Confirm'}
             </button>
           </div>
         </motion.div>

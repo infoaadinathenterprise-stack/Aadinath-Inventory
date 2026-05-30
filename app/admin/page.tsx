@@ -3,8 +3,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { supabase } from '@/lib/supabase';
-import type { Product, StockMap, Location } from '@/lib/types';
-import { SESSION_KEY, USER_KEY } from '@/lib/types';
+import type { Product, StockMap, Location, UserRole } from '@/lib/types';
+import { SESSION_KEY, USER_KEY, ROLE_KEY } from '@/lib/types';
 import { useProductComponents } from '@/lib/hooks/useProductComponents';
 import { logMovement } from '@/lib/stockActions';
 import { useSearchParams } from 'next/navigation';
@@ -116,26 +116,56 @@ async function loadData(): Promise<{
 // ── Login form ────────────────────────────────────────────────────────────────
 
 function LoginForm({ onSuccess }: { onSuccess: () => void }) {
-  const [pw,    setPw]    = useState('');
-  const [user,  setUser]  = useState('Admin');
-  const [shake, setShake] = useState(false);
-  const [err,   setErr]   = useState('');
-  const inputRef = useRef<HTMLInputElement>(null);
+  const [username, setUsername] = useState('');
+  const [pin,      setPin]      = useState('');
+  const [loading,  setLoading]  = useState(false);
+  const [shake,    setShake]    = useState(false);
+  const [err,      setErr]      = useState('');
+  const userRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => { inputRef.current?.focus(); }, []);
+  useEffect(() => { userRef.current?.focus(); }, []);
 
-  function submit(e: React.FormEvent) {
+  async function submit(e: React.FormEvent) {
     e.preventDefault();
-    const trimmedUser = user.trim() || 'Admin';
-    if (pw === PASS) {
-      localStorage.setItem(SESSION_KEY, '1');
-      localStorage.setItem(USER_KEY, trimmedUser);
-      onSuccess();
-    } else {
-      setErr('Incorrect password');
+    const u = username.trim();
+    const p = pin.trim();
+    if (!u || !p) { setErr('Enter username and PIN'); return; }
+
+    setLoading(true);
+    setErr('');
+    try {
+      // 1. Check staff table (employees + any admin accounts added there)
+      const { data: staff } = await supabase
+        .from('staff')
+        .select('full_name, role, active')
+        .eq('username', u.toLowerCase())
+        .eq('pin', p)
+        .single();
+
+      if (staff && staff.active) {
+        localStorage.setItem(SESSION_KEY, '1');
+        localStorage.setItem(USER_KEY,    staff.full_name);
+        localStorage.setItem(ROLE_KEY,    staff.role);
+        onSuccess();
+        return;
+      }
+
+      // 2. Legacy fallback: env-var admin password (backward compat)
+      if (p === PASS) {
+        localStorage.setItem(SESSION_KEY, '1');
+        localStorage.setItem(USER_KEY,    u || 'Admin');
+        localStorage.setItem(ROLE_KEY,    'admin');
+        onSuccess();
+        return;
+      }
+
+      // Wrong credentials
+      setErr('Incorrect username or PIN');
       setShake(true);
-      setPw('');
+      setPin('');
       setTimeout(() => setShake(false), 500);
+    } finally {
+      setLoading(false);
     }
   }
 
@@ -154,23 +184,22 @@ function LoginForm({ onSuccess }: { onSuccess: () => void }) {
         >
           <div className="text-center mb-8">
             <p className="font-bold text-2xl text-teal tracking-tight">Jay Aadinath<span className="text-gold">·</span></p>
-            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-gold/15 border border-gold/30 text-gold uppercase tracking-widest mt-1 inline-block">Admin Panel</span>
+            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-gold/15 border border-gold/30 text-gold uppercase tracking-widest mt-1 inline-block">Staff Panel</span>
           </div>
-          <p className="text-sm font-semibold text-slate-300 mb-1">Your name</p>
-          <select
-            value={user}
-            onChange={e => setUser(e.target.value)}
-            className="w-full px-4 py-3 rounded-xl bg-surface2 border border-white/10 text-slate-100 outline-none focus:border-teal/50 transition-colors mb-3 text-sm"
-          >
-            <option value="Admin">Admin</option>
-            <option value="Akshat">Akshat</option>
-            <option value="Anjan">Anjan</option>
-          </select>
-          <p className="text-sm font-semibold text-slate-300 mb-1">Password</p>
+          <p className="text-sm font-semibold text-slate-300 mb-1">Username</p>
           <input
-            ref={inputRef} type="password" value={pw}
-            onChange={e => { setPw(e.target.value); setErr(''); }}
-            placeholder="Enter admin password"
+            ref={userRef} type="text" value={username}
+            onChange={e => { setUsername(e.target.value); setErr(''); }}
+            placeholder="Enter your username"
+            autoComplete="username"
+            className="w-full px-4 py-3 rounded-xl bg-surface2 border border-white/10 text-slate-100 placeholder:text-muted/50 outline-none focus:border-teal/50 transition-colors mb-3 text-sm"
+          />
+          <p className="text-sm font-semibold text-slate-300 mb-1">PIN / Password</p>
+          <input
+            type="password" value={pin}
+            onChange={e => { setPin(e.target.value); setErr(''); }}
+            placeholder="Enter your PIN or password"
+            autoComplete="current-password"
             className="w-full px-4 py-3 rounded-xl bg-surface2 border border-white/10 text-slate-100 placeholder:text-muted/50 outline-none focus:border-teal/50 transition-colors mb-2 text-sm"
           />
           <AnimatePresence>
@@ -178,7 +207,8 @@ function LoginForm({ onSuccess }: { onSuccess: () => void }) {
               <motion.p initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="text-xs text-danger mb-3">{err}</motion.p>
             )}
           </AnimatePresence>
-          <button type="submit" className="w-full py-3 mt-2 rounded-xl bg-linear-to-r from-teal to-teal/70 text-navy text-sm font-bold shadow-[0_4px_14px_rgba(0,212,255,0.3)] hover:opacity-90 transition-opacity">
+          <button type="submit" disabled={loading} className="w-full py-3 mt-2 rounded-xl bg-linear-to-r from-teal to-teal/70 text-navy text-sm font-bold shadow-[0_4px_14px_rgba(0,212,255,0.3)] hover:opacity-90 transition-opacity disabled:opacity-60 flex items-center justify-center gap-2">
+            {loading && <div className="w-4 h-4 rounded-full border-2 border-navy border-t-transparent animate-spin" />}
             Sign In
           </button>
         </motion.form>
@@ -760,7 +790,7 @@ function FormField({ label, children }: { label: string; children: React.ReactNo
 
 // ── Dashboard ─────────────────────────────────────────────────────────────────
 
-function Dashboard() {
+function Dashboard({ role }: { role: UserRole }) {
   const [products,     setProducts]     = useState<Product[]>([]);
   const [backStockMap, setBackStockMap] = useState<StockMap>({});
   const [mainStockMap, setMainStockMap] = useState<StockMap>({});
@@ -798,9 +828,12 @@ function Dashboard() {
     setModal({ product, direction, location });
   }
 
+  const isAdmin = role === 'admin';
+
   function handleLogout() {
     localStorage.removeItem(SESSION_KEY);
     localStorage.removeItem(USER_KEY);
+    localStorage.removeItem(ROLE_KEY);
     window.location.reload();
   }
 
@@ -828,12 +861,14 @@ function Dashboard() {
               <h2 className="text-base font-bold text-slate-100">Inventory</h2>
               <p className="text-xs text-muted mt-0.5">{products.length} active products</p>
             </div>
-            <button
-              onClick={() => setProductModal({ editing: null })}
-              className="px-4 py-2 rounded-xl bg-teal/10 border border-teal/30 text-teal text-xs font-bold hover:bg-teal/20 transition-all"
-            >
-              + Add Product
-            </button>
+            {isAdmin && (
+              <button
+                onClick={() => setProductModal({ editing: null })}
+                className="px-4 py-2 rounded-xl bg-teal/10 border border-teal/30 text-teal text-xs font-bold hover:bg-teal/20 transition-all"
+              >
+                + Add Product
+              </button>
+            )}
           </div>
         </div>
 
@@ -845,7 +880,7 @@ function Dashboard() {
             backBoxMap={backBoxMap}
             mainBoxMap={mainBoxMap}
             onAdjust={handleAdjust}
-            onEdit={product => setProductModal({ editing: product })}
+            onEdit={isAdmin ? (product => setProductModal({ editing: product })) : undefined}
           />
         </Suspense>
       </main>
@@ -863,6 +898,7 @@ function Dashboard() {
             mainBoxMap={mainBoxMap}
             componentMap={componentMap}
             allProducts={products}
+            userRole={role}
             onClose={() => setModal(null)}
             onSuccess={msg => showToast(msg, 'success')}
             onError={msg   => showToast(msg, 'error')}
@@ -895,13 +931,21 @@ function Dashboard() {
 
 export default function AdminPage() {
   const [authed, setAuthed] = useState<boolean | null>(null);
+  const [role,   setRole]   = useState<UserRole>('admin');
 
   useEffect(() => {
-    setAuthed(typeof window !== 'undefined' && localStorage.getItem(SESSION_KEY) === '1');
+    const ok = typeof window !== 'undefined' && localStorage.getItem(SESSION_KEY) === '1';
+    setAuthed(ok);
+    if (ok) setRole((localStorage.getItem(ROLE_KEY) as UserRole) || 'admin');
   }, []);
 
+  function onLoginSuccess() {
+    setRole((localStorage.getItem(ROLE_KEY) as UserRole) || 'admin');
+    setAuthed(true);
+  }
+
   if (authed === null) return <div className="min-h-screen bg-navy" />;
-  return authed ? <Dashboard /> : <LoginForm onSuccess={() => setAuthed(true)} />;
+  return authed ? <Dashboard role={role} /> : <LoginForm onSuccess={onLoginSuccess} />;
 }
 
 // ── Inventory list wrapper that picks up ?filter= from the URL ───────────────
@@ -917,7 +961,7 @@ function InventoryListWithFilter(props: {
   backBoxMap:   StockMap;
   mainBoxMap:   StockMap;
   onAdjust:     (product: Product, direction: 'plus' | 'minus', location: Location) => void;
-  onEdit:       (product: Product) => void;
+  onEdit?:      (product: Product) => void;
 }) {
   const params = useSearchParams();
   const raw = (params?.get('filter') ?? 'all') as StockFilter;

@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { motion } from 'framer-motion';
 import { useProducts } from '@/lib/hooks/useProducts';
-import { SESSION_KEY, USER_KEY } from '@/lib/types';
+import { SESSION_KEY, USER_KEY, ROLE_KEY } from '@/lib/types';
 import AdminNavbar from '../components/AdminNavbar';
 
 // Stock-totals dashboard moved off the Inventory page so it doesn't eat
@@ -17,8 +17,9 @@ export default function StatsPage() {
   const [authed, setAuthed] = useState<boolean | null>(null);
   const router = useRouter();
   useEffect(() => {
-    const ok = typeof window !== 'undefined' && localStorage.getItem(SESSION_KEY) === '1';
-    if (!ok) router.replace('/admin');
+    const ok   = typeof window !== 'undefined' && localStorage.getItem(SESSION_KEY) === '1';
+    const role = typeof window !== 'undefined' ? localStorage.getItem(ROLE_KEY) : null;
+    if (!ok || role !== 'admin') router.replace('/admin');
     else setAuthed(true);
   }, [router]);
   if (authed === null) return <div className="min-h-screen bg-navy" />;
