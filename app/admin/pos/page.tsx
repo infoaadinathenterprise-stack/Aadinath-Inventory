@@ -338,6 +338,41 @@ function PosDashboard() {
     const fromCurPieces   = Math.min(movPieces, totalCur);
     const fromOtherPieces = movPieces - fromCurPieces;
 
+    // ── Build active component list (needed for validation + deduction) ──
+    const productComps = componentMap[pid] ?? [];
+    const alwaysComps = productComps.filter(c => !c.choice_group);
+    const cgMap: Record<string, typeof productComps> = {};
+    for (const c of productComps) {
+      if (c.choice_group) (cgMap[c.choice_group] ??= []).push(c);
+    }
+    const pickedFromGroups = Object.keys(cgMap)
+      .map(g => cgMap[g].find(c => c.component_product_id === groupChoices[g]))
+      .filter((c): c is NonNullable<typeof c> => Boolean(c));
+    const activeComps = [...alwaysComps, ...pickedFromGroups];
+
+    // ── Pre-validate component stock before ANY DB write ─────────────────
+    // If the combined stock (selling location + other location) is still not
+    // enough, block the entire sale now — no partial DB writes will happen.
+    for (const comp of activeComps) {
+      const cid       = comp.component_product_id;
+      const cPpb      = products.find(pr => pr.product_id === cid)?.pieces_per_box ?? 0;
+      const cCurPcs   = (location === 'back' ? backStockMap : mainStockMap)[cid] || 0;
+      const cCurBx    = (location === 'back' ? backBoxMap   : mainBoxMap  )[cid] || 0;
+      const cOthPcs   = (location === 'back' ? mainStockMap : backStockMap)[cid] || 0;
+      const cOthBx    = (location === 'back' ? mainBoxMap   : backBoxMap  )[cid] || 0;
+      const movComp   = movPieces * comp.quantity;
+      const cCurTotal = cCurPcs + cCurBx * cPpb;
+      const cOthTotal = cOthPcs + cOthBx * cPpb;
+      const compName  = products.find(pr => pr.product_id === cid)?.product_name ?? `#${cid}`;
+      if (cCurTotal + cOthTotal < movComp) {
+        throw new Error(
+          `Not enough "${compName}": need ${movComp}, ` +
+          `only ${cCurTotal + cOthTotal} in stock ` +
+          `(${locName}: ${cCurTotal}, ${otherName}: ${cOthTotal})`
+        );
+      }
+    }
+
     const unitLbl = unitLabel(p, unit).toLowerCase();
     const priceSuffix = sellPrice != null
       ? ` · ${qty} ${unitLbl}${qty === 1 ? '' : 's'} @ Ksh ${sellPrice} = Ksh ${(qty * sellPrice).toLocaleString('en-KE')}`
@@ -352,7 +387,6 @@ function PosDashboard() {
       }
       const before = curPcs + curBx * ppb;
       const after  = newState.quantity + newState.box_quantity * ppb;
-      // logMovement FIRST — if it throws (e.g. DB constraint), stock is untouched.
       await logMovement(pid, locId, null, fromCurPieces, 'SALE', `Sold from ${locName}${priceSuffix}`, { before, after });
       await upsertStock(pid, locId, newState);
     }
@@ -365,30 +399,36 @@ function PosDashboard() {
       await upsertStock(pid, otherId, newState);
     }
 
-    // Deduct components when selling. Uses the same box-aware logic as
-    // AdjustStockModal: deductFromLocation handles box_quantity properly.
-    const productComps = componentMap[pid] ?? [];
-    if (productComps.length > 0) {
-      const alwaysComps = productComps.filter(c => !c.choice_group);
-      const cgMap: Record<string, typeof productComps> = {};
-      for (const c of productComps) {
-        if (c.choice_group) (cgMap[c.choice_group] ??= []).push(c);
+    // ── Deduct components — pull shortfall from other location if needed ──
+    // Same overflow logic as the main product: drain current location first,
+    // then take the remainder from the other location.
+    for (const comp of activeComps) {
+      const cid      = comp.component_product_id;
+      const cPpb     = products.find(pr => pr.product_id === cid)?.pieces_per_box ?? 0;
+      const srcPcs   = (location === 'back' ? backStockMap : mainStockMap)[cid] || 0;
+      const srcBx    = (location === 'back' ? backBoxMap   : mainBoxMap  )[cid] || 0;
+      const othPcs   = (location === 'back' ? mainStockMap : backStockMap)[cid] || 0;
+      const othBx    = (location === 'back' ? mainBoxMap   : backBoxMap  )[cid] || 0;
+      const movComp  = movPieces * comp.quantity;
+      const srcTotal = srcPcs + srcBx * cPpb;
+
+      const fromSrc   = Math.min(movComp, srcTotal);
+      const fromOther = movComp - fromSrc;
+
+      if (fromSrc > 0) {
+        const raw    = deductFromLocation(srcPcs, srcBx, fromSrc, 'piece', cPpb);
+        const before = srcTotal;
+        const after  = raw.quantity + raw.box_quantity * cPpb;
+        await logMovement(cid, locId, null, fromSrc, 'AUTO_DEDUCT', `Auto: component of ${p.product_name}`, { before, after });
+        await upsertStock(cid, locId, raw);
       }
-      const pickedFromGroups = Object.keys(cgMap)
-        .map(g => cgMap[g].find(c => c.component_product_id === groupChoices[g]))
-        .filter((c): c is NonNullable<typeof c> => Boolean(c));
-      for (const comp of [...alwaysComps, ...pickedFromGroups]) {
-        const cid     = comp.component_product_id;
-        const cPpb    = products.find(pr => pr.product_id === cid)?.pieces_per_box ?? 0;
-        const srcPcs  = (location === 'back' ? backStockMap : mainStockMap)[cid] || 0;
-        const srcBx   = (location === 'back' ? backBoxMap   : mainBoxMap  )[cid] || 0;
-        const movComp = movPieces * comp.quantity;
-        const raw = deductFromLocation(srcPcs, srcBx, movComp, 'piece', cPpb);
-        const newCompState = { quantity: Math.max(0, raw.quantity), box_quantity: Math.max(0, raw.box_quantity) };
-        const cBefore = srcPcs + srcBx * cPpb;
-        const cAfter  = newCompState.quantity + newCompState.box_quantity * cPpb;
-        await logMovement(cid, locId, null, movComp, 'AUTO_DEDUCT', `Auto: component of ${p.product_name}`, { before: cBefore, after: cAfter });
-        await upsertStock(cid, locId, newCompState);
+
+      if (fromOther > 0) {
+        const raw    = deductFromLocation(othPcs, othBx, fromOther, 'piece', cPpb);
+        const before = othPcs + othBx * cPpb;
+        const after  = raw.quantity + raw.box_quantity * cPpb;
+        await logMovement(cid, otherId, null, fromOther, 'AUTO_DEDUCT', `Auto: component of ${p.product_name} (pulled from ${otherName})`, { before, after });
+        await upsertStock(cid, otherId, raw);
       }
     }
   }

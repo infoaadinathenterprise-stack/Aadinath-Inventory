@@ -130,6 +130,35 @@ export default function AdjustStockModal({
       return;
     }
 
+    // Validate component stock for outbound actions before any DB write.
+    // For sold: components only come from the current location in the modal
+    //           (no auto-pull — manual operations should be explicit).
+    // For transfers: components travel with the product so must exist in source.
+    if (['sold', 'to_front', 'to_back'].includes(selectedAction)) {
+      const pickedCheck = choiceGroupNames
+        .map(g => choiceGroupMap[g].find(c => c.component_product_id === groupChoices[g]))
+        .filter((c): c is NonNullable<typeof c> => Boolean(c));
+      for (const comp of [...alwaysComps, ...pickedCheck]) {
+        const cid      = comp.component_product_id;
+        const cPpb     = allProducts.find(p => p.product_id === cid)?.pieces_per_box ?? 0;
+        const srcPcs   = location === 'back' ? (backStockMap[cid] || 0) : (mainStockMap[cid] || 0);
+        const srcBx    = location === 'back' ? (backBoxMap[cid]   || 0) : (mainBoxMap[cid]   || 0);
+        const srcTotal = srcPcs + srcBx * cPpb;
+        const movComp  = movQty * comp.quantity;
+        if (srcTotal < movComp) {
+          const compName = allProducts.find(p => p.product_id === cid)?.product_name ?? `#${cid}`;
+          const othPcs   = location === 'back' ? (mainStockMap[cid] || 0) : (backStockMap[cid] || 0);
+          const othBx    = location === 'back' ? (mainBoxMap[cid]   || 0) : (backBoxMap[cid]   || 0);
+          const othTotal = othPcs + othBx * cPpb;
+          const hint     = othTotal > 0
+            ? ` · ${othTotal} available in ${othName} — transfer components first`
+            : '';
+          onError(`Not enough "${compName}" in ${locName}: need ${movComp}, have ${srcTotal}${hint}`);
+          return;
+        }
+      }
+    }
+
     // Deduct movQty pieces from a location, preferring to consume whole boxes
     // before dipping into loose pieces (box-mode), or loose pieces before
     // breaking boxes (piece-mode).
