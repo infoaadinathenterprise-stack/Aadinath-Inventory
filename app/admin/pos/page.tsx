@@ -387,9 +387,7 @@ function PosDashboard() {
         const newCompState = { quantity: Math.max(0, raw.quantity), box_quantity: Math.max(0, raw.box_quantity) };
         const cBefore = srcPcs + srcBx * cPpb;
         const cAfter  = newCompState.quantity + newCompState.box_quantity * cPpb;
-        // Log first with SALE type (AUTO_DEDUCT isn't in the DB check constraint).
-        // Component entries are identified by their reason prefix "Auto: component of".
-        await logMovement(cid, locId, null, movComp, 'SALE', `Auto: component of ${p.product_name}`, { before: cBefore, after: cAfter });
+        await logMovement(cid, locId, null, movComp, 'AUTO_DEDUCT', `Auto: component of ${p.product_name}`, { before: cBefore, after: cAfter });
         await upsertStock(cid, locId, newCompState);
       }
     }

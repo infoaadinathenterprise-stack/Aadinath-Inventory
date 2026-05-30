@@ -239,9 +239,7 @@ export default function AdjustStockModal({
             await upsertStock(cid, otherId, { quantity: dstPcs + movComp, box_quantity: dstBx });
           } else {
             // Sold — components consumed, not moved.
-            // Use SALE type (AUTO_DEDUCT is not in the DB check constraint).
-            // Component entries are identified by the "Auto: component of" reason prefix.
-            await logMovement(cid, locId, null, movComp, 'SALE', `Auto: component of ${product.product_name}`, { before: cBefore, after: cAfter });
+            await logMovement(cid, locId, null, movComp, 'AUTO_DEDUCT', `Auto: component of ${product.product_name}`, { before: cBefore, after: cAfter });
             await upsertStock(cid, locId, newSrcState);
           }
         }
