@@ -59,7 +59,7 @@ export default function AdjustStockModal({
   if (!product || !direction) return null;
 
   // ── Employee: cannot subtract stock manually ─────────────────────────
-  if (userRole === 'employee' && direction === 'minus') {
+  if (userRole === 'staff' && direction === 'minus') {
     return (
       <AnimatePresence>
         <motion.div
@@ -224,7 +224,7 @@ export default function AdjustStockModal({
     setSaving(true);
     try {
       // ── Employee stock-in: submit for admin approval, don't touch stock ──
-      if (userRole === 'employee') {
+      if (userRole === 'staff') {
         const locName = location === 'back' ? 'Back Godown' : 'Main Store';
         await submitPendingRequest(
           product.product_id,
@@ -497,7 +497,7 @@ export default function AdjustStockModal({
                   : 'bg-linear-to-r from-teal to-teal/70 shadow-[0_4px_14px_rgba(0,212,255,0.3)]'
               }`}
             >
-              {saving ? 'Saving…' : userRole === 'employee' ? 'Submit for Approval' : 'Confirm'}
+              {saving ? 'Saving…' : userRole === 'staff' ? 'Submit for Approval' : 'Confirm'}
             </button>
           </div>
         </motion.div>

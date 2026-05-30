@@ -134,18 +134,23 @@ function LoginForm({ onSuccess }: { onSuccess: () => void }) {
     setLoading(true);
     setErr('');
     try {
-      // 1. Check staff table (employees + any admin accounts added there)
-      const { data: staff } = await supabase
-        .from('staff')
-        .select('full_name, role, active')
-        .eq('username', u.toLowerCase())
+      // 1. Check app_users table — match by email or full_name + PIN
+      const { data: allUsers } = await supabase
+        .from('app_users')
+        .select('full_name, role, active_status, email')
         .eq('pin', p)
-        .single();
+        .eq('active_status', true);
 
-      if (staff && staff.active) {
+      const loginId = u.toLowerCase();
+      const appUser = (allUsers ?? []).find(
+        row => row.email?.toLowerCase() === loginId
+            || row.full_name.toLowerCase() === loginId,
+      );
+
+      if (appUser) {
         localStorage.setItem(SESSION_KEY, '1');
-        localStorage.setItem(USER_KEY,    staff.full_name);
-        localStorage.setItem(ROLE_KEY,    staff.role);
+        localStorage.setItem(USER_KEY,    appUser.full_name);
+        localStorage.setItem(ROLE_KEY,    appUser.role);
         onSuccess();
         return;
       }

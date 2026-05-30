@@ -11,15 +11,15 @@ interface Props {
 }
 
 const ALL_LINKS = [
-  { emoji: '📦', label: 'Inventory', href: '/admin',                   roles: ['admin', 'employee'] as UserRole[] },
+  { emoji: '📦', label: 'Inventory', href: '/admin',                   roles: ['admin', 'staff'] as UserRole[] },
   { emoji: '📊', label: 'Stats',     href: '/admin/stats',             roles: ['admin'] as UserRole[] },
   { emoji: '🛒', label: 'Sales',     href: '/admin/sales',             roles: ['admin'] as UserRole[] },
   { emoji: '📋', label: 'History',   href: '/admin/history',           roles: ['admin'] as UserRole[] },
   { emoji: '🧾', label: 'Purchases', href: '/admin/purchases',         roles: ['admin'] as UserRole[] },
   { emoji: '🏢', label: 'Suppliers', href: '/admin/suppliers',         roles: ['admin'] as UserRole[] },
   { emoji: '🏷️', label: 'Labels',    href: '/admin/labels',            roles: ['admin'] as UserRole[] },
-  { emoji: '🏭', label: 'POS',       href: '/admin/pos',               roles: ['admin', 'employee'] as UserRole[] },
-  { emoji: '🗂️', label: 'Audit',     href: '/admin/inventory-audit',   roles: ['admin', 'employee'] as UserRole[] },
+  { emoji: '🏭', label: 'POS',       href: '/admin/pos',               roles: ['admin', 'staff'] as UserRole[] },
+  { emoji: '🗂️', label: 'Audit',     href: '/admin/inventory-audit',   roles: ['admin', 'staff'] as UserRole[] },
   { emoji: '✅', label: 'Approvals', href: '/admin/approvals',         roles: ['admin'] as UserRole[] },
   { emoji: '👥', label: 'Staff',     href: '/admin/staff',             roles: ['admin'] as UserRole[] },
 ];
@@ -49,7 +49,7 @@ export default function AdminNavbar({ onLogout }: Props) {
                 ? 'bg-gold/15 border-gold/30 text-gold'
                 : 'bg-teal/15 border-teal/30 text-teal'
             }`}>
-              {isAdmin ? 'Admin' : 'Employee'}
+              {isAdmin ? 'Admin' : 'Staff'}
             </span>
           </div>
 
@@ -117,7 +117,7 @@ export default function AdminNavbar({ onLogout }: Props) {
                       ? 'bg-gold/15 border-gold/30 text-gold'
                       : 'bg-teal/15 border-teal/30 text-teal'
                   }`}>
-                    {isAdmin ? 'Admin' : 'Employee'}
+                    {isAdmin ? 'Admin' : 'Staff'}
                   </span>
                 </div>
                 <button onClick={() => setOpen(false)} className="w-7 h-7 flex items-center justify-center rounded-lg bg-surface2 text-muted hover:text-slate-100 transition-colors text-lg">×</button>

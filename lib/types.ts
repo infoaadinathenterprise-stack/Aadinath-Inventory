@@ -42,7 +42,7 @@ export const SESSION_KEY = 'aad_admin_auth';
 export const USER_KEY    = 'aad_admin_user';
 export const ROLE_KEY    = 'aad_user_role';
 
-export type UserRole = 'admin' | 'employee';
+export type UserRole = 'admin' | 'staff';
 
 export interface Supplier {
   supplier_id:   number;

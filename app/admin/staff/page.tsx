@@ -8,20 +8,20 @@ import { SESSION_KEY, ROLE_KEY } from '@/lib/types';
 import AdminNavbar from '../components/AdminNavbar';
 import Toast, { type ToastState } from '../components/Toast';
 
-interface StaffMember {
-  id:         number;
-  username:   string;
-  role:       'admin' | 'employee';
-  full_name:  string;
-  active:     boolean;
-  created_at: string;
+interface AppUser {
+  user_id:       number;
+  full_name:     string;
+  email:         string | null;
+  role:          'admin' | 'staff';
+  active_status: boolean;
+  created_at:    string;
 }
 
 const inputCls = 'w-full px-3 py-2.5 rounded-xl bg-surface2 border border-white/8 text-slate-100 text-sm placeholder:text-muted/40 outline-none focus:border-teal/40 transition-colors';
 
 export default function StaffPage() {
   const router = useRouter();
-  const [staff,    setStaff]    = useState<StaffMember[]>([]);
+  const [users,    setUsers]    = useState<AppUser[]>([]);
   const [loading,  setLoading]  = useState(true);
   const [saving,   setSaving]   = useState(false);
   const [toast,    setToast]    = useState<ToastState | null>(null);
@@ -30,9 +30,9 @@ export default function StaffPage() {
 
   // New member form
   const [fullName,  setFullName]  = useState('');
-  const [username,  setUsername]  = useState('');
+  const [email,     setEmail]     = useState('');
   const [pin,       setPin]       = useState('');
-  const [newRole,   setNewRole]   = useState<'admin' | 'employee'>('employee');
+  const [newRole,   setNewRole]   = useState<'admin' | 'staff'>('staff');
 
   function showToast(msg: string, type: ToastState['type']) {
     setToast({ msg, type, id: ++toastId });
@@ -45,13 +45,14 @@ export default function StaffPage() {
 
   const load = useCallback(async () => {
     setLoading(true);
-    const { data } = await supabase
-      .from('staff')
-      .select('id, username, role, full_name, active, created_at')
+    const { data, error } = await supabase
+      .from('app_users')
+      .select('user_id, full_name, email, role, active_status, created_at')
       .order('created_at', { ascending: true });
-    setStaff((data ?? []) as StaffMember[]);
+    if (error) showToast(error.message, 'error');
+    setUsers((data ?? []) as AppUser[]);
     setLoading(false);
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const ok   = typeof window !== 'undefined' && localStorage.getItem(SESSION_KEY) === '1';
@@ -62,48 +63,49 @@ export default function StaffPage() {
 
   async function addMember(e: React.FormEvent) {
     e.preventDefault();
-    if (!fullName.trim() || !username.trim() || !pin.trim()) {
-      showToast('Fill in all fields', 'error'); return;
+    if (!fullName.trim() || !pin.trim()) {
+      showToast('Full name and PIN are required', 'error'); return;
     }
     setSaving(true);
     try {
-      const { error } = await supabase.from('staff').insert({
-        full_name: fullName.trim(),
-        username:  username.trim().toLowerCase(),
-        pin:       pin.trim(),
-        role:      newRole,
-        active:    true,
+      const { error } = await supabase.from('app_users').insert({
+        full_name:     fullName.trim(),
+        email:         email.trim() || null,
+        pin:           pin.trim(),
+        role:          newRole,
+        active_status: true,
       });
       if (error) throw new Error(error.message);
       showToast(`${fullName} added ✓`, 'success');
-      setFullName(''); setUsername(''); setPin(''); setNewRole('employee');
+      setFullName(''); setEmail(''); setPin(''); setNewRole('staff');
       setShowForm(false);
       load();
     } catch (e) {
-      showToast(e instanceof Error ? e.message : 'Error', 'error');
+      showToast(e instanceof Error ? e.message : 'Error adding user', 'error');
     } finally {
       setSaving(false);
     }
   }
 
-  async function toggleActive(member: StaffMember) {
+  async function toggleActive(user: AppUser) {
     const { error } = await supabase
-      .from('staff')
-      .update({ active: !member.active })
-      .eq('id', member.id);
+      .from('app_users')
+      .update({ active_status: !user.active_status })
+      .eq('user_id', user.user_id);
     if (error) { showToast(error.message, 'error'); return; }
-    setStaff(s => s.map(m => m.id === member.id ? { ...m, active: !m.active } : m));
+    setUsers(u => u.map(m => m.user_id === user.user_id ? { ...m, active_status: !m.active_status } : m));
+    showToast(user.active_status ? 'Account deactivated' : 'Account activated', 'success');
   }
 
-  async function resetPin(member: StaffMember) {
-    const newPin = window.prompt(`Set new PIN for ${member.full_name}:`);
+  async function resetPin(user: AppUser) {
+    const newPin = window.prompt(`Set new PIN for ${user.full_name}:`);
     if (!newPin?.trim()) return;
     const { error } = await supabase
-      .from('staff')
+      .from('app_users')
       .update({ pin: newPin.trim() })
-      .eq('id', member.id);
+      .eq('user_id', user.user_id);
     if (error) showToast(error.message, 'error');
-    else showToast('PIN updated ✓', 'success');
+    else showToast(`PIN updated for ${user.full_name} ✓`, 'success');
   }
 
   return (
@@ -113,7 +115,7 @@ export default function StaffPage() {
         <div className="pt-5 pb-4 flex items-center justify-between">
           <div>
             <h2 className="text-base font-bold text-slate-100">👥 Staff Accounts</h2>
-            <p className="text-xs text-muted mt-0.5">{staff.length} member{staff.length !== 1 ? 's' : ''}</p>
+            <p className="text-xs text-muted mt-0.5">{users.length} member{users.length !== 1 ? 's' : ''}</p>
           </div>
           <button
             onClick={() => setShowForm(f => !f)}
@@ -137,21 +139,21 @@ export default function StaffPage() {
                 <p className="text-xs font-bold text-teal uppercase tracking-widest">New Staff Member</p>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="text-[10px] font-bold text-muted uppercase tracking-widest block mb-1">Full Name</label>
+                    <label className="text-[10px] font-bold text-muted uppercase tracking-widest block mb-1">Full Name *</label>
                     <input value={fullName} onChange={e => setFullName(e.target.value)} placeholder="e.g. Raju Sharma" className={inputCls} />
                   </div>
                   <div>
-                    <label className="text-[10px] font-bold text-muted uppercase tracking-widest block mb-1">Username</label>
-                    <input value={username} onChange={e => setUsername(e.target.value)} placeholder="e.g. raju" className={inputCls} />
+                    <label className="text-[10px] font-bold text-muted uppercase tracking-widest block mb-1">Email (optional)</label>
+                    <input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="e.g. raju@example.com" className={inputCls} />
                   </div>
                   <div>
-                    <label className="text-[10px] font-bold text-muted uppercase tracking-widest block mb-1">PIN / Password</label>
+                    <label className="text-[10px] font-bold text-muted uppercase tracking-widest block mb-1">PIN / Password *</label>
                     <input type="password" value={pin} onChange={e => setPin(e.target.value)} placeholder="Create a PIN" className={inputCls} />
                   </div>
                   <div>
                     <label className="text-[10px] font-bold text-muted uppercase tracking-widest block mb-1">Role</label>
-                    <select value={newRole} onChange={e => setNewRole(e.target.value as 'admin' | 'employee')} className={inputCls}>
-                      <option value="employee">Employee</option>
+                    <select value={newRole} onChange={e => setNewRole(e.target.value as 'admin' | 'staff')} className={inputCls}>
+                      <option value="staff">Staff</option>
                       <option value="admin">Admin</option>
                     </select>
                   </div>
@@ -168,10 +170,15 @@ export default function StaffPage() {
           )}
         </AnimatePresence>
 
-        {/* Employee permissions info */}
+        {/* Permissions info */}
         <div className="mb-4 px-3 py-2.5 rounded-xl bg-gold/5 border border-gold/20 text-xs text-gold/80 leading-relaxed">
-          <span className="font-bold">Employee access:</span> Inventory (add only, pending approval) · POS · Audit<br />
-          <span className="font-bold">Admin access:</span> Everything, including approving employee requests
+          <span className="font-bold">Staff access:</span> Inventory (add only — pending approval) · POS · Audit<br />
+          <span className="font-bold">Admin access:</span> All pages + approving stock requests
+        </div>
+
+        {/* Login hint */}
+        <div className="mb-4 px-3 py-2 rounded-xl bg-surface border border-white/8 text-xs text-muted">
+          Staff log in using their <span className="text-slate-300">full name</span> or <span className="text-slate-300">email</span> + their PIN.
         </div>
 
         {loading ? (
@@ -180,27 +187,33 @@ export default function StaffPage() {
           </div>
         ) : (
           <div className="flex flex-col gap-2">
-            {staff.map(m => (
+            {users.map(m => (
               <div
-                key={m.id}
-                className={`bg-surface border rounded-xl px-4 py-3 flex items-center gap-3 ${m.active ? 'border-white/8' : 'border-white/4 opacity-50'}`}
+                key={m.user_id}
+                className={`bg-surface border rounded-xl px-4 py-3 flex items-center gap-3 ${m.active_status ? 'border-white/8' : 'border-white/4 opacity-50'}`}
               >
-                <div className="w-9 h-9 rounded-full flex items-center justify-center text-base font-bold shrink-0"
-                  style={{ background: m.role === 'admin' ? 'rgba(255,188,0,0.15)' : 'rgba(0,212,255,0.12)' }}>
+                <div
+                  className="w-9 h-9 rounded-full flex items-center justify-center text-base font-bold shrink-0"
+                  style={{ background: m.role === 'admin' ? 'rgba(255,188,0,0.15)' : 'rgba(0,212,255,0.12)' }}
+                >
                   {m.full_name.charAt(0).toUpperCase()}
                 </div>
+
                 <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
                     <span className="text-sm font-semibold text-slate-100 truncate">{m.full_name}</span>
                     <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full border uppercase tracking-widest ${
                       m.role === 'admin'
                         ? 'bg-gold/10 border-gold/30 text-gold'
                         : 'bg-teal/10 border-teal/25 text-teal'
                     }`}>{m.role}</span>
-                    {!m.active && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-danger/10 border border-danger/30 text-danger uppercase">Inactive</span>}
+                    {!m.active_status && (
+                      <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-danger/10 border border-danger/30 text-danger uppercase">Inactive</span>
+                    )}
                   </div>
-                  <p className="text-xs text-muted">@{m.username}</p>
+                  <p className="text-xs text-muted truncate">{m.email ?? 'No email set'}</p>
                 </div>
+
                 <div className="flex items-center gap-2 shrink-0">
                   <button
                     onClick={() => resetPin(m)}
@@ -211,18 +224,18 @@ export default function StaffPage() {
                   <button
                     onClick={() => toggleActive(m)}
                     className={`text-[10px] font-bold px-2.5 py-1.5 rounded-lg border transition-all ${
-                      m.active
+                      m.active_status
                         ? 'bg-danger/10 border-danger/25 text-danger hover:bg-danger/20'
                         : 'bg-success/10 border-success/25 text-success hover:bg-success/20'
                     }`}
                   >
-                    {m.active ? 'Deactivate' : 'Activate'}
+                    {m.active_status ? 'Deactivate' : 'Activate'}
                   </button>
                 </div>
               </div>
             ))}
-            {staff.length === 0 && (
-              <p className="text-center text-sm text-muted py-12">No staff accounts yet — add one above.</p>
+            {users.length === 0 && (
+              <p className="text-center text-sm text-muted py-12">No users found. Add one above.</p>
             )}
           </div>
         )}
