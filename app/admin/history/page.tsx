@@ -30,12 +30,23 @@ function formatDate(iso: string) {
 }
 
 // Reason strings written by logMovement are prefixed "[User] …" — pull
-// the user out for display and return the rest as the clean reason.
-function parseReason(raw: string | null): { user: string | null; rest: string } {
-  if (!raw) return { user: null, rest: '' };
-  const m = raw.match(/^\[([^\]]+)\]\s*(.*)$/);
-  if (!m) return { user: null, rest: raw };
-  return { user: m[1].trim(), rest: m[2].trim() };
+// the user out for display, strip the "(was: X → now: Y)" snapshot suffix
+// added for before/after tracking, and return the clean reason separately.
+function parseReason(raw: string | null): {
+  user: string | null;
+  rest: string;
+  snapshot: { before: number; after: number } | null;
+} {
+  if (!raw) return { user: null, rest: '', snapshot: null };
+  const userMatch = raw.match(/^\[([^\]]+)\]\s*([\s\S]*)$/);
+  const body = userMatch ? userMatch[2].trim() : raw;
+  const user = userMatch ? userMatch[1].trim() : null;
+  const snapMatch = body.match(/\s*\(was: (\d+) → now: (\d+)\)\s*$/);
+  const snapshot = snapMatch
+    ? { before: parseInt(snapMatch[1], 10), after: parseInt(snapMatch[2], 10) }
+    : null;
+  const rest = snapMatch ? body.slice(0, body.length - snapMatch[0].length).trim() : body;
+  return { user, rest, snapshot };
 }
 
 function fmtKsh(n: number | null | undefined) {
@@ -187,14 +198,19 @@ function HistoryDashboard() {
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2">
             {filtered.map((m, i) => {
-              const meta = TYPE_META[m.movement_type] ?? { label: m.movement_type, emoji: '•', color: 'text-muted bg-surface2 border-white/10' };
+              const { user, rest: cleanReason, snapshot } = parseReason(m.reason);
+              // Detect component deductions: old records have movement_type AUTO_DEDUCT;
+              // new records use SALE type but carry the "Auto: component of" prefix.
+              const isAutoDeduct = m.movement_type === 'AUTO_DEDUCT'
+                || (m.movement_type === 'SALE' && cleanReason.startsWith('Auto: component of'));
+              const meta = isAutoDeduct
+                ? TYPE_META['AUTO_DEDUCT']
+                : (TYPE_META[m.movement_type] ?? { label: m.movement_type, emoji: '•', color: 'text-muted bg-surface2 border-white/10' });
               const isIn         = m.movement_type === 'ADJUSTMENT_IN' || m.movement_type === 'PURCHASE_IN';
               const isTransfer   = m.movement_type === 'TRANSFER' || m.movement_type === 'TRANSFER_TO_MAIN' || m.movement_type === 'TRANSFER_TO_BACK';
-              const isSale       = m.movement_type === 'SALE';
-              const isAutoDeduct = m.movement_type === 'AUTO_DEDUCT';
+              const isSale       = m.movement_type === 'SALE' && !isAutoDeduct;
               const isOut        = !isIn && !isTransfer;  // sales, stock-out, damaged, component deductions
               const product = products.find(p => p.product_id === m.product_id);
-              const { user, rest: cleanReason } = parseReason(m.reason);
               const fromLoc = m.from_location_id ? LOC_NAME[m.from_location_id] ?? `Location #${m.from_location_id}` : null;
               const toLoc   = m.to_location_id   ? LOC_NAME[m.to_location_id]   ?? `Location #${m.to_location_id}`   : null;
               const ts = m.movement_date ?? m.created_at;
@@ -271,6 +287,12 @@ function HistoryDashboard() {
                         <div className="p-3.5 grid grid-cols-2 gap-x-3 gap-y-2 text-xs">
                           <DetailRow label="Type"     value={`${meta.emoji} ${meta.label}`} />
                           <DetailRow label="Quantity" value={`${m.quantity}${product?.unit_of_measure ? ' ' + product.unit_of_measure.toLowerCase() + (m.quantity === 1 ? '' : 's') : ''}`} />
+                          {snapshot && (
+                            <>
+                              <DetailRow label="Stock before" value={String(snapshot.before)} highlight="text-gold" />
+                              <DetailRow label="Stock after"  value={String(snapshot.after)}  highlight={snapshot.after < snapshot.before ? 'text-danger' : 'text-success'} />
+                            </>
+                          )}
                           {fromLoc && <DetailRow label="From" value={fromLoc} />}
                           {toLoc   && <DetailRow label="To"   value={toLoc} />}
                           {!fromLoc && !isTransfer && !isIn && <DetailRow label="From" value="(not recorded)" />}

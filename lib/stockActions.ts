@@ -45,10 +45,12 @@ export async function logMovement(
   qty:       number,
   type:      string,
   reason:    string,
+  snapshot?: { before: number; after: number },
 ): Promise<void> {
   const user        = currentUser();
   const now         = new Date().toISOString();
-  const notes       = `[${user}] ${reason}`;
+  const snapSuffix  = snapshot != null ? ` (was: ${snapshot.before} → now: ${snapshot.after})` : '';
+  const notes       = `[${user}] ${reason}${snapSuffix}`;
 
   const { error } = await supabase.from('stock_requests').insert({
     product_id:       productId,

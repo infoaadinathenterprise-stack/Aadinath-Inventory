@@ -350,14 +350,19 @@ function PosDashboard() {
       } else {
         newState = deductFromLocation(curPcs, curBx, fromCurPieces, 'piece', ppb);
       }
+      const before = curPcs + curBx * ppb;
+      const after  = newState.quantity + newState.box_quantity * ppb;
+      // logMovement FIRST — if it throws (e.g. DB constraint), stock is untouched.
+      await logMovement(pid, locId, null, fromCurPieces, 'SALE', `Sold from ${locName}${priceSuffix}`, { before, after });
       await upsertStock(pid, locId, newState);
-      await logMovement(pid, locId, null, fromCurPieces, 'SALE', `Sold from ${locName}${priceSuffix}`);
     }
 
     if (fromOtherPieces > 0) {
       const newState = deductFromLocation(otherPcs, otherBx, fromOtherPieces, 'piece', ppb);
+      const before = otherPcs + otherBx * ppb;
+      const after  = newState.quantity + newState.box_quantity * ppb;
+      await logMovement(pid, otherId, null, fromOtherPieces, 'SALE', `Sold from ${otherName} (POS overflow)${priceSuffix}`, { before, after });
       await upsertStock(pid, otherId, newState);
-      await logMovement(pid, otherId, null, fromOtherPieces, 'SALE', `Sold from ${otherName} (POS overflow)${priceSuffix}`);
     }
 
     // Deduct components when selling. Uses the same box-aware logic as
@@ -373,14 +378,19 @@ function PosDashboard() {
         .map(g => cgMap[g].find(c => c.component_product_id === groupChoices[g]))
         .filter((c): c is NonNullable<typeof c> => Boolean(c));
       for (const comp of [...alwaysComps, ...pickedFromGroups]) {
-        const cid    = comp.component_product_id;
-        const cPpb   = products.find(pr => pr.product_id === cid)?.pieces_per_box ?? 0;
-        const srcPcs = (location === 'back' ? backStockMap : mainStockMap)[cid] || 0;
-        const srcBx  = (location === 'back' ? backBoxMap   : mainBoxMap  )[cid] || 0;
+        const cid     = comp.component_product_id;
+        const cPpb    = products.find(pr => pr.product_id === cid)?.pieces_per_box ?? 0;
+        const srcPcs  = (location === 'back' ? backStockMap : mainStockMap)[cid] || 0;
+        const srcBx   = (location === 'back' ? backBoxMap   : mainBoxMap  )[cid] || 0;
         const movComp = movPieces * comp.quantity;
         const raw = deductFromLocation(srcPcs, srcBx, movComp, 'piece', cPpb);
-        await upsertStock(cid, locId, { quantity: Math.max(0, raw.quantity), box_quantity: Math.max(0, raw.box_quantity) });
-        await logMovement(cid, locId, null, movComp, 'AUTO_DEDUCT', 'Auto: component of ' + p.product_name);
+        const newCompState = { quantity: Math.max(0, raw.quantity), box_quantity: Math.max(0, raw.box_quantity) };
+        const cBefore = srcPcs + srcBx * cPpb;
+        const cAfter  = newCompState.quantity + newCompState.box_quantity * cPpb;
+        // Log first with SALE type (AUTO_DEDUCT isn't in the DB check constraint).
+        // Component entries are identified by their reason prefix "Auto: component of".
+        await logMovement(cid, locId, null, movComp, 'SALE', `Auto: component of ${p.product_name}`, { before: cBefore, after: cAfter });
+        await upsertStock(cid, locId, newCompState);
       }
     }
   }
@@ -408,12 +418,14 @@ function PosDashboard() {
       throw new Error(`Back Godown only has ${backTotal} ${unitLabel(p, 'piece').toLowerCase()}s of ${p.product_name}`);
     }
 
-    // Move main product
+    // Move main product — log first so if the write fails stock is untouched.
     const newBack = deductFromLocation(backPcs, backBx, qty, unit, ppb);
     const newMain = addToLocation(mainPcs, mainBx, qty, unit);
+    const backBefore = backPcs + backBx * ppb;
+    const backAfter  = newBack.quantity + newBack.box_quantity * ppb;
+    await logMovement(pid, backId, mainId, movPieces, 'TRANSFER', 'Moved from Back Godown to Main Store', { before: backBefore, after: backAfter });
     await upsertStock(pid, backId, newBack);
     await upsertStock(pid, mainId, newMain);
-    await logMovement(pid, backId, mainId, movPieces, 'TRANSFER', 'Moved from Back Godown to Main Store');
 
     // Move components with the product
     const productComps = componentMap[pid] ?? [];
@@ -434,12 +446,13 @@ function PosDashboard() {
         const cBackBx  = backBoxMap[cid]   || 0;
         const cMainPcs = mainStockMap[cid] || 0;
         const cMainBx  = mainBoxMap[cid]   || 0;
-        // Box-aware deduction from back
         const rawBack = deductFromLocation(cBackPcs, cBackBx, movComp, 'piece', cPpb);
-        await upsertStock(cid, backId, { quantity: Math.max(0, rawBack.quantity), box_quantity: Math.max(0, rawBack.box_quantity) });
-        // Add to main as loose pieces
+        const newBackState = { quantity: Math.max(0, rawBack.quantity), box_quantity: Math.max(0, rawBack.box_quantity) };
+        const cBefore = cBackPcs + cBackBx * cPpb;
+        const cAfter  = newBackState.quantity + newBackState.box_quantity * cPpb;
+        await logMovement(cid, backId, mainId, movComp, 'TRANSFER', `Auto: component of ${p.product_name}`, { before: cBefore, after: cAfter });
+        await upsertStock(cid, backId, newBackState);
         await upsertStock(cid, mainId, { quantity: cMainPcs + movComp, box_quantity: cMainBx });
-        await logMovement(cid, backId, mainId, movComp, 'TRANSFER', 'Auto: component of ' + p.product_name);
       }
     }
   }

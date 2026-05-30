@@ -157,23 +157,39 @@ export default function AdjustStockModal({
 
     setSaving(true);
     try {
+      // Rule: logMovement ALWAYS runs BEFORE upsertStock.
+      // If logMovement throws (e.g. DB constraint), stock is untouched — no partial writes.
       if (selectedAction === 'sold') {
-        await upsertStock(product.product_id, locId, deductFrom(curQty, curBox));
-        await logMovement(product.product_id, locId, null, movQty, TYPE_MAP[selectedAction], NOTE_MAP[selectedAction]);
+        const newState = deductFrom(curQty, curBox);
+        const before = curQty + curBox * ppb;
+        const after  = newState.quantity + newState.box_quantity * ppb;
+        await logMovement(product.product_id, locId, null, movQty, TYPE_MAP[selectedAction], NOTE_MAP[selectedAction], { before, after });
+        await upsertStock(product.product_id, locId, newState);
 
       } else if (selectedAction === 'to_front' || selectedAction === 'to_back') {
-        await upsertStock(product.product_id, locId,   deductFrom(curQty, curBox));
-        await upsertStock(product.product_id, otherId, addTo(othQty, othBox));
-        await logMovement(product.product_id, locId, otherId, movQty, TYPE_MAP[selectedAction], NOTE_MAP[selectedAction]);
+        const newCurState = deductFrom(curQty, curBox);
+        const newOthState = addTo(othQty, othBox);
+        const before = curQty + curBox * ppb;
+        const after  = newCurState.quantity + newCurState.box_quantity * ppb;
+        await logMovement(product.product_id, locId, otherId, movQty, TYPE_MAP[selectedAction], NOTE_MAP[selectedAction], { before, after });
+        await upsertStock(product.product_id, locId, newCurState);
+        await upsertStock(product.product_id, otherId, newOthState);
 
       } else if (selectedAction === 'from_back' || selectedAction === 'from_main') {
-        await upsertStock(product.product_id, otherId, deductFrom(othQty, othBox));
-        await upsertStock(product.product_id, locId,   addTo(curQty, curBox));
-        await logMovement(product.product_id, otherId, locId, movQty, TYPE_MAP[selectedAction], NOTE_MAP[selectedAction]);
+        const newOthState = deductFrom(othQty, othBox);
+        const newCurState = addTo(curQty, curBox);
+        const before = othQty + othBox * ppb;
+        const after  = newOthState.quantity + newOthState.box_quantity * ppb;
+        await logMovement(product.product_id, otherId, locId, movQty, TYPE_MAP[selectedAction], NOTE_MAP[selectedAction], { before, after });
+        await upsertStock(product.product_id, otherId, newOthState);
+        await upsertStock(product.product_id, locId, newCurState);
 
       } else if (selectedAction === 'stockin') {
-        await upsertStock(product.product_id, locId, addTo(curQty, curBox));
-        await logMovement(product.product_id, null, locId, movQty, TYPE_MAP[selectedAction], NOTE_MAP[selectedAction]);
+        const newState = addTo(curQty, curBox);
+        const before = curQty + curBox * ppb;
+        const after  = newState.quantity + newState.box_quantity * ppb;
+        await logMovement(product.product_id, null, locId, movQty, TYPE_MAP[selectedAction], NOTE_MAP[selectedAction], { before, after });
+        await upsertStock(product.product_id, locId, newState);
       }
 
       // Apply components for outbound actions.
@@ -202,26 +218,31 @@ export default function AdjustStockModal({
         }
 
         for (const comp of components) {
-          const cid    = comp.component_product_id;
-          const cPpb   = allProducts.find(p => p.product_id === cid)?.pieces_per_box ?? 0;
+          const cid     = comp.component_product_id;
+          const cPpb    = allProducts.find(p => p.product_id === cid)?.pieces_per_box ?? 0;
           const movComp = movQty * comp.quantity;   // pieces of this component to handle
 
           // Source stock
           const srcPcs = location === 'back' ? (backStockMap[cid] || 0) : (mainStockMap[cid] || 0);
           const srcBx  = location === 'back' ? (backBoxMap[cid]   || 0) : (mainBoxMap[cid]   || 0);
 
-          // Deduct from source (box-aware)
-          await upsertStock(cid, locId, deductCompPieces(srcPcs, srcBx, movComp, cPpb));
+          const newSrcState = deductCompPieces(srcPcs, srcBx, movComp, cPpb);
+          const cBefore = srcPcs + srcBx * cPpb;
+          const cAfter  = newSrcState.quantity + newSrcState.box_quantity * cPpb;
 
           if (isTransferAction) {
             // Add to destination as loose pieces
             const dstPcs = location === 'back' ? (mainStockMap[cid] || 0) : (backStockMap[cid] || 0);
             const dstBx  = location === 'back' ? (mainBoxMap[cid]   || 0) : (backBoxMap[cid]   || 0);
+            await logMovement(cid, locId, otherId, movComp, 'TRANSFER', `Auto: component of ${product.product_name}`, { before: cBefore, after: cAfter });
+            await upsertStock(cid, locId, newSrcState);
             await upsertStock(cid, otherId, { quantity: dstPcs + movComp, box_quantity: dstBx });
-            await logMovement(cid, locId, otherId, movComp, 'TRANSFER', 'Auto: component of ' + product.product_name);
           } else {
-            // Sold — components consumed, not moved
-            await logMovement(cid, locId, null, movComp, 'AUTO_DEDUCT', 'Auto: component of ' + product.product_name);
+            // Sold — components consumed, not moved.
+            // Use SALE type (AUTO_DEDUCT is not in the DB check constraint).
+            // Component entries are identified by the "Auto: component of" reason prefix.
+            await logMovement(cid, locId, null, movComp, 'SALE', `Auto: component of ${product.product_name}`, { before: cBefore, after: cAfter });
+            await upsertStock(cid, locId, newSrcState);
           }
         }
       }
