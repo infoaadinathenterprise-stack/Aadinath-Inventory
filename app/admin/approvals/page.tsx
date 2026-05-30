@@ -19,7 +19,7 @@ interface PendingRequest {
   requested_at:  string;
 }
 
-const LOC_NAME: Record<number, string> = { 1: 'Main Store', 2: 'Back Godown' };
+let LOC_NAME: Record<number, string> = { 1: 'Main Store', 2: 'Back Godown' };
 
 function parseUser(notes: string | null): string {
   if (!notes) return 'Unknown';
@@ -47,14 +47,18 @@ export default function ApprovalsPage() {
 
   const load = useCallback(async () => {
     setLoading(true);
-    const [reqRes, prodRes] = await Promise.all([
+    const [reqRes, prodRes, locRes] = await Promise.all([
       supabase
         .from('stock_requests')
         .select('request_id, product_id, quantity, to_location_id, notes, requested_at')
         .eq('status', 'PENDING')
         .order('requested_at', { ascending: true }),
       supabase.from('products').select('product_id, product_name, type, unit_of_measure, pieces_per_box'),
+      supabase.from('locations').select('location_id, location_name'),
     ]);
+    for (const loc of locRes.data ?? []) {
+      LOC_NAME[loc.location_id as number] = loc.location_name as string;
+    }
     setRequests((reqRes.data ?? []) as PendingRequest[]);
     setProducts((prodRes.data ?? []) as Product[]);
     setLoading(false);

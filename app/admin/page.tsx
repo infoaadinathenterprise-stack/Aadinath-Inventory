@@ -3,9 +3,10 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { supabase } from '@/lib/supabase';
-import type { Product, StockMap, Location, UserRole } from '@/lib/types';
+import type { Product, UserRole, StockMap } from '@/lib/types';
 import { SESSION_KEY, USER_KEY, ROLE_KEY } from '@/lib/types';
 import { useProductComponents } from '@/lib/hooks/useProductComponents';
+import { useProducts } from '@/lib/hooks/useProducts';
 import { logMovement } from '@/lib/stockActions';
 import { useSearchParams } from 'next/navigation';
 import { Suspense } from 'react';
@@ -17,9 +18,9 @@ import Toast, { type ToastState } from './components/Toast';
 const PASS = process.env.NEXT_PUBLIC_ADMIN_PASSWORD ?? 'admin123';
 
 interface ModalState {
-  product:   Product;
-  direction: 'plus' | 'minus';
-  location:  Location;
+  product:    Product;
+  direction:  'plus' | 'minus';
+  locationId: number;
 }
 
 interface ProductForm {
@@ -78,40 +79,7 @@ function errMessage(e: unknown): string {
   return String(e);
 }
 
-// ── Data loading ─────────────────────────────────────────────────────────────
-
-async function loadData(): Promise<{
-  products:     Product[];
-  backStockMap: StockMap;
-  mainStockMap: StockMap;
-  backBoxMap:   StockMap;
-  mainBoxMap:   StockMap;
-}> {
-  const [{ data: prods, error: pErr }, { data: stock, error: sErr }] = await Promise.all([
-    supabase.from('products').select('*').eq('active_status', true).order('product_name'),
-    supabase.from('stock_by_location').select('product_id, quantity, box_quantity, location_id'),
-  ]);
-
-  if (pErr || sErr) throw new Error((pErr ?? sErr)!.message);
-
-  const products: Product[] = prods ?? [];
-  const backStockMap: StockMap = {};
-  const mainStockMap: StockMap = {};
-  const backBoxMap:   StockMap = {};
-  const mainBoxMap:   StockMap = {};
-
-  for (const row of stock ?? []) {
-    if (row.location_id === 2) {
-      backStockMap[row.product_id] = row.quantity   ?? 0;
-      backBoxMap[row.product_id]   = row.box_quantity ?? 0;
-    } else {
-      mainStockMap[row.product_id] = row.quantity   ?? 0;
-      mainBoxMap[row.product_id]   = row.box_quantity ?? 0;
-    }
-  }
-
-  return { products, backStockMap, mainStockMap, backBoxMap, mainBoxMap };
-}
+// loadData() removed — Dashboard now uses useProducts() hook directly.
 
 // ── Login form ────────────────────────────────────────────────────────────────
 
@@ -796,44 +764,33 @@ function FormField({ label, children }: { label: string; children: React.ReactNo
 // ── Dashboard ─────────────────────────────────────────────────────────────────
 
 function Dashboard({ role }: { role: UserRole }) {
-  const [products,     setProducts]     = useState<Product[]>([]);
-  const [backStockMap, setBackStockMap] = useState<StockMap>({});
-  const [mainStockMap, setMainStockMap] = useState<StockMap>({});
-  const [backBoxMap,   setBackBoxMap]   = useState<StockMap>({});
-  const [mainBoxMap,   setMainBoxMap]   = useState<StockMap>({});
-  const [loading,      setLoading]      = useState(true);
+  const { products, locations, stockByLoc, boxByLoc, loading, error, refresh } = useProducts();
   const [modal,        setModal]        = useState<ModalState | null>(null);
   const [productModal, setProductModal] = useState<{ editing: Product | null } | null>(null);
   const [toast,        setToast]        = useState<ToastState | null>(null);
   const toastId      = useRef(0);
   const componentMap = useProductComponents();
 
-  const refresh = useCallback(async () => {
-    try {
-      const d = await loadData();
-      setProducts(d.products);
-      setBackStockMap(d.backStockMap);
-      setMainStockMap(d.mainStockMap);
-      setBackBoxMap(d.backBoxMap);
-      setMainBoxMap(d.mainBoxMap);
-    } catch (e) {
-      setToast({ msg: 'Failed to load inventory: ' + (e instanceof Error ? e.message : 'Network error'), type: 'error', id: ++toastId.current });
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => { refresh(); }, [refresh]);
-
   function showToast(msg: string, type: ToastState['type']) {
     setToast({ msg, type, id: ++toastId.current });
   }
 
-  function handleAdjust(product: Product, direction: 'plus' | 'minus', location: Location) {
-    setModal({ product, direction, location });
+  useEffect(() => {
+    if (error) showToast('Failed to load inventory: ' + error, 'error');
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [error]);
+
+  function handleAdjust(product: Product, direction: 'plus' | 'minus', locationId: number) {
+    setModal({ product, direction, locationId });
   }
 
   const isAdmin = role === 'admin';
+
+  // Backward-compat shims for ProductModal (still uses named back/main maps)
+  const backId       = locations.find(l => l.location_name === 'Back Godown')?.location_id ?? 2;
+  const mainId       = locations.find(l => l.location_name === 'Main Store')?.location_id  ?? 1;
+  const backStockMap = stockByLoc[backId] ?? {};
+  const mainStockMap = stockByLoc[mainId] ?? {};
 
   function handleLogout() {
     localStorage.removeItem(SESSION_KEY);
@@ -880,10 +837,9 @@ function Dashboard({ role }: { role: UserRole }) {
         <Suspense fallback={null}>
           <InventoryListWithFilter
             products={products}
-            backStockMap={backStockMap}
-            mainStockMap={mainStockMap}
-            backBoxMap={backBoxMap}
-            mainBoxMap={mainBoxMap}
+            locations={locations}
+            stockByLoc={stockByLoc}
+            boxByLoc={boxByLoc}
             onAdjust={handleAdjust}
             onEdit={isAdmin ? (product => setProductModal({ editing: product })) : undefined}
           />
@@ -895,12 +851,11 @@ function Dashboard({ role }: { role: UserRole }) {
           <AdjustStockModal
             key="modal"
             product={modal.product}
-            location={modal.location}
+            locationId={modal.locationId}
             direction={modal.direction}
-            backStockMap={backStockMap}
-            mainStockMap={mainStockMap}
-            backBoxMap={backBoxMap}
-            mainBoxMap={mainBoxMap}
+            locations={locations}
+            stockByLoc={stockByLoc}
+            boxByLoc={boxByLoc}
             componentMap={componentMap}
             allProducts={products}
             userRole={role}
@@ -957,19 +912,19 @@ export default function AdminPage() {
 // Lives in its own component so it can call useSearchParams (which Next
 // requires be inside a Suspense boundary in static export mode).
 
-type StockFilter = 'all' | 'in_stock' | 'out_of_stock' | 'back_only' | 'main_only';
+import type { StockByLoc, LocationInfo } from '@/lib/types';
+import type { StockFilter } from './components/ProductList';
 
 function InventoryListWithFilter(props: {
-  products:     Product[];
-  backStockMap: StockMap;
-  mainStockMap: StockMap;
-  backBoxMap:   StockMap;
-  mainBoxMap:   StockMap;
-  onAdjust:     (product: Product, direction: 'plus' | 'minus', location: Location) => void;
-  onEdit?:      (product: Product) => void;
+  products:    Product[];
+  locations:   LocationInfo[];
+  stockByLoc:  StockByLoc;
+  boxByLoc:    StockByLoc;
+  onAdjust:    (product: Product, direction: 'plus' | 'minus', locationId: number) => void;
+  onEdit?:     (product: Product) => void;
 }) {
   const params = useSearchParams();
   const raw = (params?.get('filter') ?? 'all') as StockFilter;
-  const stockFilter: StockFilter = (['all', 'in_stock', 'out_of_stock', 'back_only', 'main_only'] as StockFilter[]).includes(raw) ? raw : 'all';
+  const stockFilter: StockFilter = (['all', 'in_stock', 'out_of_stock'] as StockFilter[]).includes(raw) ? raw : 'all';
   return <ProductList {...props} stockFilter={stockFilter} />;
 }

@@ -27,7 +27,7 @@ export default function StatsPage() {
 }
 
 function StatsDashboard() {
-  const { products, backStockMap, mainStockMap, backBoxMap, mainBoxMap, loading } = useProducts();
+  const { products, locations, stockByLoc, boxByLoc, loading } = useProducts();
 
   function handleLogout() {
     localStorage.removeItem(SESSION_KEY);
@@ -35,21 +35,24 @@ function StatsDashboard() {
     window.location.href = '/admin';
   }
 
-  // Treat boxes as their piece-equivalent so "in stock" / "out of stock"
-  // counts agree with what the user sees on the cards in inventory.
-  function pieceTotal(map: Record<number, number>, boxMap: Record<number, number>, p: { product_id: number; pieces_per_box: number | null }) {
-    const ppb = p.pieces_per_box ?? 0;
-    return (map[p.product_id] || 0) + (boxMap[p.product_id] || 0) * ppb;
+  function totalForProduct(pid: number, ppb: number): number {
+    return locations.reduce((s, l) =>
+      s + ((stockByLoc[l.location_id] ?? {})[pid] ?? 0) + ((boxByLoc[l.location_id] ?? {})[pid] ?? 0) * ppb, 0);
   }
 
-  const totalBack = products.reduce((s, p) => s + pieceTotal(backStockMap, backBoxMap, p), 0);
-  const totalMain = products.reduce((s, p) => s + pieceTotal(mainStockMap, mainBoxMap, p), 0);
-  const inStock   = products.filter(p =>
-    pieceTotal(backStockMap, backBoxMap, p) + pieceTotal(mainStockMap, mainBoxMap, p) > 0,
-  ).length;
+  // Back Godown and Main Store shims (for the location-specific stat cards)
+  const backId = locations.find(l => l.location_name === 'Back Godown')?.location_id ?? 2;
+  const mainId = locations.find(l => l.location_name === 'Main Store')?.location_id  ?? 1;
+  function locTotal(locId: number, pid: number, ppb: number) {
+    return ((stockByLoc[locId] ?? {})[pid] ?? 0) + ((boxByLoc[locId] ?? {})[pid] ?? 0) * ppb;
+  }
+
+  const totalBack = products.reduce((s, p) => s + locTotal(backId, p.product_id, p.pieces_per_box ?? 0), 0);
+  const totalMain = products.reduce((s, p) => s + locTotal(mainId, p.product_id, p.pieces_per_box ?? 0), 0);
+  const inStock   = products.filter(p => totalForProduct(p.product_id, p.pieces_per_box ?? 0) > 0).length;
   const outStock  = products.length - inStock;
-  const backCount = products.filter(p => pieceTotal(backStockMap, backBoxMap, p) > 0).length;
-  const mainCount = products.filter(p => pieceTotal(mainStockMap, mainBoxMap, p) > 0).length;
+  const backCount = products.filter(p => locTotal(backId, p.product_id, p.pieces_per_box ?? 0) > 0).length;
+  const mainCount = products.filter(p => locTotal(mainId, p.product_id, p.pieces_per_box ?? 0) > 0).length;
 
   // value = the total piece count for piece-pool cards, or the product
   // count for status cards. sub = the secondary line under the value.

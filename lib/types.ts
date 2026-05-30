@@ -26,17 +26,19 @@ export interface Product {
 
 export type StockMap = Record<number, number>;
 
-export type AdjAction =
-  | 'sold'
-  | 'to_front'
-  | 'to_back'
-  | 'from_back'
-  | 'from_main'
-  | 'stockin';
+// All StockMaps keyed by location_id  →  product_id  →  qty
+export type StockByLoc = Record<number, StockMap>;
 
-export type Location = 'back' | 'main';
+export interface LocationInfo {
+  location_id:   number;
+  location_name: string;
+  active_status: boolean;
+}
 
-export const LOC_ID: Record<Location, number> = { back: 2, main: 1 };
+export type AdjAction = 'sold' | 'transfer' | 'receive' | 'stockin';
+
+/** @deprecated use location_id (number) directly */
+export type Location = number;
 
 export const SESSION_KEY = 'aad_admin_auth';
 export const USER_KEY    = 'aad_admin_user';

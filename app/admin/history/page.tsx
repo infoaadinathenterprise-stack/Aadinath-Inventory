@@ -23,7 +23,8 @@ const TYPE_META: Record<string, { label: string; emoji: string; color: string }>
   AUTO_DEDUCT:      { label: 'Component',   emoji: '🔧',  color: 'text-muted bg-surface2 border-white/15' },
 };
 
-const LOC_NAME: Record<number, string> = { 1: 'Main Store', 2: 'Back Godown' };
+// Location names loaded from DB — starts with fallbacks, filled by load()
+let LOC_NAME: Record<number, string> = { 1: 'Main Store', 2: 'Back Godown' };
 
 function formatDate(iso: string) {
   return new Date(iso).toLocaleString('en-KE', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
@@ -88,13 +89,16 @@ function HistoryDashboard() {
   const load = useCallback(async () => {
     setLoading(true);
     setLoadError(null);
-    const [movRes, reqRes, prodRes] = await Promise.all([
+    const [movRes, reqRes, prodRes, locRes] = await Promise.all([
       supabase.from('stock_movements').select('*').order('id', { ascending: false }).limit(500),
       supabase.from('stock_requests').select('*').neq('status', 'PENDING').order('request_id', { ascending: false }).limit(500),
-      // Load enough fields to render unit-of-measure, prices, brand,
-      // model on the detail panel without a follow-up query.
       supabase.from('products').select('product_id, product_name, brand, model, unit_of_measure, display_unit, pieces_per_box, selling_price, buying_price, box_selling_price'),
+      supabase.from('locations').select('location_id, location_name'),
     ]);
+    // Update module-level LOC_NAME with DB values
+    for (const loc of locRes.data ?? []) {
+      LOC_NAME[loc.location_id as number] = loc.location_name as string;
+    }
 
     const fromMovements: StockMovement[] = (movRes.data ?? []) as StockMovement[];
     const fromRequests: StockMovement[] = (reqRes.data ?? []).map(r => ({

@@ -6,8 +6,8 @@ import Link from 'next/link';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useProducts } from '@/lib/hooks/useProducts';
 import { upsertStock, logMovement } from '@/lib/stockActions';
-import type { Product, Location } from '@/lib/types';
-import { SESSION_KEY, LOC_ID, ROLE_KEY } from '@/lib/types';
+import type { Product } from '@/lib/types';
+import { SESSION_KEY, ROLE_KEY } from '@/lib/types';
 
 const LABELS_PER_PAGE = 24;
 type SortBy = 'recent' | 'name';
@@ -37,25 +37,27 @@ export default function LabelsPage() {
 type Selected = Record<number, number>; // productId → copies
 
 function LabelsDashboard() {
-  const { products, backStockMap, mainStockMap, loading, error, refresh } = useProducts();
-  const [selected, setSelected] = useState<Selected>({});
-  const [search,   setSearch]   = useState('');
-  const [location, setLocation] = useState<Location>('back');
-  const [sortBy,   setSortBy]   = useState<SortBy>('recent');
+  const { products, locations, stockByLoc, loading, error, refresh } = useProducts();
+  const [selected, setSelected]   = useState<Selected>({});
+  const [search,   setSearch]     = useState('');
+  const [locationId, setLocationId] = useState<number>(0);
+  const [sortBy,   setSortBy]     = useState<SortBy>('recent');
   const [mobileTab, setMobileTab] = useState<'products' | 'preview'>('products');
-  // 'all' = browse everything in the location; 'selected' = only show
-  // products already added to the print queue, so the user can quickly
-  // review or deselect.
-  const [viewMode, setViewMode] = useState<'all' | 'selected'>('all');
-  const [toast,    setToast]    = useState<{ msg: string; type: string } | null>(null);
+  const [viewMode, setViewMode]   = useState<'all' | 'selected'>('all');
+  const [toast,    setToast]      = useState<{ msg: string; type: string } | null>(null);
   const [stockModal, setStockModal] = useState<{ mode: 'add' | 'remove'; product: Product } | null>(null);
   const [stockQty,   setStockQty]   = useState(1);
   const [stockSaving, setStockSaving] = useState(false);
   const toastRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
-  const stockMap   = location === 'back' ? backStockMap : mainStockMap;
-  const locId      = LOC_ID[location];
-  const locName    = location === 'back' ? 'Back Godown' : 'Main Store';
+  // Set default location once loaded
+  useEffect(() => {
+    if (!locationId && locations.length > 0) setLocationId(locations[0].location_id);
+  }, [locations, locationId]);
+
+  const stockMap = stockByLoc[locationId] ?? {};
+  const locId    = locationId;
+  const locName  = locations.find(l => l.location_id === locationId)?.location_name ?? 'Location';
 
   function showToast(msg: string, type = 'success') {
     setToast({ msg, type });
@@ -230,18 +232,18 @@ function LabelsDashboard() {
       <div className="flex flex-1 overflow-hidden">
         <aside className={`${mobileTab === 'preview' ? 'hidden' : 'flex'} sm:flex print-hide w-full sm:w-72 lg:w-80 shrink-0 bg-surface border-r border-white/8 flex-col`}>
           <div className="p-3 border-b border-white/8 shrink-0 flex flex-col gap-2">
-            <div className="flex gap-1.5">
-              {(['main', 'back'] as Location[]).map(loc => (
+            <div className="flex gap-1.5 overflow-x-auto scrollbar-none">
+              {locations.map(loc => (
                 <button
-                  key={loc}
-                  onClick={() => { setLocation(loc); setSelected({}); }}
-                  className={`flex-1 py-2 rounded-xl border text-[11px] font-bold transition-all ${
-                    location === loc
+                  key={loc.location_id}
+                  onClick={() => { setLocationId(loc.location_id); setSelected({}); }}
+                  className={`shrink-0 flex-1 py-2 rounded-xl border text-[11px] font-bold transition-all ${
+                    locationId === loc.location_id
                       ? 'border-teal bg-teal/10 text-teal'
                       : 'border-white/8 bg-surface2 text-muted hover:border-white/20'
                   }`}
                 >
-                  {loc === 'main' ? '🏪 Main Store' : '🏭 Back Godown'}
+                  {loc.location_name}
                 </button>
               ))}
             </div>

@@ -11,10 +11,10 @@ import Toast, { type ToastState } from '../components/Toast';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type LocationKey = 'back' | 'main';
-
-const LOC_ID: Record<LocationKey, number>   = { back: 2, main: 1 };
-const LOC_NAME: Record<LocationKey, string> = { back: 'Back Godown', main: 'Main Store' };
+interface LocationInfo {
+  location_id:   number;
+  location_name: string;
+}
 
 interface AuditRow {
   product:      Product;
@@ -101,7 +101,8 @@ export default function InventoryAuditPage() {
 // ─── Main dashboard ───────────────────────────────────────────────────────────
 
 function InventoryAuditDashboard() {
-  const [location,    setLocation]    = useState<LocationKey>('back');
+  const [locations,   setLocations]   = useState<LocationInfo[]>([]);
+  const [locationId,  setLocationId]  = useState<number>(0);
   const [allProducts, setAllProducts] = useState<Product[]>([]);
   const [auditRows,   setAuditRows]   = useState<AuditRow[]>([]);
   const [loading,     setLoading]     = useState(false);
@@ -121,14 +122,18 @@ function InventoryAuditDashboard() {
     window.location.href = '/admin';
   }
 
-  // ── Load all active products once ────────────────────────────────────────
+  // ── Load locations + products once ───────────────────────────────────────
   useEffect(() => {
-    supabase
-      .from('products')
-      .select('*')
-      .eq('active_status', true)
-      .order('product_name')
-      .then(({ data }) => setAllProducts((data ?? []) as Product[]));
+    Promise.all([
+      supabase.from('products').select('*').eq('active_status', true).order('product_name'),
+      supabase.from('locations').select('location_id, location_name').eq('active_status', true).order('location_id'),
+    ]).then(([{ data: prods }, { data: locs }]) => {
+      setAllProducts((prods ?? []) as Product[]);
+      const locList = (locs ?? []) as LocationInfo[];
+      setLocations(locList);
+      if (locList.length > 0 && !locationId) setLocationId(locList[0].location_id);
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // ── Load audit rows whenever location or product list changes ─────────────
@@ -137,7 +142,8 @@ function InventoryAuditDashboard() {
     setLoading(true);
     setSelected(null);
 
-    const locId = LOC_ID[location];
+    const locId = locationId;
+    if (!locId) return;
 
     try {
       // 1. All stock rows for this location (any qty, including 0)
@@ -199,7 +205,7 @@ function InventoryAuditDashboard() {
     } finally {
       setLoading(false);
     }
-  }, [location, allProducts]);
+  }, [locationId, allProducts]);
 
   useEffect(() => { loadAuditRows(); }, [loadAuditRows]);
 
@@ -208,7 +214,7 @@ function InventoryAuditDashboard() {
     setSelected(row);
     setHistLoading(true);
     setHistory([]);
-    const locId = LOC_ID[location];
+    const locId = locationId;
     const { data, error } = await supabase
       .from('stock_requests')
       .select('request_id, request_type, quantity, from_location_id, to_location_id, notes, requested_at')
@@ -254,8 +260,7 @@ function InventoryAuditDashboard() {
     return [...map.entries()].sort(([a], [b]) => a.localeCompare(b));
   }, [filtered]);
 
-  const locId   = LOC_ID[location];
-  const locName = LOC_NAME[location];
+  const locName = locations.find(l => l.location_id === locationId)?.location_name ?? 'Location';
   const today   = fmtDateLong(new Date());
 
   return (
@@ -351,19 +356,19 @@ function InventoryAuditDashboard() {
             </button>
           </div>
 
-          {/* ── Location toggle ──────────────────────────────────────────── */}
-          <div className="flex gap-2 mb-4">
-            {(['back', 'main'] as LocationKey[]).map(loc => (
+          {/* ── Location toggle (dynamic) ────────────────────────────── */}
+          <div className="flex gap-2 mb-4 overflow-x-auto scrollbar-none">
+            {locations.map(loc => (
               <button
-                key={loc}
-                onClick={() => { setLocation(loc); setSearch(''); }}
-                className={`flex-1 py-2.5 rounded-xl border text-sm font-bold transition-all ${
-                  location === loc
+                key={loc.location_id}
+                onClick={() => { setLocationId(loc.location_id); setSearch(''); }}
+                className={`shrink-0 flex-1 py-2.5 rounded-xl border text-sm font-bold transition-all ${
+                  locationId === loc.location_id
                     ? 'border-teal bg-teal/10 text-teal'
                     : 'border-white/8 bg-surface2 text-muted hover:border-white/20'
                 }`}
               >
-                {loc === 'back' ? '📦 Back Godown' : '🏪 Main Store'}
+                {loc.location_name}
               </button>
             ))}
           </div>
@@ -549,8 +554,8 @@ function InventoryAuditDashboard() {
                         label: mov.movement_type, emoji: '📝', color: 'text-muted',
                       };
                       // Direction label relative to the current location
-                      const isIn  = mov.to_location_id   === locId;
-                      const isOut = mov.from_location_id === locId;
+                      const isIn  = mov.to_location_id   === locationId;
+                      const isOut = mov.from_location_id === locationId;
                       const dirLabel =
                         isIn && isOut  ? '↔ Both'  :
                         isIn           ? '↓ In'    :

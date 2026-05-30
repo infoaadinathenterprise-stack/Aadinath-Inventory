@@ -12,7 +12,7 @@ import { upsertStock, logMovement } from '@/lib/stockActions';
 import AdjustStockModal from '@/app/admin/components/AdjustStockModal';
 import BarcodeScanner   from '@/app/admin/components/BarcodeScanner';
 import Toast, { type ToastState } from '@/app/admin/components/Toast';
-import type { Product, Location } from '@/lib/types';
+import type { Product, LocationInfo } from '@/lib/types';
 import { SESSION_KEY, USER_KEY } from '@/lib/types';
 
 // ── Auth guard ─────────────────────────────────────────────────────────────────
@@ -36,11 +36,12 @@ export default function PosPage() {
 type CartUnit = 'piece' | 'box';
 
 interface CartItem {
-  product:      Product;
-  qty:          number;
-  unit:         CartUnit;
-  sellPrice:    number | null;
-  groupChoices: Record<string, number>;  // component_product_id keyed by choice_group name
+  product:         Product;
+  qty:             number;
+  unit:            CartUnit;
+  sellPrice:       number | null;
+  groupChoices:    Record<string, number>;
+  transferDestId?: number;  // selected destination for → Move action
 }
 
 // Does this product have a bulk unit (box/roll/etc.)? Gate on
@@ -108,17 +109,15 @@ function splitVAT(totalIncl: number) {
 interface ModalState {
   product:   Product;
   direction: 'plus' | 'minus';
-  location:  Location;
+  location:  number;  // location_id
 }
 
 function PosDashboard() {
-  const {
-    products, backStockMap, mainStockMap, backBoxMap, mainBoxMap,
-    loading, error, refresh,
-  } = useProducts();
+  const { products, locations, stockByLoc, boxByLoc, loading, error, refresh } = useProducts();
   const componentMap = useProductComponents();
 
-  const [location,    setLocation]    = useState<Location>('back');
+  // locationId: default to first location once loaded
+  const [locationId,  setLocationId]  = useState<number>(0);
   const [category,    setCategory]    = useState('All');
   const [search,      setSearch]      = useState('');
   const [modal,       setModal]       = useState<ModalState | null>(null);
@@ -132,27 +131,26 @@ function PosDashboard() {
   const toastId    = useRef(0);
   const barcodeRef = useRef<HTMLInputElement>(null);
 
-  // Auto-focus barcode input on page load (delayed to survive loading state transition)
+  // Set initial location once locations load
+  useEffect(() => {
+    if (!locationId && locations.length > 0) setLocationId(locations[0].location_id);
+  }, [locations, locationId]);
+
   useEffect(() => {
     const t = setTimeout(() => barcodeRef.current?.focus(), 300);
     return () => clearTimeout(t);
   }, []);
 
-  // Reset restock alerts when the operator switches between locations
   useEffect(() => {
     setRestockSaleAlert([]);
     setRestockBannerOpen(true);
-  }, [location]);
+  }, [locationId]);
 
-  // Global keydown redirect — USB scanner types then sends Enter; if focus
-  // has drifted to a non-input element, snap it back to the barcode field
   useEffect(() => {
     function handleGlobalKey(e: KeyboardEvent) {
       const active = document.activeElement;
       const isInput = active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement;
-      if (!isInput && barcodeRef.current) {
-        barcodeRef.current.focus();
-      }
+      if (!isInput && barcodeRef.current) barcodeRef.current.focus();
     }
     window.addEventListener('keydown', handleGlobalKey);
     return () => window.removeEventListener('keydown', handleGlobalKey);
@@ -162,17 +160,15 @@ function PosDashboard() {
     setToast({ msg, type, id: ++toastId.current });
   }
 
-  const sm = location === 'back' ? backStockMap : mainStockMap;
-  const bm = location === 'back' ? backBoxMap   : mainBoxMap;
+  const sm = stockByLoc[locationId] ?? {};
+  const bm = boxByLoc[locationId]   ?? {};
+  const locName = locations.find(l => l.location_id === locationId)?.location_name ?? '';
 
-  // Max quantity we can put in the cart for this product in the
-  // chosen unit. Treats both locations as one piece pool (overflow
-  // pulls from the other location when current runs out) and
-  // converts to the chosen unit if needed.
+  // Max across ALL locations combined (overflow logic)
   function maxForProduct(p: Product, unit: CartUnit = 'piece'): number {
     const ppb = p.pieces_per_box ?? 0;
-    const totalPcs = (backStockMap[p.product_id] || 0) + (mainStockMap[p.product_id] || 0);
-    const totalBx  = (backBoxMap[p.product_id]   || 0) + (mainBoxMap[p.product_id]   || 0);
+    const totalPcs = locations.reduce((s, l) => s + ((stockByLoc[l.location_id] ?? {})[p.product_id] ?? 0), 0);
+    const totalBx  = locations.reduce((s, l) => s + ((boxByLoc[l.location_id]   ?? {})[p.product_id] ?? 0), 0);
     const pool = totalPcs + totalBx * ppb;
     if (unit === 'box' && ppb > 0) return Math.floor(pool / ppb);
     return pool;
@@ -201,18 +197,17 @@ function PosDashboard() {
     });
   }, [inStock, category, search]);
 
-  // Products at or below reorder level in Main Store that still have
-  // stock in Back Godown — the shelf needs restocking.
+  // Products low at current location but available elsewhere
   const restockNeeded = useMemo(() => {
-    if (location !== 'main') return [];
     return products.filter(p => {
       const ppb     = p.pieces_per_box ?? 0;
-      const mainTot = (mainStockMap[p.product_id] || 0) + (mainBoxMap[p.product_id] || 0) * ppb;
-      const backTot = (backStockMap[p.product_id] || 0) + (backBoxMap[p.product_id] || 0) * ppb;
-      const reorder = p.reorder_level ?? 2;
-      return mainTot <= reorder && backTot > 0;
+      const curTot  = (sm[p.product_id] || 0) + (bm[p.product_id] || 0) * ppb;
+      const othTot  = locations
+        .filter(l => l.location_id !== locationId)
+        .reduce((s, l) => s + ((stockByLoc[l.location_id] ?? {})[p.product_id] ?? 0) + ((boxByLoc[l.location_id] ?? {})[p.product_id] ?? 0) * ppb, 0);
+      return curTot <= (p.reorder_level ?? 2) && othTot > 0;
     });
-  }, [location, products, mainStockMap, mainBoxMap, backStockMap, backBoxMap]);
+  }, [locationId, products, sm, bm, locations, stockByLoc, boxByLoc]);
 
   // Pick a default sell price based on the chosen unit. For 'piece'
   // we use products.selling_price; for the bulk unit we use
@@ -267,7 +262,7 @@ function PosDashboard() {
       products.find(p => p.product_name.toLowerCase().includes(code.toLowerCase()));
     if (!match) { showToast('No product found: ' + code, 'error'); return; }
     const hasStock = (sm[match.product_id] || 0) > 0 || (bm[match.product_id] || 0) > 0;
-    if (!hasStock) { showToast(`Not in ${location === 'back' ? 'Back Godown' : 'Main Store'}: ${match.product_name}`, 'error'); return; }
+    if (!hasStock) { showToast(`Not in ${locName}: ${match.product_name}`, 'error'); return; }
     addToCart(match);
   }
 
@@ -277,7 +272,7 @@ function PosDashboard() {
       products.find(p => p.product_name.toLowerCase().includes(code.toLowerCase()));
     if (!match) { showToast('No product found: ' + code, 'error'); return; }
     const hasStock = (sm[match.product_id] || 0) > 0 || (bm[match.product_id] || 0) > 0;
-    if (!hasStock) { showToast(`Not in ${location === 'back' ? 'Back Godown' : 'Main Store'}: ${match.product_name}`, 'error'); return; }
+    if (!hasStock) { showToast(`Not in ${locName}: ${match.product_name}`, 'error'); return; }
     addToCart(match);
   }
 
@@ -292,7 +287,7 @@ function PosDashboard() {
       addToCart(product);
       return;
     }
-    setModal({ product, direction, location });
+    setModal({ product, direction, location: locationId });
   }
 
   // Sell `qty` of `unit` for product `p`: take from current location
@@ -319,15 +314,22 @@ function PosDashboard() {
     const isBoxMode = unit === 'box' && ppb > 0;
     const movPieces = isBoxMode ? qty * ppb : qty;
 
-    const locId    = location === 'back' ? 2 : 1;
-    const otherId  = location === 'back' ? 1 : 2;
-    const locName  = location === 'back' ? 'Back Godown' : 'Main Store';
-    const otherName = location === 'back' ? 'Main Store' : 'Back Godown';
+    const locId     = locationId;
+    const otherLocs = locations.filter(l => l.location_id !== locId);
+    // For overflow we pick the "best" other location = most stock
+    const bestOther = otherLocs.reduce<LocationInfo | null>((best, l) => {
+      const tot = ((stockByLoc[l.location_id] ?? {})[pid] ?? 0) + ((boxByLoc[l.location_id] ?? {})[pid] ?? 0) * ppb;
+      const bestTot = best ? ((stockByLoc[best.location_id] ?? {})[pid] ?? 0) + ((boxByLoc[best.location_id] ?? {})[pid] ?? 0) * ppb : -1;
+      return tot > bestTot ? l : best;
+    }, null);
+    const otherId   = bestOther?.location_id ?? 0;
+    const saleLocName  = locName;
+    const otherName = bestOther?.location_name ?? 'Other';
 
-    const curPcs = (location === 'back' ? backStockMap : mainStockMap)[pid] || 0;
-    const curBx  = (location === 'back' ? backBoxMap   : mainBoxMap  )[pid] || 0;
-    const otherPcs = (location === 'back' ? mainStockMap : backStockMap)[pid] || 0;
-    const otherBx  = (location === 'back' ? mainBoxMap   : backBoxMap )[pid] || 0;
+    const curPcs   = (stockByLoc[locId]   ?? {})[pid] ?? 0;
+    const curBx    = (boxByLoc[locId]     ?? {})[pid] ?? 0;
+    const otherPcs = bestOther ? ((stockByLoc[bestOther.location_id] ?? {})[pid] ?? 0) : 0;
+    const otherBx  = bestOther ? ((boxByLoc[bestOther.location_id]   ?? {})[pid] ?? 0) : 0;
 
     const totalCur   = curPcs   + curBx   * ppb;
     const totalOther = otherPcs + otherBx * ppb;
@@ -356,19 +358,19 @@ function PosDashboard() {
     for (const comp of activeComps) {
       const cid       = comp.component_product_id;
       const cPpb      = products.find(pr => pr.product_id === cid)?.pieces_per_box ?? 0;
-      const cCurPcs   = (location === 'back' ? backStockMap : mainStockMap)[cid] || 0;
-      const cCurBx    = (location === 'back' ? backBoxMap   : mainBoxMap  )[cid] || 0;
-      const cOthPcs   = (location === 'back' ? mainStockMap : backStockMap)[cid] || 0;
-      const cOthBx    = (location === 'back' ? mainBoxMap   : backBoxMap  )[cid] || 0;
-      const movComp   = movPieces * comp.quantity;
+      const cCurPcs   = (stockByLoc[locId] ?? {})[cid] ?? 0;
+      const cCurBx    = (boxByLoc[locId]   ?? {})[cid] ?? 0;
       const cCurTotal = cCurPcs + cCurBx * cPpb;
-      const cOthTotal = cOthPcs + cOthBx * cPpb;
-      const compName  = products.find(pr => pr.product_id === cid)?.product_name ?? `#${cid}`;
+      const cOthTotal = locations
+        .filter(l => l.location_id !== locId)
+        .reduce((s, l) => s + ((stockByLoc[l.location_id] ?? {})[cid] ?? 0) + ((boxByLoc[l.location_id] ?? {})[cid] ?? 0) * cPpb, 0);
+      const movComp  = movPieces * comp.quantity;
+      const compName = products.find(pr => pr.product_id === cid)?.product_name ?? `#${cid}`;
       if (cCurTotal + cOthTotal < movComp) {
         throw new Error(
           `Not enough "${compName}": need ${movComp}, ` +
           `only ${cCurTotal + cOthTotal} in stock ` +
-          `(${locName}: ${cCurTotal}, ${otherName}: ${cOthTotal})`
+          `(${saleLocName}: ${cCurTotal}, other locations: ${cOthTotal})`
         );
       }
     }
@@ -387,7 +389,7 @@ function PosDashboard() {
       }
       const before = curPcs + curBx * ppb;
       const after  = newState.quantity + newState.box_quantity * ppb;
-      await logMovement(pid, locId, null, fromCurPieces, 'SALE', `Sold from ${locName}${priceSuffix}`, { before, after });
+      await logMovement(pid, locId, null, fromCurPieces, 'SALE', `Sold from ${saleLocName}${priceSuffix}`, { before, after });
       await upsertStock(pid, locId, newState);
     }
 
@@ -405,10 +407,10 @@ function PosDashboard() {
     for (const comp of activeComps) {
       const cid      = comp.component_product_id;
       const cPpb     = products.find(pr => pr.product_id === cid)?.pieces_per_box ?? 0;
-      const srcPcs   = (location === 'back' ? backStockMap : mainStockMap)[cid] || 0;
-      const srcBx    = (location === 'back' ? backBoxMap   : mainBoxMap  )[cid] || 0;
-      const othPcs   = (location === 'back' ? mainStockMap : backStockMap)[cid] || 0;
-      const othBx    = (location === 'back' ? mainBoxMap   : backBoxMap  )[cid] || 0;
+      const srcPcs   = (stockByLoc[locId]   ?? {})[cid] ?? 0;
+      const srcBx    = (boxByLoc[locId]     ?? {})[cid] ?? 0;
+      const othPcs   = bestOther ? ((stockByLoc[bestOther.location_id] ?? {})[cid] ?? 0) : 0;
+      const othBx    = bestOther ? ((boxByLoc[bestOther.location_id]   ?? {})[cid] ?? 0) : 0;
       const movComp  = movPieces * comp.quantity;
       const srcTotal = srcPcs + srcBx * cPpb;
 
@@ -433,37 +435,37 @@ function PosDashboard() {
     }
   }
 
-  // Transfer `qty` of `unit` for `p` from back godown to main store.
-  // Also transfers all components (always-deducted + chosen group picks)
-  // so the component stock in each location stays accurate.
+  // Transfer `qty` of `unit` for `p` from current location to `destLocationId`.
   async function transferOneItem(
     p: Product,
     qty: number,
     unit: CartUnit,
+    destLocationId: number,
     groupChoices: Record<string, number> = {},
   ) {
     const pid = p.product_id;
     const ppb = p.pieces_per_box ?? 0;
-    const backId = 2, mainId = 1;
-    const backPcs = backStockMap[pid] || 0;
-    const backBx  = backBoxMap[pid]   || 0;
-    const mainPcs = mainStockMap[pid] || 0;
-    const mainBx  = mainBoxMap[pid]   || 0;
+    const srcId   = locationId;
+    const dstId   = destLocationId;
+    const srcName = locName;
+    const dstName = locations.find(l => l.location_id === dstId)?.location_name ?? 'Destination';
+
+    const srcPcs = (stockByLoc[srcId] ?? {})[pid] ?? 0;
+    const srcBx  = (boxByLoc[srcId]   ?? {})[pid] ?? 0;
+    const dstPcs = (stockByLoc[dstId] ?? {})[pid] ?? 0;
+    const dstBx  = (boxByLoc[dstId]   ?? {})[pid] ?? 0;
 
     const movPieces = unit === 'box' && ppb > 0 ? qty * ppb : qty;
-    const backTotal = backPcs + backBx * ppb;
-    if (movPieces > backTotal) {
-      throw new Error(`Back Godown only has ${backTotal} ${unitLabel(p, 'piece').toLowerCase()}s of ${p.product_name}`);
+    const srcTotal  = srcPcs + srcBx * ppb;
+    if (movPieces > srcTotal) {
+      throw new Error(`${srcName} only has ${srcTotal} ${unitLabel(p, 'piece').toLowerCase()}s of ${p.product_name}`);
     }
 
-    // Move main product — log first so if the write fails stock is untouched.
-    const newBack = deductFromLocation(backPcs, backBx, qty, unit, ppb);
-    const newMain = addToLocation(mainPcs, mainBx, qty, unit);
-    const backBefore = backPcs + backBx * ppb;
-    const backAfter  = newBack.quantity + newBack.box_quantity * ppb;
-    await logMovement(pid, backId, mainId, movPieces, 'TRANSFER', 'Moved from Back Godown to Main Store', { before: backBefore, after: backAfter });
-    await upsertStock(pid, backId, newBack);
-    await upsertStock(pid, mainId, newMain);
+    const newSrc = deductFromLocation(srcPcs, srcBx, qty, unit, ppb);
+    const newDst = addToLocation(dstPcs, dstBx, qty, unit);
+    await logMovement(pid, srcId, dstId, movPieces, 'TRANSFER', `Moved from ${srcName} to ${dstName}`, { before: srcTotal, after: newSrc.quantity + newSrc.box_quantity * ppb });
+    await upsertStock(pid, srcId, newSrc);
+    await upsertStock(pid, dstId, newDst);
 
     // Move components with the product
     const productComps = componentMap[pid] ?? [];
@@ -480,17 +482,17 @@ function PosDashboard() {
         const cid     = comp.component_product_id;
         const cPpb    = products.find(pr => pr.product_id === cid)?.pieces_per_box ?? 0;
         const movComp = movPieces * comp.quantity;
-        const cBackPcs = backStockMap[cid] || 0;
-        const cBackBx  = backBoxMap[cid]   || 0;
-        const cMainPcs = mainStockMap[cid] || 0;
-        const cMainBx  = mainBoxMap[cid]   || 0;
-        const rawBack = deductFromLocation(cBackPcs, cBackBx, movComp, 'piece', cPpb);
-        const newBackState = { quantity: Math.max(0, rawBack.quantity), box_quantity: Math.max(0, rawBack.box_quantity) };
-        const cBefore = cBackPcs + cBackBx * cPpb;
-        const cAfter  = newBackState.quantity + newBackState.box_quantity * cPpb;
-        await logMovement(cid, backId, mainId, movComp, 'TRANSFER', `Auto: component of ${p.product_name}`, { before: cBefore, after: cAfter });
-        await upsertStock(cid, backId, newBackState);
-        await upsertStock(cid, mainId, { quantity: cMainPcs + movComp, box_quantity: cMainBx });
+        const cSrcPcs = (stockByLoc[srcId] ?? {})[cid] ?? 0;
+        const cSrcBx  = (boxByLoc[srcId]   ?? {})[cid] ?? 0;
+        const cDstPcs = (stockByLoc[dstId] ?? {})[cid] ?? 0;
+        const cDstBx  = (boxByLoc[dstId]   ?? {})[cid] ?? 0;
+        const rawSrc = deductFromLocation(cSrcPcs, cSrcBx, movComp, 'piece', cPpb);
+        const newSrcState = { quantity: Math.max(0, rawSrc.quantity), box_quantity: Math.max(0, rawSrc.box_quantity) };
+        const cBefore = cSrcPcs + cSrcBx * cPpb;
+        const cAfter  = newSrcState.quantity + newSrcState.box_quantity * cPpb;
+        await logMovement(cid, srcId, dstId, movComp, 'TRANSFER', `Auto: component of ${p.product_name}`, { before: cBefore, after: cAfter });
+        await upsertStock(cid, srcId, newSrcState);
+        await upsertStock(cid, dstId, { quantity: cDstPcs + movComp, box_quantity: cDstBx });
       }
     }
   }
@@ -502,7 +504,7 @@ function PosDashboard() {
     const total = items.reduce((s, i) => s + (i.sellPrice ?? 0) * i.qty, 0);
     const itemCount = items.reduce((s, i) => s + i.qty, 0);
     const performedBy = (typeof window !== 'undefined' && localStorage.getItem(USER_KEY)) || 'Admin';
-    const locId = location === 'back' ? 2 : 1;
+    const locId = locationId;
 
     const { data: saleRow, error: saleErr } = await supabase.from('sales').insert({
       sale_date:    new Date().toISOString().split('T')[0],
@@ -557,9 +559,8 @@ function PosDashboard() {
     return groups.filter(g => item.groupChoices[g] == null);
   }
 
-  async function processCart(action: 'sold' | 'to_main') {
+  async function processCart(action: 'sold' | 'move') {
     if (cart.length === 0) return;
-    // Validate choice-group components for both sell and transfer
     for (const item of cart) {
       const missing = getMissingChoices(item);
       if (missing.length > 0) {
@@ -567,16 +568,9 @@ function PosDashboard() {
         setCartOpen(true);
         return;
       }
-    }
-    if (action === 'to_main') {
-      const overflows = cart.filter(it => {
-        const ppb = it.product.pieces_per_box ?? 0;
-        const movPieces = it.unit === 'box' && ppb > 0 ? it.qty * ppb : it.qty;
-        const backTotal = (backStockMap[it.product.product_id] || 0) + (backBoxMap[it.product.product_id] || 0) * ppb;
-        return movPieces > backTotal;
-      });
-      if (overflows.length > 0) {
-        showToast(`Cannot move more than Back Godown has: ${overflows.map(o => o.product.product_name).join(', ')}`, 'error');
+      if (action === 'move' && !item.transferDestId) {
+        showToast(`Select a destination location for ${item.product.product_name}`, 'error');
+        setCartOpen(true);
         return;
       }
     }
@@ -586,25 +580,19 @@ function PosDashboard() {
         if (action === 'sold') {
           await sellOneItem(item.product, item.qty, item.unit, item.sellPrice, item.groupChoices);
         } else {
-          await transferOneItem(item.product, item.qty, item.unit, item.groupChoices);
+          await transferOneItem(item.product, item.qty, item.unit, item.transferDestId!, item.groupChoices);
         }
       }
-      // After all stock + movement writes succeed, snapshot the cart
-      // to the sales journal so the new /admin/sales page can show
-      // daily totals + per-product breakdowns.
-      if (action === 'sold') {
-        await recordSale(cart);
-      }
+      if (action === 'sold') await recordSale(cart);
       showToast(`${action === 'sold' ? 'Sold' : 'Moved'} ${cart.length} item(s) ✓`, 'success');
-      // After a Main Store sale, surface any items that have stock
-      // waiting in Back Godown so the operator knows to restock.
-      if (action === 'sold' && location === 'main') {
+      // Restock alert: after a sale, show items available elsewhere
+      if (action === 'sold') {
         const names = cart
           .filter(item => {
-            const ppb     = item.product.pieces_per_box ?? 0;
-            const backTot = (backStockMap[item.product.product_id] || 0)
-                          + (backBoxMap[item.product.product_id]   || 0) * ppb;
-            return backTot > 0;
+            const ppb = item.product.pieces_per_box ?? 0;
+            return locations
+              .filter(l => l.location_id !== locationId)
+              .some(l => ((stockByLoc[l.location_id] ?? {})[item.product.product_id] ?? 0) + ((boxByLoc[l.location_id] ?? {})[item.product.product_id] ?? 0) * ppb > 0);
           })
           .map(item => item.product.product_name);
         if (names.length > 0) setRestockSaleAlert(names);
@@ -620,21 +608,15 @@ function PosDashboard() {
     }
   }
 
-  async function processItem(item: CartItem, action: 'sold' | 'to_main') {
-    // Validate choice-group components for both sell and transfer
+  async function processItem(item: CartItem, action: 'sold' | 'move') {
     const missing = getMissingChoices(item);
     if (missing.length > 0) {
       showToast(`Pick a ${missing[0]} for ${item.product.product_name}`, 'error');
       return;
     }
-    if (action === 'to_main') {
-      const ppb = item.product.pieces_per_box ?? 0;
-      const movPieces = item.unit === 'box' && ppb > 0 ? item.qty * ppb : item.qty;
-      const backTotal = (backStockMap[item.product.product_id] || 0) + (backBoxMap[item.product.product_id] || 0) * ppb;
-      if (movPieces > backTotal) {
-        showToast(`Back Godown only has ${backTotal} ${unitLabel(item.product, 'piece').toLowerCase()}s for ${item.product.product_name}`, 'error');
-        return;
-      }
+    if (action === 'move' && !item.transferDestId) {
+      showToast('Select a destination location first', 'error');
+      return;
     }
     setProcessing(true);
     try {
@@ -642,16 +624,15 @@ function PosDashboard() {
         await sellOneItem(item.product, item.qty, item.unit, item.sellPrice, item.groupChoices);
         await recordSale([item]);
       } else {
-        await transferOneItem(item.product, item.qty, item.unit, item.groupChoices);
+        await transferOneItem(item.product, item.qty, item.unit, item.transferDestId!, item.groupChoices);
       }
       setCart(c => c.filter(i => i.product.product_id !== item.product.product_id));
       showToast(`${action === 'sold' ? 'Sold' : 'Moved'}: ${item.product.product_name} ✓`, 'success');
-      // Restock alert for single-item sale from Main Store
-      if (action === 'sold' && location === 'main') {
+      if (action === 'sold') {
         const ppb     = item.product.pieces_per_box ?? 0;
-        const backTot = (backStockMap[item.product.product_id] || 0)
-                      + (backBoxMap[item.product.product_id]   || 0) * ppb;
-        if (backTot > 0) setRestockSaleAlert([item.product.product_name]);
+        const othTot  = locations.filter(l => l.location_id !== locationId)
+          .reduce((s, l) => s + ((stockByLoc[l.location_id] ?? {})[item.product.product_id] ?? 0) + ((boxByLoc[l.location_id] ?? {})[item.product.product_id] ?? 0) * ppb, 0);
+        if (othTot > 0) setRestockSaleAlert([item.product.product_name]);
       }
       refresh();
     } catch (e) {
@@ -699,8 +680,8 @@ function PosDashboard() {
         <Link href="/admin" className="text-muted hover:text-slate-100 text-sm px-3 py-1.5 rounded-lg bg-surface2 border border-white/8 transition-colors shrink-0">
           ← Back
         </Link>
-        <h1 className="text-sm font-bold text-slate-100 shrink-0">
-          {location === 'back' ? '📦 Back Godown' : '🏪 Main Store'}
+        <h1 className="text-sm font-bold text-slate-100 shrink-0 truncate">
+          🏭 {locName || 'POS'}
         </h1>
 
         <div className="flex-1 relative min-w-0 max-w-xs">
@@ -738,27 +719,26 @@ function PosDashboard() {
         </button>
       </header>
 
-      <div className="shrink-0 flex gap-2 px-3 pt-2.5 pb-2 border-b border-white/8 bg-surface">
-        {(['back', 'main'] as Location[]).map(loc => (
+      {/* Dynamic location tabs */}
+      <div className="shrink-0 flex gap-2 px-3 pt-2.5 pb-2 border-b border-white/8 bg-surface overflow-x-auto scrollbar-none">
+        {locations.map(loc => (
           <button
-            key={loc}
-            onClick={() => { setLocation(loc); setCategory('All'); }}
-            className={`flex-1 py-2 rounded-xl border text-xs font-bold transition-all ${
-              location === loc
+            key={loc.location_id}
+            onClick={() => { setLocationId(loc.location_id); setCategory('All'); }}
+            className={`shrink-0 flex-1 py-2 rounded-xl border text-xs font-bold transition-all ${
+              locationId === loc.location_id
                 ? 'border-teal bg-teal/10 text-teal'
                 : 'border-white/8 bg-surface2 text-muted hover:border-white/20'
             }`}
           >
-            {loc === 'back' ? '📦 Back Godown' : '🏪 Main Store'}
+            {loc.location_name}
           </button>
         ))}
       </div>
 
-      {/* ── Restock notification strip ─────────────────────────────────
-          Shown only when viewing Main Store and some products are at or
-          below their reorder level but still have stock in Back Godown. */}
+      {/* ── Restock notification strip ─────────────────────────────────── */}
       <AnimatePresence>
-        {location === 'main' && restockNeeded.length > 0 && (
+        {restockNeeded.length > 0 && (
           <motion.div
             key="restock-strip"
             initial={{ height: 0, opacity: 0 }}
@@ -773,7 +753,7 @@ function PosDashboard() {
               >
                 <span>📦</span>
                 <span className="flex-1 text-left">
-                  {restockNeeded.length} product{restockNeeded.length > 1 ? 's' : ''} to restock from Back Godown
+                  {restockNeeded.length} product{restockNeeded.length > 1 ? 's' : ''} low here — available elsewhere
                 </span>
                 <span className="w-4 h-4 rounded-full bg-gold/20 border border-gold/40 text-[9px] font-black flex items-center justify-center">
                   {restockBannerOpen ? '▴' : '▾'}
@@ -791,23 +771,23 @@ function PosDashboard() {
                   >
                     <div className="mt-1.5 bg-gold/5 border border-gold/15 rounded-xl px-3 py-2 max-h-40 overflow-y-auto flex flex-col gap-1.5">
                       {restockNeeded.map(p => {
-                        const ppb     = p.pieces_per_box ?? 0;
-                        const mainTot = (mainStockMap[p.product_id] || 0) + (mainBoxMap[p.product_id] || 0) * ppb;
-                        const backTot = (backStockMap[p.product_id] || 0) + (backBoxMap[p.product_id] || 0) * ppb;
+                        const ppb = p.pieces_per_box ?? 0;
                         return (
                           <div key={p.product_id} className="flex items-center justify-between gap-2">
                             <span className="text-xs text-slate-200 truncate flex-1">{p.product_name}</span>
-                            <div className="flex items-center gap-2 shrink-0 text-[10px] font-mono font-bold tabular-nums">
-                              <span className={`px-1.5 py-0.5 rounded border ${
-                                mainTot === 0
-                                  ? 'bg-danger/10 border-danger/30 text-danger'
-                                  : 'bg-gold/10 border-gold/30 text-gold'
-                              }`}>
-                                🏪 {mainTot}
-                              </span>
-                              <span className="px-1.5 py-0.5 rounded border bg-success/10 border-success/30 text-success">
-                                📦 {backTot}
-                              </span>
+                            <div className="flex items-center gap-1.5 shrink-0 text-[10px] font-mono font-bold tabular-nums flex-wrap justify-end">
+                              {locations.map(loc => {
+                                const tot = ((stockByLoc[loc.location_id] ?? {})[p.product_id] ?? 0) + ((boxByLoc[loc.location_id] ?? {})[p.product_id] ?? 0) * ppb;
+                                return (
+                                  <span key={loc.location_id} className={`px-1.5 py-0.5 rounded border ${
+                                    loc.location_id === locationId
+                                      ? tot === 0 ? 'bg-danger/10 border-danger/30 text-danger' : 'bg-gold/10 border-gold/30 text-gold'
+                                      : 'bg-success/10 border-success/30 text-success'
+                                  }`}>
+                                    {tot}
+                                  </span>
+                                );
+                              })}
                             </div>
                           </div>
                         );
@@ -855,7 +835,7 @@ function PosDashboard() {
 
       <main className="flex-1 overflow-y-auto px-3 py-3 flex flex-col gap-2">
         {visible.length === 0 && (
-          <p className="text-center text-muted text-sm py-12">No products with {location} stock</p>
+          <p className="text-center text-muted text-sm py-12">No products at {locName}</p>
         )}
         <AnimatePresence mode="popLayout">
           {visible.map((p, i) => (
@@ -863,12 +843,11 @@ function PosDashboard() {
               key={p.product_id}
               product={p}
               index={i}
-              location={location}
-              stockMap={sm}
-              boxMap={bm}
+              locationId={locationId}
+              locations={locations}
+              stockByLoc={stockByLoc}
+              boxByLoc={boxByLoc}
               onAdjust={openModal}
-              backStockMap={backStockMap}
-              backBoxMap={backBoxMap}
             />
           ))}
         </AnimatePresence>
@@ -1104,18 +1083,43 @@ function PosDashboard() {
                         <p className="text-[9px] text-gold mb-1.5">⚠ Pick {missing.join(', ')} to sell</p>
                       ) : null;
                     })()}
+                    {/* Destination picker for Move action */}
+                    {locations.filter(l => l.location_id !== locationId).length > 0 && (
+                      <div className="mb-1.5">
+                        <p className="text-[9px] text-muted uppercase font-bold tracking-widest mb-1">Move to:</p>
+                        <div className="flex gap-1 flex-wrap">
+                          {locations.filter(l => l.location_id !== locationId).map(loc => (
+                            <button
+                              key={loc.location_id}
+                              onClick={() => setCart(c => c.map(i =>
+                                i.product.product_id === item.product.product_id
+                                  ? { ...i, transferDestId: i.transferDestId === loc.location_id ? undefined : loc.location_id }
+                                  : i
+                              ))}
+                              className={`text-[9px] font-bold px-2 py-1 rounded-lg border transition-all ${
+                                item.transferDestId === loc.location_id
+                                  ? 'border-teal bg-teal/15 text-teal'
+                                  : 'border-white/10 bg-surface text-muted hover:border-teal/30'
+                              }`}
+                            >
+                              {item.transferDestId === loc.location_id ? '✓ ' : ''}{loc.location_name}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                     <div className="flex gap-1.5">
                       <button
                         onClick={() => processItem(item, 'sold')}
                         disabled={processing || getMissingChoices(item).length > 0}
                         className="flex-1 py-1 rounded-lg bg-danger/10 border border-danger/20 text-danger text-[10px] font-bold hover:bg-danger/20 disabled:opacity-50 transition-all"
                       >Sold</button>
-                      {location === 'back' && (
+                      {item.transferDestId && (
                         <button
-                          onClick={() => processItem(item, 'to_main')}
+                          onClick={() => processItem(item, 'move')}
                           disabled={processing}
                           className="flex-1 py-1 rounded-lg bg-teal/10 border border-teal/20 text-teal text-[10px] font-bold hover:bg-teal/20 disabled:opacity-50 transition-all"
-                        >→ Main</button>
+                        >→ Move</button>
                       )}
                     </div>
                   </div>
@@ -1157,14 +1161,14 @@ function PosDashboard() {
                     {processing && <div className="w-3.5 h-3.5 rounded-full border-2 border-danger border-t-transparent animate-spin" />}
                     ✅ Confirm All Sold
                   </button>
-                  {location === 'back' && (
+                  {cart.some(i => i.transferDestId) && (
                     <button
-                      onClick={() => processCart('to_main')}
+                      onClick={() => processCart('move')}
                       disabled={processing}
                       className="w-full py-2.5 rounded-xl bg-teal/15 border border-teal/30 text-teal text-sm font-bold disabled:opacity-50 flex items-center justify-center gap-2 hover:bg-teal/25 transition-all"
                     >
                       {processing && <div className="w-3.5 h-3.5 rounded-full border-2 border-teal border-t-transparent animate-spin" />}
-                      📦 Move All to Main Store
+                      📦 Move Selected Items
                     </button>
                   )}
                 </div>
@@ -1189,12 +1193,11 @@ function PosDashboard() {
           <AdjustStockModal
             key="modal"
             product={modal.product}
-            location={modal.location}
+            locationId={modal.location}
             direction={modal.direction}
-            backStockMap={backStockMap}
-            mainStockMap={mainStockMap}
-            backBoxMap={backBoxMap}
-            mainBoxMap={mainBoxMap}
+            locations={locations}
+            stockByLoc={stockByLoc}
+            boxByLoc={boxByLoc}
             componentMap={componentMap}
             allProducts={products}
             onClose={() => { setModal(null); setTimeout(() => barcodeRef.current?.focus(), 100); }}
@@ -1228,14 +1231,14 @@ function PosDashboard() {
                 <div className="flex items-center gap-1.5">
                   <button
                     onClick={() => {
-                      setLocation('back');
+                      if (locations.length > 1) setLocationId(locations[0].location_id);
                       setRestockSaleAlert([]);
                       setCartOpen(false);
                       setTimeout(() => barcodeRef.current?.focus(), 100);
                     }}
                     className="text-[10px] font-bold px-2.5 py-1 rounded-lg bg-teal/15 border border-teal/30 text-teal hover:bg-teal/25 active:scale-95 transition-all"
                   >
-                    Go to Back →
+                    Switch Location →
                   </button>
                   <button
                     onClick={() => setRestockSaleAlert([])}
@@ -1262,31 +1265,29 @@ function PosDashboard() {
 }
 
 interface CardProps {
-  product:      Product;
-  index:        number;
-  location:     Location;
-  stockMap:     Record<number, number>;
-  boxMap:       Record<number, number>;
-  onAdjust:     (product: Product, direction: 'plus' | 'minus') => void;
-  // Passed when viewing Main Store so the card can show a "In Back" badge
-  backStockMap?: Record<number, number>;
-  backBoxMap?:   Record<number, number>;
+  product:    Product;
+  index:      number;
+  locationId: number;
+  locations:  LocationInfo[];
+  stockByLoc: Record<number, Record<number, number>>;
+  boxByLoc:   Record<number, Record<number, number>>;
+  onAdjust:   (product: Product, direction: 'plus' | 'minus') => void;
 }
 
-function PosProductCard({ product: p, index, location, stockMap, boxMap, onAdjust, backStockMap, backBoxMap }: CardProps) {
-  const ppb   = p.pieces_per_box || 0;
-  const qty   = stockMap[p.product_id] || 0;
-  const bx    = boxMap[p.product_id]   || 0;
-  const total = qty + bx * (ppb || 1);
-  const fmt   = formatStock(total, p.unit_type, p.unit_of_measure, ppb);
+function PosProductCard({ product: p, index, locationId, locations, stockByLoc, boxByLoc, onAdjust }: CardProps) {
+  const ppb     = p.pieces_per_box || 0;
+  const qty     = (stockByLoc[locationId] ?? {})[p.product_id] ?? 0;
+  const bx      = (boxByLoc[locationId]   ?? {})[p.product_id] ?? 0;
+  const total   = qty + bx * (ppb || 1);
+  const fmt     = formatStock(total, p.unit_type, p.unit_of_measure, ppb);
   const reorder = p.reorder_level ?? 2;
 
-  // Back godown availability — show badge only when at Main Store and
-  // stock here is low/zero while back still has some.
-  const backTot = location === 'main'
-    ? (backStockMap?.[p.product_id] ?? 0) + (backBoxMap?.[p.product_id] ?? 0) * ppb
-    : 0;
-  const showBackBadge = location === 'main' && backTot > 0 && total <= reorder;
+  // Stock available at other locations
+  const otherTotal = locations
+    .filter(l => l.location_id !== locationId)
+    .reduce((s, l) => s + ((stockByLoc[l.location_id] ?? {})[p.product_id] ?? 0) + ((boxByLoc[l.location_id] ?? {})[p.product_id] ?? 0) * ppb, 0);
+
+  const showOtherBadge = otherTotal > 0 && total <= reorder;
 
   const stockCls =
     total === 0      ? 'text-danger' :
@@ -1294,9 +1295,9 @@ function PosProductCard({ product: p, index, location, stockMap, boxMap, onAdjus
                        'text-muted';
 
   const stockTxt =
-    total === 0        ? 'Out of stock' :
-    total <= reorder   ? `⚠ Low — ${fmt.label}` :
-    `${fmt.label} in ${location === 'back' ? 'back' : 'main'}`;
+    total === 0      ? 'Out of stock'       :
+    total <= reorder ? `⚠ Low — ${fmt.label}` :
+                       fmt.label;
 
   const bigNum = fmt.unitBadge === 'BOX' && ppb > 0 ? Math.floor(total / ppb) : total;
 
@@ -1321,9 +1322,9 @@ function PosProductCard({ product: p, index, location, stockMap, boxMap, onAdjus
           {[p.brand, p.model].filter(Boolean).join(' · ') || p.stock_keeping_unit || '—'}
         </p>
         <p className={`text-[10px] font-semibold mt-1 ${stockCls}`}>{stockTxt}</p>
-        {showBackBadge && (
+        {showOtherBadge && (
           <span className="inline-flex items-center gap-1 mt-1 text-[9px] font-bold px-1.5 py-0.5 rounded-full border bg-gold/10 border-gold/30 text-gold leading-none">
-            📦 {backTot} in Back
+            📦 {otherTotal} elsewhere
           </span>
         )}
       </div>

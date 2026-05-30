@@ -2,28 +2,26 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
-import type { Product, StockMap } from '@/lib/types';
+import type { Product, StockMap, StockByLoc, LocationInfo } from '@/lib/types';
 
 interface ProductsData {
-  products:     Product[];
-  backStockMap: StockMap;
-  mainStockMap: StockMap;
-  backBoxMap:   StockMap;
-  mainBoxMap:   StockMap;
-  loading:      boolean;
-  error:        string | null;
-  refresh:      () => void;
+  products:    Product[];
+  locations:   LocationInfo[];          // all active locations from DB
+  stockByLoc:  StockByLoc;             // location_id → product_id → pieces
+  boxByLoc:    StockByLoc;             // location_id → product_id → boxes
+  loading:     boolean;
+  error:       string | null;
+  refresh:     () => void;
 }
 
 export function useProducts(): ProductsData {
-  const [products,     setProducts]     = useState<Product[]>([]);
-  const [backStockMap, setBackStockMap] = useState<StockMap>({});
-  const [mainStockMap, setMainStockMap] = useState<StockMap>({});
-  const [backBoxMap,   setBackBoxMap]   = useState<StockMap>({});
-  const [mainBoxMap,   setMainBoxMap]   = useState<StockMap>({});
-  const [loading,      setLoading]      = useState(true);
-  const [error,        setError]        = useState<string | null>(null);
-  const [tick,         setTick]         = useState(0);
+  const [products,   setProducts]   = useState<Product[]>([]);
+  const [locations,  setLocations]  = useState<LocationInfo[]>([]);
+  const [stockByLoc, setStockByLoc] = useState<StockByLoc>({});
+  const [boxByLoc,   setBoxByLoc]   = useState<StockByLoc>({});
+  const [loading,    setLoading]    = useState(true);
+  const [error,      setError]      = useState<string | null>(null);
+  const [tick,       setTick]       = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -31,38 +29,34 @@ export function useProducts(): ProductsData {
     setError(null);
 
     async function load() {
-      const [{ data: prods, error: pErr }, { data: stock, error: sErr }] = await Promise.all([
-        supabase.from('products').select('*').eq('active_status', true).order('product_name'),
-        supabase.from('stock_by_location').select('product_id, quantity, box_quantity, location_id'),
-      ]);
+      const [{ data: prods, error: pErr }, { data: stock, error: sErr }, { data: locs, error: lErr }] =
+        await Promise.all([
+          supabase.from('products').select('*').eq('active_status', true).order('product_name'),
+          supabase.from('stock_by_location').select('product_id, quantity, box_quantity, location_id'),
+          supabase.from('locations').select('location_id, location_name, active_status').eq('active_status', true).order('location_id'),
+        ]);
 
       if (cancelled) return;
-      if (pErr || sErr) {
-        setError((pErr ?? sErr)!.message);
+      if (pErr || sErr || lErr) {
+        setError((pErr ?? sErr ?? lErr)!.message);
         setLoading(false);
         return;
       }
 
-      const bsm: StockMap = {};
-      const msm: StockMap = {};
-      const bbm: StockMap = {};
-      const mbm: StockMap = {};
-
+      // Build per-location maps
+      const sbl: StockByLoc = {};
+      const bbl: StockByLoc = {};
       for (const row of stock ?? []) {
-        if (row.location_id === 2) {
-          bsm[row.product_id] = row.quantity    ?? 0;
-          bbm[row.product_id] = row.box_quantity ?? 0;
-        } else if (row.location_id === 1) {
-          msm[row.product_id] = row.quantity    ?? 0;
-          mbm[row.product_id] = row.box_quantity ?? 0;
-        }
+        const lid = row.location_id as number;
+        if (!sbl[lid]) { sbl[lid] = {}; bbl[lid] = {}; }
+        sbl[lid][row.product_id] = row.quantity     ?? 0;
+        bbl[lid][row.product_id] = row.box_quantity ?? 0;
       }
 
       setProducts(prods ?? []);
-      setBackStockMap(bsm);
-      setMainStockMap(msm);
-      setBackBoxMap(bbm);
-      setMainBoxMap(mbm);
+      setLocations((locs ?? []) as LocationInfo[]);
+      setStockByLoc(sbl);
+      setBoxByLoc(bbl);
       setLoading(false);
     }
 
@@ -72,5 +66,5 @@ export function useProducts(): ProductsData {
 
   const refresh = useCallback(() => setTick(t => t + 1), []);
 
-  return { products, backStockMap, mainStockMap, backBoxMap, mainBoxMap, loading, error, refresh };
+  return { products, locations, stockByLoc, boxByLoc, loading, error, refresh };
 }

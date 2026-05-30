@@ -2,42 +2,42 @@
 
 import { motion } from 'framer-motion';
 import { formatStock } from '@/lib/formatStock';
-import type { Product, StockMap, Location } from '@/lib/types';
+import type { Product, StockByLoc, LocationInfo } from '@/lib/types';
 
 interface Props {
-  product:      Product;
-  index:        number;
-  location:     Location;
-  backStockMap: StockMap;
-  mainStockMap: StockMap;
-  backBoxMap:   StockMap;
-  mainBoxMap:   StockMap;
-  onAdjust:     (product: Product, direction: 'plus' | 'minus', location: Location) => void;
-  onEdit?:      (product: Product) => void;
+  product:    Product;
+  index:      number;
+  locationId: number;
+  locations:  LocationInfo[];
+  stockByLoc: StockByLoc;
+  boxByLoc:   StockByLoc;
+  onAdjust:   (product: Product, direction: 'plus' | 'minus', locationId: number) => void;
+  onEdit?:    (product: Product) => void;
 }
 
 export default function AdminProductCard({
-  product: p, index, location,
-  backStockMap, mainStockMap, backBoxMap, mainBoxMap,
-  onAdjust, onEdit,
+  product: p, index, locationId, locations, stockByLoc, boxByLoc, onAdjust, onEdit,
 }: Props) {
-  const sm  = location === 'back' ? backStockMap : mainStockMap;
-  const bm  = location === 'back' ? backBoxMap   : mainBoxMap;
-  const ppb = p.pieces_per_box || 0;
-  const qty = sm[p.product_id] || 0;
-  const bx  = bm[p.product_id] || 0;
-  const total = qty + bx * (ppb || 1);
+  const ppb     = p.pieces_per_box || 0;
+  const qty     = (stockByLoc[locationId] ?? {})[p.product_id] ?? 0;
+  const bx      = (boxByLoc[locationId]   ?? {})[p.product_id] ?? 0;
+  const total   = qty + bx * (ppb || 1);
   const reorder = p.reorder_level || 2;
-  const fmt = formatStock(total, p.unit_type, p.unit_of_measure, ppb);
+  const fmt     = formatStock(total, p.unit_type, p.unit_of_measure, ppb);
+
+  // Stock in other locations (for low-stock hint)
+  const otherTotal = locations
+    .filter(l => l.location_id !== locationId)
+    .reduce((s, l) => s + ((stockByLoc[l.location_id] ?? {})[p.product_id] ?? 0) + ((boxByLoc[l.location_id] ?? {})[p.product_id] ?? 0) * ppb, 0);
 
   const stockClass =
-    total === 0         ? 'text-danger'  :
-    total <= reorder    ? 'text-gold'    :
-    /* otherwise */       'text-muted';
+    total === 0      ? 'text-danger' :
+    total <= reorder ? 'text-gold'   :
+                       'text-muted';
 
   const stockLabel =
-    !fmt.inStock        ? 'Out of stock'           :
-    total <= reorder    ? `⚠ Low — ${fmt.label}`   :
+    !fmt.inStock        ? 'Out of stock'         :
+    total <= reorder    ? `⚠ Low — ${fmt.label}` :
     fmt.label;
 
   return (
@@ -60,6 +60,9 @@ export default function AdminProductCard({
           {[p.brand, p.model].filter(Boolean).join(' · ') || p.stock_keeping_unit || '—'}
         </p>
         <p className={`text-[10px] font-semibold mt-1 ${stockClass}`}>{stockLabel}</p>
+        {total <= reorder && otherTotal > 0 && (
+          <p className="text-[9px] text-gold/70 mt-0.5">📦 {otherTotal} in other location{locations.length > 2 ? 's' : ''}</p>
+        )}
       </div>
 
       {onEdit && (
@@ -72,28 +75,22 @@ export default function AdminProductCard({
 
       <div className="flex items-center gap-1.5 shrink-0">
         <button
-          onClick={() => onAdjust(p, 'minus', location)}
+          onClick={() => onAdjust(p, 'minus', locationId)}
           className="w-8 h-8 rounded-lg bg-danger/10 border border-danger/30 text-danger text-lg font-bold flex items-center justify-center hover:bg-danger hover:text-white transition-all duration-150 active:scale-90"
         >−</button>
 
         <div className="flex flex-col items-center min-w-9">
           <span className="text-lg font-bold text-slate-200 tabular-nums leading-none">
-            {fmt.unitBadge === 'BOX' && ppb > 0
-              ? Math.floor(total / ppb)
-              : total}
+            {fmt.unitBadge === 'BOX' && ppb > 0 ? Math.floor(total / ppb) : total}
           </span>
-          {fmt.unitBadge === 'BOX' && ppb > 0 && (
-            <span className="text-[8px] text-muted leading-none mt-0.5">
-              {`${Math.floor(total / ppb)}bx+${total % ppb}pc`}
-            </span>
+          {fmt.unitBadge === 'BOX' && ppb > 0 && total % ppb > 0 && (
+            <span className="text-[8px] text-muted leading-none">{`+${total % ppb}pc`}</span>
           )}
-          <span className="text-[8px] font-bold text-muted/60 uppercase tracking-wider leading-none mt-0.5">
-            {fmt.unitBadge}
-          </span>
+          <span className="text-[8px] font-bold text-muted/60 uppercase tracking-wider leading-none mt-0.5">{fmt.unitBadge}</span>
         </div>
 
         <button
-          onClick={() => onAdjust(p, 'plus', location)}
+          onClick={() => onAdjust(p, 'plus', locationId)}
           className="w-8 h-8 rounded-lg bg-teal/10 border border-teal/30 text-teal text-lg font-bold flex items-center justify-center hover:bg-teal hover:text-navy transition-all duration-150 active:scale-90"
         >+</button>
       </div>
