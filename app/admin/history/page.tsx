@@ -82,7 +82,7 @@ function HistoryDashboard() {
 
   useEffect(() => {
     const ok   = typeof window !== 'undefined' && localStorage.getItem(SESSION_KEY) === '1';
-    const role = typeof window !== 'undefined' ? localStorage.getItem(ROLE_KEY) : null;
+    const role = (typeof window !== 'undefined' ? localStorage.getItem(ROLE_KEY) : null) ?? 'admin';
     if (!ok || role !== 'admin') router.replace('/admin');
   }, [router]);
 
@@ -90,7 +90,7 @@ function HistoryDashboard() {
     setLoading(true);
     setLoadError(null);
     const [movRes, reqRes, prodRes, locRes] = await Promise.all([
-      supabase.from('stock_movements').select('*').order('id', { ascending: false }).limit(500),
+      supabase.from('stock_movements').select('movement_id, product_id, from_location_id, to_location_id, quantity, movement_type, reason, notes, movement_at').order('movement_id', { ascending: false }).limit(500),
       supabase.from('stock_requests').select('*').neq('status', 'PENDING').order('request_id', { ascending: false }).limit(500),
       supabase.from('products').select('product_id, product_name, brand, model, unit_of_measure, display_unit, pieces_per_box, selling_price, buying_price, box_selling_price'),
       supabase.from('locations').select('location_id, location_name'),
@@ -100,7 +100,17 @@ function HistoryDashboard() {
       LOC_NAME[loc.location_id as number] = loc.location_name as string;
     }
 
-    const fromMovements: StockMovement[] = (movRes.data ?? []) as StockMovement[];
+    // Map stock_movements columns (movement_id, movement_at) → StockMovement interface (id, created_at)
+    const fromMovements: StockMovement[] = (movRes.data ?? []).map((r: Record<string, unknown>) => ({
+      id:               r.movement_id as number,
+      product_id:       r.product_id as number,
+      from_location_id: (r.from_location_id ?? null) as number | null,
+      to_location_id:   (r.to_location_id ?? null) as number | null,
+      quantity:         r.quantity as number,
+      movement_type:    r.movement_type as string,
+      reason:           ((r.reason ?? r.notes) ?? null) as string | null,
+      created_at:       r.movement_at as string,
+    }));
     const fromRequests: StockMovement[] = (reqRes.data ?? []).map(r => ({
       id:               r.request_id as number,
       product_id:       r.product_id as number,

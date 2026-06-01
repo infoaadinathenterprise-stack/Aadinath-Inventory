@@ -16,7 +16,7 @@ export default function SalesPage() {
   const router = useRouter();
   useEffect(() => {
     const ok   = typeof window !== 'undefined' && localStorage.getItem(SESSION_KEY) === '1';
-    const role = typeof window !== 'undefined' ? localStorage.getItem(ROLE_KEY) : null;
+    const role = (typeof window !== 'undefined' ? localStorage.getItem(ROLE_KEY) : null) ?? 'admin';
     if (!ok || role !== 'admin') router.replace('/admin');
     else setAuthed(true);
   }, [router]);

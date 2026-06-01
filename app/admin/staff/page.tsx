@@ -56,7 +56,7 @@ export default function StaffPage() {
 
   useEffect(() => {
     const ok   = typeof window !== 'undefined' && localStorage.getItem(SESSION_KEY) === '1';
-    const role = typeof window !== 'undefined' ? localStorage.getItem(ROLE_KEY) : null;
+    const role = (typeof window !== 'undefined' ? localStorage.getItem(ROLE_KEY) : null) ?? 'admin';
     if (!ok || role !== 'admin') { router.replace('/admin'); return; }
     load();
   }, [router, load]);

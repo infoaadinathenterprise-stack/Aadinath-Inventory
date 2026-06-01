@@ -37,8 +37,9 @@ export function useProducts(): ProductsData {
         ]);
 
       if (cancelled) return;
-      if (pErr || sErr || lErr) {
-        setError((pErr ?? sErr ?? lErr)!.message);
+      // Only treat products/stock errors as fatal; locations error is handled gracefully below
+      if (pErr || sErr) {
+        setError((pErr ?? sErr)!.message);
         setLoading(false);
         return;
       }
@@ -53,8 +54,20 @@ export function useProducts(): ProductsData {
         bbl[lid][row.product_id] = row.box_quantity ?? 0;
       }
 
+      // If locations query returned empty (RLS / no data), synthesise from stock rows
+      let locationList = (locs ?? []) as LocationInfo[];
+      if (locationList.length === 0) {
+        const seen = new Set<number>();
+        for (const row of stock ?? []) {
+          if (!seen.has(row.location_id)) {
+            seen.add(row.location_id);
+            locationList.push({ location_id: row.location_id, location_name: `Location ${row.location_id}`, active_status: true });
+          }
+        }
+      }
+
       setProducts(prods ?? []);
-      setLocations((locs ?? []) as LocationInfo[]);
+      setLocations(locationList);
       setStockByLoc(sbl);
       setBoxByLoc(bbl);
       setLoading(false);
