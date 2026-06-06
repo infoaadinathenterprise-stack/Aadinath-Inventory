@@ -38,7 +38,7 @@ export default function AdminNavbar({ onLogout }: Props) {
 
   return (
     <>
-      <nav className="fixed top-0 inset-x-0 z-50 bg-navy/90 backdrop-blur-md border-b border-teal/10 shadow-lg">
+      <nav className="fixed top-0 inset-x-0 z-50 bg-navy border-b border-teal/10 shadow-lg">
         <div className="max-w-7xl mx-auto px-4 h-14 flex items-center justify-between gap-3">
           <div className="flex items-center gap-2.5">
             <span className="font-bold text-base text-teal tracking-tight leading-none">

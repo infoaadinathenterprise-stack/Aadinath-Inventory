@@ -642,11 +642,6 @@ function PosDashboard() {
     }
   }
 
-  const [showVersionFlash, setShowVersionFlash] = useState(true);
-  useEffect(() => {
-    const t = setTimeout(() => setShowVersionFlash(false), 2500);
-    return () => clearTimeout(t);
-  }, []);
 
   if (loading) {
     return (
@@ -671,11 +666,6 @@ function PosDashboard() {
 
   return (
     <div className="h-screen bg-navy flex flex-col overflow-hidden">
-      {showVersionFlash && (
-        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-999 bg-teal text-navy text-xs font-black px-4 py-2 rounded-full shadow-lg animate-bounce">
-          ✓ POS v2 — Barcode Cart Mode Active
-        </div>
-      )}
       <header className="shrink-0 bg-surface border-b border-white/8 px-3 flex items-center gap-2 h-14">
         <Link href="/admin" className="text-muted hover:text-slate-100 text-sm px-3 py-1.5 rounded-lg bg-surface2 border border-white/8 transition-colors shrink-0">
           ← Back
@@ -837,7 +827,7 @@ function PosDashboard() {
         {visible.length === 0 && (
           <p className="text-center text-muted text-sm py-12">No products at {locName}</p>
         )}
-        <AnimatePresence mode="popLayout">
+        <AnimatePresence>
           {visible.map((p, i) => (
             <PosProductCard
               key={p.product_id}
@@ -1303,12 +1293,11 @@ function PosProductCard({ product: p, index, locationId, locations, stockByLoc, 
 
   return (
     <motion.div
-      initial={{ opacity: 0, y: 16 }}
+      initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ delay: Math.min(index * 0.03, 0.5), duration: 0.3 }}
-      layout
+      transition={{ delay: Math.min(index * 0.02, 0.25), duration: 0.25 }}
       onClick={() => onAdjust(p, 'minus')}
-      className="flex items-center gap-3 px-3 py-3 rounded-xl bg-surface border border-white/5 hover:border-teal/20 cursor-pointer transition-all group"
+      className="flex items-center gap-3 px-3 py-3 rounded-xl bg-surface border border-white/5 hover:border-teal/20 cursor-pointer transition-colors group"
     >
       <span className="shrink-0 self-start mt-0.5 text-[9px] font-bold px-2 py-0.5 rounded-md bg-surface2 border border-white/8 text-muted uppercase tracking-wider whitespace-nowrap">
         {p.type || '—'}
