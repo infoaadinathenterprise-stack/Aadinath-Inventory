@@ -561,7 +561,17 @@ function EditPurchaseModal({
         if (row.productId && row.unitPrice != null && row.unitPrice > 0) {
           const original = data.items.find(i => i.id === row.id);
           if (!original || original.unit_price !== row.unitPrice) {
-            await supabase.from('products').update({ buying_price: row.unitPrice }).eq('product_id', row.productId);
+            const { error: priceErr } = await supabase
+              .from('products')
+              .update({ buying_price: row.unitPrice })
+              .eq('product_id', row.productId);
+            if (priceErr) {
+              onError(
+                'Purchase updated, but syncing buying price failed: ' + priceErr.message +
+                '. Likely Row-Level Security — run in Supabase SQL editor:\n' +
+                'CREATE POLICY "Allow public update" ON products FOR UPDATE TO anon USING (true) WITH CHECK (true);'
+              );
+            }
           }
         }
       }
@@ -1047,6 +1057,7 @@ ${rawText}`;
 
       let createdProducts = 0;
       let stockedRows     = 0;
+      let priceSyncError: string | null = null;
 
       for (const row of validRows) {
         // ── Auto-create a product for unmatched rows ──────────────
@@ -1104,15 +1115,24 @@ ${rawText}`;
 
           // Push the unit price from this purchase into
           // products.buying_price so future sales snapshot the right
-          // cost and the Sales page profit math works without any
-          // manual sync.
-          if (row.unitPrice != null && row.unitPrice > 0) {
-            await supabase
+          // cost and so the Inventory edit form shows it pre-filled.
+          // Skip auto-created products (already inserted with this price).
+          if (row.productId && row.unitPrice != null && row.unitPrice > 0) {
+            const { error: priceErr } = await supabase
               .from('products')
               .update({ buying_price: row.unitPrice })
               .eq('product_id', productId);
+            if (priceErr && !priceSyncError) priceSyncError = priceErr.message;
           }
         }
+      }
+
+      if (priceSyncError) {
+        onError(
+          'Stock saved, but updating product buying price failed: ' + priceSyncError +
+          '. This is usually Row-Level Security. Run in Supabase SQL editor:\n' +
+          'CREATE POLICY "Allow public update" ON products FOR UPDATE TO anon USING (true) WITH CHECK (true);'
+        );
       }
 
       const summary =
