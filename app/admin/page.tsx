@@ -424,6 +424,24 @@ function ProductModal({
   const acTypes  = [...new Set(products.map(p => p.type).filter(Boolean))].sort() as string[];
   const acBrands = [...new Set(products.map(p => p.brand).filter(Boolean))].sort() as string[];
   const acUnits  = [...new Set(products.map(p => p.unit_of_measure).filter(Boolean))].sort() as string[];
+  const acNames  = [...new Set(products.map(p => p.product_name).filter(Boolean))].sort() as string[];
+  const acModels = [...new Set(products.map(p => p.model).filter(Boolean))].sort() as string[];
+
+  // Detect a possible duplicate as the user types a new product name.
+  // Exact (case-insensitive) match → almost certainly a duplicate.
+  // Close match (one name contains the other) → likely a variant/typo.
+  const nameQuery = form.product_name.trim().toLowerCase();
+  const exactDup = !editing && nameQuery.length > 0
+    ? products.find(p => p.product_name.trim().toLowerCase() === nameQuery)
+    : undefined;
+  const similarNames = !editing && nameQuery.length >= 2 && !exactDup
+    ? products
+        .filter(p => {
+          const n = p.product_name.trim().toLowerCase();
+          return n.includes(nameQuery) || nameQuery.includes(n);
+        })
+        .slice(0, 4)
+    : [];
 
   return (
     <>
@@ -483,24 +501,57 @@ function ProductModal({
 
           <div className="grid grid-cols-2 gap-3">
             <FormField label="Product Name *">
-              <input value={form.product_name} onChange={e => set('product_name', e.target.value)}
+              <input value={form.product_name} onChange={e => set('product_name', e.target.value)} list="ac-names"
+                autoComplete="off"
                 placeholder="e.g. Generator 4000" className={inputCls} />
+              <datalist id="ac-names">{acNames.map(n => <option key={n} value={n} />)}</datalist>
             </FormField>
             <FormField label="Type / Category *">
               <input value={form.type} onChange={e => set('type', e.target.value)} list="ac-types"
+                autoComplete="off"
                 placeholder="e.g. Generator" className={inputCls} />
               <datalist id="ac-types">{acTypes.map(t => <option key={t} value={t} />)}</datalist>
             </FormField>
           </div>
 
+          {/* Duplicate / similar-name guard — only when adding a NEW product */}
+          {exactDup && (
+            <div className="px-3 py-2 rounded-xl bg-danger/10 border border-danger/30 text-xs text-danger leading-relaxed">
+              ⚠ <b>&ldquo;{exactDup.product_name}&rdquo;</b> already exists
+              {exactDup.type ? ` (${exactDup.type})` : ''}. Don&rsquo;t create a duplicate —
+              close this and use <b>+ / −</b> on the existing product to change its stock.
+            </div>
+          )}
+          {similarNames.length > 0 && (
+            <div className="px-3 py-2 rounded-xl bg-gold/5 border border-gold/25 text-xs text-gold/90 leading-relaxed">
+              <p className="font-bold mb-1">🔎 Similar products already exist — did you mean one of these?</p>
+              <div className="flex flex-col gap-1">
+                {similarNames.map(p => (
+                  <button
+                    key={p.product_id}
+                    type="button"
+                    onClick={() => set('product_name', p.product_name)}
+                    className="text-left px-2 py-1 rounded-lg bg-surface2 border border-white/8 text-slate-200 hover:border-gold/40 transition-colors"
+                  >
+                    {p.product_name}{p.brand ? ` · ${p.brand}` : ''}{p.model ? ` · ${p.model}` : ''}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
           <div className="grid grid-cols-2 gap-3">
             <FormField label="Brand">
               <input value={form.brand} onChange={e => set('brand', e.target.value)} list="ac-brands"
+                autoComplete="off"
                 placeholder="e.g. Sigma UK" className={inputCls} />
               <datalist id="ac-brands">{acBrands.map(b => <option key={b} value={b} />)}</datalist>
             </FormField>
             <FormField label="Model">
-              <input value={form.model} onChange={e => set('model', e.target.value)} placeholder="e.g. 4000AE" className={inputCls} />
+              <input value={form.model} onChange={e => set('model', e.target.value)} list="ac-models"
+                autoComplete="off"
+                placeholder="e.g. 4000AE" className={inputCls} />
+              <datalist id="ac-models">{acModels.map(m => <option key={m} value={m} />)}</datalist>
             </FormField>
           </div>
 
@@ -695,8 +746,8 @@ function ProductModal({
 
           <div className="flex gap-3 mt-2">
             <button onClick={onClose} className="flex-1 py-2.5 rounded-xl bg-surface2 border border-white/8 text-muted text-sm font-semibold hover:text-slate-100 transition-colors">Cancel</button>
-            <button onClick={save} disabled={saving} className="flex-1 py-2.5 rounded-xl bg-teal/15 border border-teal/30 text-teal text-sm font-bold hover:bg-teal/25 transition-colors disabled:opacity-50">
-              {saving ? 'Saving…' : editing ? 'Update Product' : 'Add Product'}
+            <button onClick={save} disabled={saving || !!exactDup} className="flex-1 py-2.5 rounded-xl bg-teal/15 border border-teal/30 text-teal text-sm font-bold hover:bg-teal/25 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+              {saving ? 'Saving…' : exactDup ? 'Already exists' : editing ? 'Update Product' : 'Add Product'}
             </button>
           </div>
 
