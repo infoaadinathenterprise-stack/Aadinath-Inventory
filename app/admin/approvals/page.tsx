@@ -19,7 +19,7 @@ interface PendingRequest {
   requested_at:  string;
 }
 
-let LOC_NAME: Record<number, string> = { 1: 'Back Godown', 2: 'Main Store', 3: 'Main Store First Floor' };
+let LOC_NAME: Record<number, string> = { 1: 'Main Store', 2: 'Back Godown', 3: 'Main Store First Floor' };
 
 function parseUser(notes: string | null): string {
   if (!notes) return 'Unknown';

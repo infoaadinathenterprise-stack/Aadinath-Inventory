@@ -60,7 +60,7 @@ export function useProducts(): ProductsData {
       // real table the source of truth instead of this fallback.
       let locationList = (locs ?? []) as LocationInfo[];
       if (locationList.length === 0) {
-        const KNOWN: Record<number, string> = { 1: 'Back Godown', 2: 'Main Store', 3: 'Main Store First Floor' };
+        const KNOWN: Record<number, string> = { 1: 'Main Store', 2: 'Back Godown', 3: 'Main Store First Floor' };
         locationList = [1, 2, 3].map(id => ({
           location_id:   id,
           location_name: KNOWN[id] ?? `Location ${id}`,

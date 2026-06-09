@@ -193,13 +193,13 @@ function LoginForm({ onSuccess }: { onSuccess: () => void }) {
 // ── Add/Edit Product Modal ────────────────────────────────────────────────────
 
 function ProductModal({
-  editing, products, backStockMap, mainStockMap,
+  editing, products, locations, stockByLoc,
   onClose, onSaved, onError,
 }: {
   editing:      Product | null;
   products:     Product[];
-  backStockMap: StockMap;
-  mainStockMap: StockMap;
+  locations:    LocationInfo[];
+  stockByLoc:   StockByLoc;
   onClose:  () => void;
   onSaved:  (msg: string) => void;
   onError:  (msg: string) => void;
@@ -208,10 +208,6 @@ function ProductModal({
 
   const [form,   setForm]   = useState<ProductForm>(() => {
     if (!editing) return EMPTY_FORM;
-    const backQ = backStockMap[editing.product_id] ?? 0;
-    const mainQ = mainStockMap[editing.product_id] ?? 0;
-    const hasBack = backStockMap[editing.product_id] !== undefined;
-    const hasMain = mainStockMap[editing.product_id] !== undefined;
     return {
       product_name:      editing.product_name,
       type:              editing.type        ?? '',
@@ -226,11 +222,24 @@ function ProductModal({
       selling_price:     editing.selling_price != null ? String(editing.selling_price) : '',
       box_selling_price: editing.box_selling_price != null ? String(editing.box_selling_price) : '',
       reorder_level:     String(editing.reorder_level ?? 0),
-      location:          hasBack && hasMain ? 'both' : hasBack ? '2' : hasMain ? '1' : '',
-      stock_back:        String(backQ),
-      stock_main:        String(mainQ),
+      location:          '', stock_back: '0', stock_main: '0',  // legacy fields, unused
     };
   });
+
+  // Per-location stock quantities, keyed by real location_id from the
+  // locations table. Initialised from current stock when editing.
+  const [locStock, setLocStock] = useState<Record<number, string>>(() => {
+    const init: Record<number, string> = {};
+    for (const loc of locations) {
+      const q = editing ? (stockByLoc[loc.location_id]?.[editing.product_id] ?? 0) : 0;
+      init[loc.location_id] = String(q);
+    }
+    return init;
+  });
+  function setLocQty(locId: number, value: string) {
+    setLocStock(prev => ({ ...prev, [locId]: value }));
+  }
+
   const [saving,       setSaving]       = useState(false);
   const [compList,     setCompList]     = useState<CompEntry[]>([]);
   const [compSearch,   setCompSearch]   = useState('');
@@ -357,7 +366,6 @@ function ProductModal({
 
   async function save() {
     if (!form.product_name.trim()) { onError('Product name is required'); return; }
-    if (!form.location)            { onError('Please select a location'); return; }
     setSaving(true);
 
     const payload: Record<string, unknown> = {
@@ -390,24 +398,28 @@ function ProductModal({
         productId = (data as { product_id: number }).product_id;
       }
 
-      const backQty = parseInt(form.stock_back) || 0;
-      const mainQty = parseInt(form.stock_main) || 0;
-      const locs: { locId: number; qty: number }[] = [];
-      if (form.location === '2' || form.location === 'both') locs.push({ locId: 2, qty: backQty });
-      if (form.location === '1' || form.location === 'both') locs.push({ locId: 1, qty: mainQty });
-
-      for (const { locId, qty } of locs) {
-        const { data: ex } = await supabase.from('stock_by_location').select('id, quantity').eq('product_id', productId).eq('location_id', locId).single();
+      // Write stock for every location using its REAL id from the
+      // locations table — no hardcoded 1/2 mapping.
+      for (const loc of locations) {
+        const locId = loc.location_id;
+        const qty   = parseInt(locStock[locId] ?? '0') || 0;
+        const { data: ex } = await supabase
+          .from('stock_by_location').select('id, quantity')
+          .eq('product_id', productId).eq('location_id', locId).maybeSingle();
         const oldQty = ex?.quantity ?? 0;
+
         if (ex) {
           await supabase.from('stock_by_location').update({ quantity: qty }).eq('id', ex.id);
-        } else {
+        } else if (qty > 0) {
           await supabase.from('stock_by_location').insert({ product_id: productId, location_id: locId, quantity: qty });
+        } else {
+          continue; // no existing row and nothing to add
         }
+
         if (editing) {
           const delta = qty - oldQty;
-          if (delta > 0)  await logMovement(productId, null, locId,  delta, 'ADJUSTMENT_IN',  'Stock adjusted via product form');
-          if (delta < 0)  await logMovement(productId, locId, null, -delta, 'ADJUSTMENT_OUT', 'Stock adjusted via product form');
+          if (delta > 0) await logMovement(productId, null, locId,  delta, 'ADJUSTMENT_IN',  'Stock adjusted via product form');
+          if (delta < 0) await logMovement(productId, locId, null, -delta, 'ADJUSTMENT_OUT', 'Stock adjusted via product form');
         } else if (qty > 0) {
           await logMovement(productId, null, locId, qty, 'ADJUSTMENT_IN', 'Initial stock');
         }
@@ -601,46 +613,33 @@ function ProductModal({
             <input type="number" value={form.reorder_level} onChange={e => set('reorder_level', e.target.value)} onWheel={e => e.currentTarget.blur()} placeholder="0" min="0" className={inputCls} />
           </FormField>
 
-          <FormField label="Location *">
-            <select value={form.location} onChange={e => set('location', e.target.value as ProductForm['location'])} className={inputCls}>
-              <option value="">— Select location —</option>
-              <option value="2">Back Godown only</option>
-              <option value="1">Main Store only</option>
-              <option value="both">Both locations</option>
-            </select>
-          </FormField>
-
-          {(form.location === '2' || form.location === 'both') && (
-            <FormField label={`Back Godown Stock${isBox && ppb > 0 && !editing ? ' (boxes)' : ''}`}>
-              <div className="flex items-center gap-2">
-                <button onClick={() => set('stock_back', String(Math.max(0, parseInt(form.stock_back) - 1)))}
-                  className="w-9 h-9 rounded-lg bg-surface2 border border-white/10 text-slate-100 text-lg font-bold flex items-center justify-center shrink-0">−</button>
-                <input type="number" value={form.stock_back} onChange={e => set('stock_back', e.target.value)} onWheel={e => e.currentTarget.blur()} min="0"
-                  className={`${inputCls} text-center text-lg font-bold`} />
-                <button onClick={() => set('stock_back', String((parseInt(form.stock_back) || 0) + 1))}
-                  className="w-9 h-9 rounded-lg bg-surface2 border border-white/10 text-slate-100 text-lg font-bold flex items-center justify-center shrink-0">+</button>
-              </div>
-              {isBox && ppb > 0 && !editing && parseInt(form.stock_back) > 0 && (
-                <p className="text-xs text-blue-400 mt-1">= {parseInt(form.stock_back) * ppb} pieces</p>
-              )}
-            </FormField>
-          )}
-
-          {(form.location === '1' || form.location === 'both') && (
-            <FormField label={`Main Store Stock${isBox && ppb > 0 && !editing ? ' (boxes)' : ''}`}>
-              <div className="flex items-center gap-2">
-                <button onClick={() => set('stock_main', String(Math.max(0, parseInt(form.stock_main) - 1)))}
-                  className="w-9 h-9 rounded-lg bg-surface2 border border-white/10 text-slate-100 text-lg font-bold flex items-center justify-center shrink-0">−</button>
-                <input type="number" value={form.stock_main} onChange={e => set('stock_main', e.target.value)} onWheel={e => e.currentTarget.blur()} min="0"
-                  className={`${inputCls} text-center text-lg font-bold`} />
-                <button onClick={() => set('stock_main', String((parseInt(form.stock_main) || 0) + 1))}
-                  className="w-9 h-9 rounded-lg bg-surface2 border border-white/10 text-slate-100 text-lg font-bold flex items-center justify-center shrink-0">+</button>
-              </div>
-              {isBox && ppb > 0 && !editing && parseInt(form.stock_main) > 0 && (
-                <p className="text-xs text-blue-400 mt-1">= {parseInt(form.stock_main) * ppb} pieces</p>
-              )}
-            </FormField>
-          )}
+          {/* Stock per location — one input per real location from the DB */}
+          <div>
+            <label className="text-[10px] font-bold text-muted uppercase tracking-widest block mb-2">
+              Stock by Location{isBox && ppb > 0 && !editing ? ' (boxes)' : ''}
+            </label>
+            <div className="flex flex-col gap-2.5">
+              {locations.map(loc => {
+                const val = locStock[loc.location_id] ?? '0';
+                return (
+                  <div key={loc.location_id}>
+                    <p className="text-xs font-semibold text-slate-300 mb-1">{loc.location_name}</p>
+                    <div className="flex items-center gap-2">
+                      <button type="button" onClick={() => setLocQty(loc.location_id, String(Math.max(0, (parseInt(val) || 0) - 1)))}
+                        className="w-9 h-9 rounded-lg bg-surface2 border border-white/10 text-slate-100 text-lg font-bold flex items-center justify-center shrink-0">−</button>
+                      <input type="number" value={val} onChange={e => setLocQty(loc.location_id, e.target.value)} onWheel={e => e.currentTarget.blur()} min="0"
+                        className={`${inputCls} text-center text-lg font-bold`} />
+                      <button type="button" onClick={() => setLocQty(loc.location_id, String((parseInt(val) || 0) + 1))}
+                        className="w-9 h-9 rounded-lg bg-surface2 border border-white/10 text-slate-100 text-lg font-bold flex items-center justify-center shrink-0">+</button>
+                    </div>
+                    {isBox && ppb > 0 && !editing && (parseInt(val) || 0) > 0 && (
+                      <p className="text-xs text-blue-400 mt-1">= {(parseInt(val) || 0) * ppb} pieces</p>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
 
           {editing && (
             <div className="border-t border-white/8 pt-4">
@@ -837,12 +836,6 @@ function Dashboard({ role }: { role: UserRole }) {
 
   const isAdmin = role === 'admin';
 
-  // Backward-compat shims for ProductModal (still uses named back/main maps)
-  const backId       = locations.find(l => l.location_name === 'Back Godown')?.location_id ?? 2;
-  const mainId       = locations.find(l => l.location_name === 'Main Store')?.location_id  ?? 1;
-  const backStockMap = stockByLoc[backId] ?? {};
-  const mainStockMap = stockByLoc[mainId] ?? {};
-
   function handleLogout() {
     localStorage.removeItem(SESSION_KEY);
     localStorage.removeItem(USER_KEY);
@@ -924,8 +917,8 @@ function Dashboard({ role }: { role: UserRole }) {
             key="prod-modal"
             editing={productModal.editing}
             products={products}
-            backStockMap={backStockMap}
-            mainStockMap={mainStockMap}
+            locations={locations}
+            stockByLoc={stockByLoc}
             onClose={() => setProductModal(null)}
             onSaved={msg => { setProductModal(null); showToast(msg, 'success'); refresh(); }}
             onError={msg => showToast(msg, 'error')}
