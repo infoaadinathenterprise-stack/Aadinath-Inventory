@@ -24,7 +24,7 @@ export default function SalesPage() {
   return <SalesDashboard />;
 }
 
-let LOC_NAME: Record<number, string> = { 1: 'Main Store', 2: 'Back Godown' };
+let LOC_NAME: Record<number, string> = { 1: 'Back Godown', 2: 'Main Store', 3: 'Main Store First Floor' };
 const DASH = '—';
 
 function fmtKsh(n: number | null | undefined) {

@@ -24,7 +24,7 @@ const TYPE_META: Record<string, { label: string; emoji: string; color: string }>
 };
 
 // Location names loaded from DB — starts with fallbacks, filled by load()
-let LOC_NAME: Record<number, string> = { 1: 'Main Store', 2: 'Back Godown' };
+let LOC_NAME: Record<number, string> = { 1: 'Back Godown', 2: 'Main Store', 3: 'Main Store First Floor' };
 
 function formatDate(iso: string) {
   return new Date(iso).toLocaleString('en-KE', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });

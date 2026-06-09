@@ -54,13 +54,21 @@ export function useProducts(): ProductsData {
         bbl[lid][row.product_id] = row.box_quantity ?? 0;
       }
 
-      // If locations query returned empty (RLS / no data), synthesise from stock rows
+      // If locations query returned empty (RLS blocking read / no data),
+      // fall back to the known location set so names + the 3rd location
+      // still appear. Run the SQL read policy on `locations` to make the
+      // real table the source of truth instead of this fallback.
       let locationList = (locs ?? []) as LocationInfo[];
       if (locationList.length === 0) {
-        const seen = new Set<number>();
+        const KNOWN: Record<number, string> = { 1: 'Back Godown', 2: 'Main Store', 3: 'Main Store First Floor' };
+        locationList = [1, 2, 3].map(id => ({
+          location_id:   id,
+          location_name: KNOWN[id] ?? `Location ${id}`,
+          active_status: true,
+        }));
+        // Include any other location ids that appear in stock but aren't in KNOWN
         for (const row of stock ?? []) {
-          if (!seen.has(row.location_id)) {
-            seen.add(row.location_id);
+          if (!locationList.some(l => l.location_id === row.location_id)) {
             locationList.push({ location_id: row.location_id, location_name: `Location ${row.location_id}`, active_status: true });
           }
         }

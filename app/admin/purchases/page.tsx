@@ -90,8 +90,9 @@ function PurchasesDashboard() {
       // Fallback to the two original locations if the table read returns empty
       const locs = (lr.data ?? []) as LocationInfo[];
       setLocations(locs.length > 0 ? locs : [
-        { location_id: 1, location_name: 'Main Store',  active_status: true },
-        { location_id: 2, location_name: 'Back Godown', active_status: true },
+        { location_id: 1, location_name: 'Back Godown',            active_status: true },
+        { location_id: 2, location_name: 'Main Store',             active_status: true },
+        { location_id: 3, location_name: 'Main Store First Floor', active_status: true },
       ]);
     }
     setLoading(false);
