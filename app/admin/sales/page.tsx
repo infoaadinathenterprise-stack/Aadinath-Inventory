@@ -24,7 +24,7 @@ export default function SalesPage() {
   return <SalesDashboard />;
 }
 
-const LOC_NAME: Record<number, string> = { 1: 'Main Store', 2: 'Back Godown' };
+let LOC_NAME: Record<number, string> = { 1: 'Main Store', 2: 'Back Godown' };
 const DASH = '—';
 
 function fmtKsh(n: number | null | undefined) {
@@ -88,10 +88,14 @@ function SalesDashboard() {
     setLoading(true);
     setError(null);
 
-    const [salesRes, withdrawRes] = await Promise.all([
+    const [salesRes, withdrawRes, locRes] = await Promise.all([
       supabase.from('sales').select('*').eq('sale_date', day).order('created_at', { ascending: false }),
       supabase.from('withdrawals').select('*').eq('withdrawal_date', day).order('created_at', { ascending: false }),
+      supabase.from('locations').select('location_id, location_name'),
     ]);
+    for (const loc of locRes.data ?? []) {
+      LOC_NAME[loc.location_id as number] = loc.location_name as string;
+    }
 
     if (salesRes.error) {
       setError('Sales: ' + salesRes.error.message);

@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import { supabase } from '@/lib/supabase';
-import type { Purchase, PurchaseItem, Supplier, Product } from '@/lib/types';
+import type { Purchase, PurchaseItem, Supplier, Product, LocationInfo } from '@/lib/types';
 import { SESSION_KEY, ROLE_KEY } from '@/lib/types';
 import { logMovement } from '@/lib/stockActions';
 import AdminNavbar from '../components/AdminNavbar';
@@ -63,6 +63,7 @@ function PurchasesDashboard() {
   const [purchases,    setPurchases]    = useState<Purchase[]>([]);
   const [suppliers,    setSuppliers]    = useState<Supplier[]>([]);
   const [products,     setProducts]     = useState<Product[]>([]);
+  const [locations,    setLocations]    = useState<LocationInfo[]>([]);
   const [loading,      setLoading]      = useState(true);
   const [toast,        setToast]        = useState<ToastState | null>(null);
   const [newOpen,      setNewOpen]      = useState(false);
@@ -73,10 +74,11 @@ function PurchasesDashboard() {
 
   const load = useCallback(async () => {
     setLoading(true);
-    const [pr, sr, prd] = await Promise.all([
+    const [pr, sr, prd, lr] = await Promise.all([
       supabase.from('purchases').select('*').order('created_at', { ascending: false }),
       supabase.from('suppliers').select('*').eq('active_status', true).order('supplier_name'),
       supabase.from('products').select('*').eq('active_status', true).order('product_name'),
+      supabase.from('locations').select('location_id, location_name, active_status').eq('active_status', true).order('location_id'),
     ]);
     if (pr.error || sr.error || prd.error) {
       const msg = (pr.error ?? sr.error ?? prd.error)!.message;
@@ -85,6 +87,12 @@ function PurchasesDashboard() {
       setPurchases((pr.data ?? []) as Purchase[]);
       setSuppliers((sr.data ?? []) as Supplier[]);
       setProducts((prd.data ?? []) as Product[]);
+      // Fallback to the two original locations if the table read returns empty
+      const locs = (lr.data ?? []) as LocationInfo[];
+      setLocations(locs.length > 0 ? locs : [
+        { location_id: 1, location_name: 'Main Store',  active_status: true },
+        { location_id: 2, location_name: 'Back Godown', active_status: true },
+      ]);
     }
     setLoading(false);
   }, []);
@@ -141,10 +149,11 @@ function PurchasesDashboard() {
       // dropped that column earlier), so subtract from wherever the
       // item currently has at least row.qty available, preferring
       // back godown first then main store.
+      const drainOrder = locations.length > 0 ? locations.map(l => l.location_id) : [2, 1];
       for (const it of data.items) {
         if (!it.product_id || !it.quantity) continue;
         const qty = it.quantity;
-        for (const locId of [2, 1] as const) {
+        for (const locId of drainOrder) {
           const { data: row } = await supabase
             .from('stock_by_location')
             .select('id, quantity')
@@ -304,6 +313,7 @@ function PurchasesDashboard() {
           <NewPurchaseModal
             suppliers={suppliers}
             products={products}
+            locations={locations}
             onClose={() => setNewOpen(false)}
             onSaved={() => { setNewOpen(false); load(); showToast('Purchase saved ✓', 'success'); }}
             onError={msg => showToast(msg, 'error')}
@@ -743,10 +753,11 @@ const OCR_SPACE_KEY = 'K89615870288957';
 const GEMINI_PROXY_URL = 'https://aadinath-proxy.info-aadinathenterprise.workers.dev/api/gemini';
 
 function NewPurchaseModal({
-  suppliers, products, onClose, onSaved, onError,
+  suppliers, products, locations, onClose, onSaved, onError,
 }: {
   suppliers: Supplier[];
   products:  Product[];
+  locations: LocationInfo[];
   onClose:   () => void;
   onSaved:   () => void;
   onError:   (msg: string) => void;
@@ -1294,6 +1305,7 @@ ${rawText}`;
                   row={row}
                   index={idx}
                   products={products}
+                  locations={locations}
                   onChange={patch => updateRow(row.rowId, patch)}
                   onRemove={items.length > 1 ? () => setItems(rs => rs.filter(r => r.rowId !== row.rowId)) : undefined}
                 />
@@ -1357,13 +1369,14 @@ ${rawText}`;
 // ─── Item row editor ──────────────────────────────────────────────────────────
 
 function ItemRowEditor({
-  row, index, products, onChange, onRemove,
+  row, index, products, locations, onChange, onRemove,
 }: {
-  row:      ItemRow;
-  index:    number;
-  products: Product[];
-  onChange: (patch: Partial<ItemRow>) => void;
-  onRemove: (() => void) | undefined;
+  row:       ItemRow;
+  index:     number;
+  products:  Product[];
+  locations: LocationInfo[];
+  onChange:  (patch: Partial<ItemRow>) => void;
+  onRemove:  (() => void) | undefined;
 }) {
   const [search, setSearch] = useState(row.productName);
   const [open,   setOpen]   = useState(false);
@@ -1463,17 +1476,17 @@ function ItemRowEditor({
       {/* Location */}
       <div className="mt-2">
         <label className="text-[9px] font-bold text-muted uppercase block mb-0.5">Goes to</label>
-        <div className="flex gap-1.5">
-          {([[2, '🏭 Back Godown'], [1, '🏪 Main Store']] as const).map(([id, label]) => (
+        <div className="flex gap-1.5 flex-wrap">
+          {locations.map(loc => (
             <button
-              key={id}
-              onClick={() => onChange({ locationId: id })}
-              className={`flex-1 py-1.5 rounded-lg border text-[11px] font-bold transition-all ${
-                row.locationId === id
+              key={loc.location_id}
+              onClick={() => onChange({ locationId: loc.location_id })}
+              className={`flex-1 min-w-[30%] py-1.5 rounded-lg border text-[11px] font-bold transition-all ${
+                row.locationId === loc.location_id
                   ? 'border-teal bg-teal/10 text-teal'
                   : 'border-white/8 bg-surface text-muted hover:border-white/20'
               }`}
-            >{label}</button>
+            >{loc.location_name}</button>
           ))}
         </div>
       </div>
