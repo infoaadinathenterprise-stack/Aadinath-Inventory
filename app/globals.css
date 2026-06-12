@@ -1,33 +1,59 @@
 @import "tailwindcss";
 
+/* ─────────────────────────────────────────────────────────────────────
+   Design tokens — the whole app derives from these.
+   Palette: deep slate-navy base, refined sky-cyan primary, warm amber
+   accent. Softer than the old neon set; reads "enterprise dashboard".
+   ──────────────────────────────────────────────────────────────────── */
 @theme {
-  --color-navy:     #0a0f1e;
-  --color-surface:  #111827;
-  --color-surface2: #1a2438;
-  --color-teal:     #00d4ff;
-  --color-gold:     #f5a623;
-  --color-success:  #22c55e;
-  --color-danger:   #ef4444;
-  --color-muted:    #94a3b8;
+  --color-navy:     #0b1120;   /* page background  */
+  --color-surface:  #121b2e;   /* card             */
+  --color-surface2: #1a2740;   /* raised / inputs  */
+  --color-teal:     #38bdf8;   /* primary action   */
+  --color-gold:     #f5b544;   /* secondary accent */
+  --color-success:  #34d399;
+  --color-danger:   #f0524f;
+  --color-muted:    #8ca3c7;
+
+  --font-display: var(--font-jakarta), var(--font-inter), system-ui, sans-serif;
 }
 
-html  { scroll-behavior: smooth; }
-body  { background: #0a0f1e; }
+html {
+  scroll-behavior: smooth;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
 
-::selection { background: rgba(0, 212, 255, 0.25); color: #f1f5f9; }
+body {
+  background: #0b1120;
+  -webkit-tap-highlight-color: transparent;   /* clean mobile taps */
+}
 
-::-webkit-scrollbar       { width: 5px; }
-::-webkit-scrollbar-track { background: #0a0f1e; }
-::-webkit-scrollbar-thumb { background: #1e3a5f; border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: #00d4ff33; }
+/* Headings get the display face */
+h1, h2, h3 { font-family: var(--font-display); letter-spacing: -0.02em; }
+
+/* Numbers line up in tables/cards by default */
+input[type="number"], .tabular-nums { font-variant-numeric: tabular-nums; }
+
+::selection { background: rgba(56, 189, 248, 0.25); color: #f1f5f9; }
+
+::-webkit-scrollbar       { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #24426c; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #38bdf855; }
+
+/* Hide scrollbars on chip rows but keep them swipeable */
+.scrollbar-none { scrollbar-width: none; }
+.scrollbar-none::-webkit-scrollbar { display: none; }
 
 @keyframes float {
   0%, 100% { transform: translateY(0px) scale(1); opacity: 0.6; }
   50%       { transform: translateY(-20px) scale(1.05); opacity: 1; }
 }
 @keyframes pulse-glow {
-  0%, 100% { box-shadow: 0 0 20px rgba(0,212,255,0.3); }
-  50%       { box-shadow: 0 0 40px rgba(0,212,255,0.6), 0 0 60px rgba(0,212,255,0.2); }
+  0%, 100% { box-shadow: 0 0 16px rgba(56,189,248,0.25); }
+  50%       { box-shadow: 0 0 32px rgba(56,189,248,0.45); }
 }
 @keyframes gradient-shift {
   0%   { background-position: 0% 50%; }

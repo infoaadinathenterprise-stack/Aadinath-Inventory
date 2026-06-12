@@ -5,18 +5,25 @@ import { motion, useInView } from 'framer-motion';
 
 const LOCATIONS = [
   {
-    name:    'Back Godown',
-    icon:    '🏭',
-    desc:    'Main storage facility — where bulk inventory is held and dispatched.',
-    hours:   'Mon – Sat: 9 AM – 6 PM',
-    tagline: 'Bulk Storage',
-  },
-  {
     name:    'Main Store',
     icon:    '🏪',
     desc:    'Walk-in store — ready stock for immediate purchase and retail customers.',
     hours:   'Mon – Sun: 9 AM – 7 PM',
     tagline: 'Walk-in Store',
+  },
+  {
+    name:    'Main Store · First Floor',
+    icon:    '🏬',
+    desc:    'Extended showroom floor — specialty parts and additional ready stock.',
+    hours:   'Mon – Sun: 9 AM – 7 PM',
+    tagline: 'Showroom',
+  },
+  {
+    name:    'Back Godown',
+    icon:    '🏭',
+    desc:    'Main storage facility — where bulk inventory is held and dispatched.',
+    hours:   'Mon – Sat: 9 AM – 6 PM',
+    tagline: 'Bulk Storage',
   },
 ];
 
@@ -54,7 +61,7 @@ export default function AboutSection() {
           </div>
         </FadeIn>
 
-        <div className="grid md:grid-cols-2 gap-6 mb-16">
+        <div className="grid md:grid-cols-3 gap-4 sm:gap-6 mb-16">
           {LOCATIONS.map((loc, i) => (
             <FadeIn key={loc.name} delay={i * 0.15}>
               <div className="relative p-6 rounded-2xl bg-surface border border-teal/10 hover:border-teal/30 transition-all duration-300 group overflow-hidden">

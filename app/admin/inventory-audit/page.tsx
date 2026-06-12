@@ -438,7 +438,7 @@ function InventoryAuditDashboard() {
                         >
                           <div className="flex items-start justify-between gap-3">
                             <div className="min-w-0 flex-1">
-                              <p className="font-semibold text-sm text-slate-100 truncate leading-tight">
+                              <p className="font-semibold text-sm text-slate-100 leading-snug break-words line-clamp-2">
                                 {row.product.product_name}
                               </p>
                               <p className="text-[11px] text-muted mt-0.5 truncate">

@@ -293,7 +293,7 @@ export default function AdjustStockModal({
         >
           <div className="w-9 h-1 bg-white/15 rounded-full mx-auto mb-4 sm:hidden" />
 
-          <h3 className="font-bold text-slate-100 text-base mb-1 truncate">{product.product_name}</h3>
+          <h3 className="font-bold text-slate-100 text-base mb-1 leading-snug break-words">{product.product_name}</h3>
 
           {/* Per-location stock summary */}
           <div className="flex flex-wrap gap-1.5 mb-4">

@@ -41,15 +41,15 @@ export default function ProductsPage() {
 
   return (
     <main className="min-h-screen pt-24 pb-20">
-      <div className="max-w-7xl mx-auto px-6">
-        <div className="text-center mb-12">
-          <span className="text-xs font-bold text-teal uppercase tracking-widest">Catalogue</span>
-          <h1 className="text-4xl md:text-5xl font-bold text-slate-100 mt-3 mb-4">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6">
+        <div className="text-center mb-8 sm:mb-12">
+          <span className="text-[11px] sm:text-xs font-bold text-teal uppercase tracking-widest">Catalogue</span>
+          <h1 className="text-3xl sm:text-4xl md:text-5xl font-bold text-slate-100 mt-3 mb-3 tracking-tight">
             Our <span className="text-teal">Products</span>
           </h1>
-          <p className="text-muted max-w-lg mx-auto text-sm leading-relaxed">
-            Browse our full range of auto parts, lubricants, and consumables.
-            All products sourced from trusted manufacturers.
+          <p className="text-muted max-w-lg mx-auto text-sm leading-relaxed px-2">
+            Browse our full range of auto parts, lubricants, and consumables —
+            all sourced from trusted manufacturers.
           </p>
         </div>
 

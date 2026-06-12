@@ -88,7 +88,7 @@ export default function ProductGrid({ products, categories }: Props) {
         ) : (
           <motion.div
             key="grid"
-            className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-5"
+            className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-5"
           >
             {filtered.map((p, i) => (
               <ProductCard key={p.product_id} product={p} index={i} />

@@ -53,21 +53,20 @@ export default function AdminNavbar({ onLogout }: Props) {
             </span>
           </div>
 
-          <div className="hidden md:flex items-center gap-1">
+          <div className="hidden lg:flex items-center gap-0.5">
             {links.map(({ emoji, label, href }) => {
               const active = pathname === href;
               return (
                 <Link
                   key={href}
                   href={href}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                  className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
                     active
-                      ? 'bg-teal/10 border border-teal/20 text-teal'
+                      ? 'bg-teal/10 text-teal'
                       : 'text-muted hover:text-slate-100 hover:bg-white/5'
                   }`}
                 >
                   <span>{emoji}</span>{label}
-                  {active && <span className="w-1 h-1 rounded-full bg-teal ml-0.5" />}
                 </Link>
               );
             })}
@@ -83,7 +82,7 @@ export default function AdminNavbar({ onLogout }: Props) {
             <button
               onClick={() => setOpen(true)}
               aria-label="Open menu"
-              className="w-9 h-9 rounded-lg bg-surface2 border border-white/8 hover:border-teal/30 transition-all md:hidden flex flex-col justify-center items-center gap-1"
+              className="w-9 h-9 rounded-lg bg-surface2 border border-white/8 hover:border-teal/30 transition-all lg:hidden flex flex-col justify-center items-center gap-1"
             >
               <span className="w-4 h-0.5 bg-slate-300 rounded-full" />
               <span className="w-4 h-0.5 bg-slate-300 rounded-full" />

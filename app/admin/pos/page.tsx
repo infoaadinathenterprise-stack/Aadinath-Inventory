@@ -823,7 +823,7 @@ function PosDashboard() {
         </div>
       </div>
 
-      <main className="flex-1 overflow-y-auto px-3 py-3 flex flex-col gap-2">
+      <main className="flex-1 overflow-y-auto px-3 py-3 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5 auto-rows-min">
         {visible.length === 0 && (
           <p className="text-center text-muted text-sm py-12">No products at {locName}</p>
         )}
@@ -853,7 +853,7 @@ function PosDashboard() {
               onClick={() => { setCartOpen(false); setTimeout(() => barcodeRef.current?.focus(), 100); }}
             />
             <motion.div
-              className="fixed right-0 top-0 bottom-0 w-72 z-90 bg-surface border-l border-white/8 flex flex-col shadow-2xl"
+              className="fixed right-0 top-0 bottom-0 w-[88vw] max-w-sm z-90 bg-surface border-l border-white/8 flex flex-col shadow-2xl"
               initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }}
               transition={{ type: 'spring', damping: 25, stiffness: 200 }}
             >
@@ -888,7 +888,7 @@ function PosDashboard() {
                   return (
                   <div key={item.product.product_id} className="bg-surface2 rounded-xl px-3 py-2.5 border border-white/5">
                     <div className="flex items-start justify-between mb-2">
-                      <p className="text-xs font-semibold text-slate-100 truncate flex-1 mr-2">{item.product.product_name}</p>
+                      <p className="text-xs font-semibold text-slate-100 leading-snug break-words line-clamp-2 flex-1 mr-2">{item.product.product_name}</p>
                       <button
                         onClick={() => setCart(c => c.filter(i => i.product.product_id !== item.product.product_id))}
                         className="text-muted hover:text-danger text-sm shrink-0 transition-colors"
@@ -1290,6 +1290,7 @@ function PosProductCard({ product: p, index, locationId, locations, stockByLoc, 
                        fmt.label;
 
   const bigNum = fmt.unitBadge === 'BOX' && ppb > 0 ? Math.floor(total / ppb) : total;
+  const meta   = [p.brand, p.model].filter(Boolean).join(' · ') || p.stock_keeping_unit;
 
   return (
     <motion.div
@@ -1297,45 +1298,51 @@ function PosProductCard({ product: p, index, locationId, locations, stockByLoc, 
       animate={{ opacity: 1, y: 0 }}
       transition={{ delay: Math.min(index * 0.02, 0.25), duration: 0.25 }}
       onClick={() => onAdjust(p, 'minus')}
-      className="flex items-center gap-3 px-3 py-3 rounded-xl bg-surface border border-white/5 hover:border-teal/20 cursor-pointer transition-colors group"
+      className="flex flex-col rounded-2xl bg-surface border border-white/6 hover:border-teal/25 cursor-pointer transition-colors duration-200 overflow-hidden active:bg-surface2/60"
     >
-      <span className="shrink-0 self-start mt-0.5 text-[9px] font-bold px-2 py-0.5 rounded-md bg-surface2 border border-white/8 text-muted uppercase tracking-wider whitespace-nowrap">
-        {p.type || '—'}
-      </span>
-
-      <div className="flex-1 min-w-0">
-        <p className="text-sm font-bold text-slate-100 truncate group-hover:text-teal transition-colors">
+      {/* Name block — full width so long names wrap instead of clipping */}
+      <div className="px-3.5 pt-3 pb-2">
+        <p className="text-[15px] font-semibold text-slate-100 leading-snug break-words line-clamp-2">
           {p.product_name}
         </p>
-        <p className="text-xs text-muted truncate mt-0.5">
-          {[p.brand, p.model].filter(Boolean).join(' · ') || p.stock_keeping_unit || '—'}
-        </p>
-        <p className={`text-[10px] font-semibold mt-1 ${stockCls}`}>{stockTxt}</p>
-        {showOtherBadge && (
-          <span className="inline-flex items-center gap-1 mt-1 text-[9px] font-bold px-1.5 py-0.5 rounded-full border bg-gold/10 border-gold/30 text-gold leading-none">
-            📦 {otherTotal} elsewhere
+        <p className="text-[11px] text-muted mt-1 flex items-center gap-1.5 min-w-0">
+          <span className="shrink-0 text-[9px] font-bold uppercase tracking-wider text-teal/80 bg-teal/8 border border-teal/15 rounded px-1.5 py-px">
+            {p.type || '—'}
           </span>
-        )}
+          {meta && <span className="truncate">{meta}</span>}
+        </p>
       </div>
 
-      <div className="flex items-center gap-1.5 shrink-0" onClick={e => e.stopPropagation()}>
-        <button
-          onClick={() => onAdjust(p, 'minus')}
-          className="w-8 h-8 rounded-lg bg-danger/10 border border-danger/30 text-danger text-xl font-bold flex items-center justify-center hover:bg-danger hover:text-white transition-all active:scale-90"
-        >−</button>
-
-        <div className="flex flex-col items-center min-w-8.5">
-          <span className="text-lg font-bold text-slate-200 tabular-nums leading-none">{bigNum}</span>
-          {fmt.unitBadge === 'BOX' && ppb > 0 && total % ppb > 0 && (
-            <span className="text-[8px] text-muted leading-none">{`+${total % ppb}pc`}</span>
+      {/* Stock status + tap controls */}
+      <div className="px-3.5 py-2 border-t border-white/5 bg-white/[0.015] flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <p className={`text-xs font-semibold ${stockCls}`}>{stockTxt}</p>
+          {showOtherBadge && (
+            <p className="text-[10px] text-gold/75 mt-0.5">📦 {otherTotal} elsewhere</p>
           )}
-          <span className="text-[8px] font-bold text-muted/60 uppercase tracking-wider">{fmt.unitBadge}</span>
         </div>
 
-        <button
-          onClick={() => onAdjust(p, 'plus')}
-          className="w-8 h-8 rounded-lg bg-teal/10 border border-teal/30 text-teal text-xl font-bold flex items-center justify-center hover:bg-teal hover:text-navy transition-all active:scale-90"
-        >+</button>
+        <div className="flex items-center gap-2 shrink-0" onClick={e => e.stopPropagation()}>
+          <button
+            onClick={() => onAdjust(p, 'minus')}
+            aria-label="Sell / remove"
+            className="w-10 h-10 rounded-xl bg-danger/10 border border-danger/25 text-danger text-xl font-bold flex items-center justify-center hover:bg-danger hover:text-white transition-all active:scale-90"
+          >−</button>
+
+          <div className="flex flex-col items-center min-w-9">
+            <span className="text-xl font-bold text-slate-100 tabular-nums leading-none">{bigNum}</span>
+            {fmt.unitBadge === 'BOX' && ppb > 0 && total % ppb > 0 && (
+              <span className="text-[9px] text-muted leading-none mt-0.5">{`+${total % ppb}pc`}</span>
+            )}
+            <span className="text-[8px] font-bold text-muted/50 uppercase tracking-widest leading-none mt-0.5">{fmt.unitBadge}</span>
+          </div>
+
+          <button
+            onClick={() => onAdjust(p, 'plus')}
+            aria-label="Add stock"
+            className="w-10 h-10 rounded-xl bg-teal/10 border border-teal/25 text-teal text-xl font-bold flex items-center justify-center hover:bg-teal hover:text-navy transition-all active:scale-90"
+          >+</button>
+        </div>
       </div>
     </motion.div>
   );

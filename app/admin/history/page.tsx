@@ -264,7 +264,7 @@ function HistoryDashboard() {
                       {meta.emoji}
                     </div>
                     <div className="flex-1 min-w-0">
-                      <div className="font-semibold text-sm text-slate-100 truncate">{productName(m.product_id)}</div>
+                      <div className="font-semibold text-sm text-slate-100 leading-snug break-words line-clamp-2">{productName(m.product_id)}</div>
                       <div className="text-xs text-muted mt-0.5 truncate">
                         {isTransfer
                           ? `${fromLoc ?? '?'} → ${toLoc ?? '?'}`
