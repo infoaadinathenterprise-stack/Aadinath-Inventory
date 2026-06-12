@@ -193,13 +193,14 @@ function LoginForm({ onSuccess }: { onSuccess: () => void }) {
 // ── Add/Edit Product Modal ────────────────────────────────────────────────────
 
 function ProductModal({
-  editing, products, locations, stockByLoc,
+  editing, products, locations, stockByLoc, boxByLoc,
   onClose, onSaved, onError,
 }: {
   editing:      Product | null;
   products:     Product[];
   locations:    LocationInfo[];
   stockByLoc:   StockByLoc;
+  boxByLoc:     StockByLoc;
   onClose:  () => void;
   onSaved:  (msg: string) => void;
   onError:  (msg: string) => void;
@@ -226,15 +227,29 @@ function ProductModal({
     };
   });
 
-  // Per-location stock quantities, keyed by real location_id from the
-  // locations table. Initialised from current stock when editing.
+  // Per-location stock, keyed by real location_id. When EDITING, the
+  // value shown is the TOTAL piece count (loose + boxes×ppb) so it
+  // matches what the inventory card displays — e.g. 1 box + 27 pcs at
+  // ppb 40 shows as 67, not 27. When creating a box product, the input
+  // is in boxes (legacy behavior, hint shows the piece conversion).
   const [locStock, setLocStock] = useState<Record<number, string>>(() => {
     const init: Record<number, string> = {};
+    const editPpb = editing?.pieces_per_box ?? 0;
     for (const loc of locations) {
       const q = editing ? (stockByLoc[loc.location_id]?.[editing.product_id] ?? 0) : 0;
-      init[loc.location_id] = String(q);
+      const b = editing ? (boxByLoc[loc.location_id]?.[editing.product_id]   ?? 0) : 0;
+      init[loc.location_id] = String(q + b * (editPpb > 0 ? editPpb : 0));
     }
     return init;
+  });
+  // Snapshot of how many whole boxes each location held when the modal
+  // opened — used to preserve the box/loose split when saving totals.
+  const [initBoxes] = useState<Record<number, number>>(() => {
+    const m: Record<number, number> = {};
+    for (const loc of locations) {
+      m[loc.location_id] = editing ? (boxByLoc[loc.location_id]?.[editing.product_id] ?? 0) : 0;
+    }
+    return m;
   });
   function setLocQty(locId: number, value: string) {
     setLocStock(prev => ({ ...prev, [locId]: value }));
@@ -398,30 +413,60 @@ function ProductModal({
         productId = (data as { product_id: number }).product_id;
       }
 
-      // Write stock for every location using its REAL id from the
-      // locations table — no hardcoded 1/2 mapping.
+      // Write stock for every location. The form value is the TOTAL
+      // piece count when editing (boxes input when creating a box
+      // product). We compare totals against totals — the old code
+      // compared against loose `quantity` only, which double-counted
+      // box stock (e.g. 1 box + 27 pcs at ppb 40 showed as 27, and
+      // typing 67 would have created 67 loose + 1 box = 107).
+      const formPpb = isBox ? (parseInt(form.pieces_per_box) || 0) : 0;
+      // The DB's existing box counts were stored under the product's
+      // PREVIOUS ppb — use that for reading old totals.
+      const oldPpb = editing?.pieces_per_box ?? formPpb;
+
       for (const loc of locations) {
         const locId = loc.location_id;
-        const qty   = parseInt(locStock[locId] ?? '0') || 0;
-        const { data: ex } = await supabase
-          .from('stock_by_location').select('id, quantity')
-          .eq('product_id', productId).eq('location_id', locId).maybeSingle();
-        const oldQty = ex?.quantity ?? 0;
+        const input = parseInt(locStock[locId] ?? '0') || 0;
+        // New box product: input is boxes → convert. Otherwise: total pieces.
+        const newTotal = (!editing && formPpb > 0) ? input * formPpb : input;
 
-        if (ex) {
-          await supabase.from('stock_by_location').update({ quantity: qty }).eq('id', ex.id);
-        } else if (qty > 0) {
-          await supabase.from('stock_by_location').insert({ product_id: productId, location_id: locId, quantity: qty });
-        } else {
-          continue; // no existing row and nothing to add
+        const { data: ex } = await supabase
+          .from('stock_by_location').select('id, quantity, box_quantity')
+          .eq('product_id', productId).eq('location_id', locId).maybeSingle();
+        const oldLoose = ex?.quantity     ?? 0;
+        const oldBoxes = ex?.box_quantity ?? 0;
+        const oldTotal = oldLoose + oldBoxes * (oldPpb > 0 ? oldPpb : 0);
+
+        if (!ex && newTotal === 0) continue;          // nothing to create
+        if (editing && ex && newTotal === oldTotal) continue;  // unchanged
+
+        // Decompose the total back into boxes + loose pieces. Keep as
+        // many existing whole boxes as still fit so the box/loose
+        // split survives an edit; new products pack into whole boxes.
+        let newBoxes = 0, newLoose = newTotal;
+        if (formPpb > 0) {
+          newBoxes = editing
+            ? Math.min(oldBoxes, Math.floor(newTotal / formPpb))
+            : Math.floor(newTotal / formPpb);
+          newLoose = newTotal - newBoxes * formPpb;
         }
 
+        // logMovement FIRST — if it throws, stock is untouched (no partial writes).
         if (editing) {
-          const delta = qty - oldQty;
-          if (delta > 0) await logMovement(productId, null, locId,  delta, 'ADJUSTMENT_IN',  'Stock adjusted via product form');
-          if (delta < 0) await logMovement(productId, locId, null, -delta, 'ADJUSTMENT_OUT', 'Stock adjusted via product form');
-        } else if (qty > 0) {
-          await logMovement(productId, null, locId, qty, 'ADJUSTMENT_IN', 'Initial stock');
+          const delta = newTotal - oldTotal;
+          if (delta > 0) await logMovement(productId, null, locId,  delta, 'ADJUSTMENT_IN',  'Stock adjusted via product form', { before: oldTotal, after: newTotal });
+          if (delta < 0) await logMovement(productId, locId, null, -delta, 'ADJUSTMENT_OUT', 'Stock adjusted via product form', { before: oldTotal, after: newTotal });
+        } else if (newTotal > 0) {
+          await logMovement(productId, null, locId, newTotal, 'ADJUSTMENT_IN', 'Initial stock', { before: 0, after: newTotal });
+        }
+
+        if (ex) {
+          await supabase.from('stock_by_location')
+            .update({ quantity: newLoose, box_quantity: newBoxes })
+            .eq('id', ex.id);
+        } else {
+          await supabase.from('stock_by_location')
+            .insert({ product_id: productId, location_id: locId, quantity: newLoose, box_quantity: newBoxes });
         }
       }
 
@@ -616,11 +661,27 @@ function ProductModal({
           {/* Stock per location — one input per real location from the DB */}
           <div>
             <label className="text-[10px] font-bold text-muted uppercase tracking-widest block mb-2">
-              Stock by Location{isBox && ppb > 0 && !editing ? ' (boxes)' : ''}
+              Stock by Location{isBox && ppb > 0 ? (editing ? ' (total pieces)' : ' (boxes)') : ''}
             </label>
             <div className="flex flex-col gap-2.5">
               {locations.map(loc => {
                 const val = locStock[loc.location_id] ?? '0';
+                const num = parseInt(val) || 0;
+                // Live preview of the box/loose split that will be saved
+                // (keeps existing whole boxes, breaks them only if the
+                // total drops below box capacity).
+                let hint: string | null = null;
+                if (isBox && ppb > 0 && num > 0) {
+                  if (editing) {
+                    const kb = Math.min(initBoxes[loc.location_id] ?? 0, Math.floor(num / ppb));
+                    const lo = num - kb * ppb;
+                    hint = kb > 0
+                      ? `= ${kb} box${kb === 1 ? '' : 'es'}${lo > 0 ? ` + ${lo} pcs` : ''}`
+                      : `= ${lo} loose pcs`;
+                  } else {
+                    hint = `= ${num * ppb} pieces`;
+                  }
+                }
                 return (
                   <div key={loc.location_id}>
                     <p className="text-xs font-semibold text-slate-300 mb-1">{loc.location_name}</p>
@@ -632,9 +693,7 @@ function ProductModal({
                       <button type="button" onClick={() => setLocQty(loc.location_id, String((parseInt(val) || 0) + 1))}
                         className="w-9 h-9 rounded-lg bg-surface2 border border-white/10 text-slate-100 text-lg font-bold flex items-center justify-center shrink-0">+</button>
                     </div>
-                    {isBox && ppb > 0 && !editing && (parseInt(val) || 0) > 0 && (
-                      <p className="text-xs text-blue-400 mt-1">= {(parseInt(val) || 0) * ppb} pieces</p>
-                    )}
+                    {hint && <p className="text-xs text-teal/80 mt-1">{hint}</p>}
                   </div>
                 );
               })}
@@ -919,6 +978,7 @@ function Dashboard({ role }: { role: UserRole }) {
             products={products}
             locations={locations}
             stockByLoc={stockByLoc}
+            boxByLoc={boxByLoc}
             onClose={() => setProductModal(null)}
             onSaved={msg => { setProductModal(null); showToast(msg, 'success'); refresh(); }}
             onError={msg => showToast(msg, 'error')}
