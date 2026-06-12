@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
 import type { Product, StockMap, StockByLoc, LocationInfo } from '@/lib/types';
 
@@ -22,10 +22,14 @@ export function useProducts(): ProductsData {
   const [loading,    setLoading]    = useState(true);
   const [error,      setError]      = useState<string | null>(null);
   const [tick,       setTick]       = useState(0);
+  // Only the FIRST load shows the full-page spinner. Subsequent
+  // refreshes (after a sale/adjust/transfer) update data silently so
+  // the page keeps its filters, search, and scroll position.
+  const firstLoad = useRef(true);
 
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
+    if (firstLoad.current) setLoading(true);
     setError(null);
 
     async function load() {
@@ -78,6 +82,7 @@ export function useProducts(): ProductsData {
       setLocations(locationList);
       setStockByLoc(sbl);
       setBoxByLoc(bbl);
+      firstLoad.current = false;
       setLoading(false);
     }
 

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import { supabase } from '@/lib/supabase';
@@ -45,8 +45,9 @@ export default function ApprovalsPage() {
     window.location.href = '/admin';
   }
 
+  const firstLoad = useRef(true);
   const load = useCallback(async () => {
-    setLoading(true);
+    if (firstLoad.current) setLoading(true);
     const [reqRes, prodRes, locRes] = await Promise.all([
       supabase
         .from('stock_requests')
@@ -61,6 +62,7 @@ export default function ApprovalsPage() {
     }
     setRequests((reqRes.data ?? []) as PendingRequest[]);
     setProducts((prodRes.data ?? []) as Product[]);
+    firstLoad.current = false;
     setLoading(false);
   }, []);
 

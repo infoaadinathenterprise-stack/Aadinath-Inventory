@@ -84,8 +84,11 @@ function SalesDashboard() {
     setToast({ msg, type, id: ++toastId.current });
   }
 
+  // Spinner only while the page has nothing to show. Day switches and
+  // post-save refreshes update in place without blanking the page.
+  const firstLoad = useRef(true);
   const load = useCallback(async () => {
-    setLoading(true);
+    if (firstLoad.current) setLoading(true);
     setError(null);
 
     const [salesRes, withdrawRes, locRes] = await Promise.all([
@@ -150,6 +153,7 @@ function SalesDashboard() {
       setItems({});
       setBuyMap({});
     }
+    firstLoad.current = false;
     setLoading(false);
   }, [day]);
   useEffect(() => { load(); }, [load]);

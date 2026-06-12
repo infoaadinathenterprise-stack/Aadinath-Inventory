@@ -36,14 +36,16 @@ function SuppliersDashboard() {
     if (!ok || role !== 'admin') router.replace('/admin');
   }, [router]);
 
+  const firstLoad = useRef(true);
   const load = useCallback(async () => {
-    setLoading(true);
+    if (firstLoad.current) setLoading(true);
     const { data, error } = await supabase.from('suppliers').select('*').eq('active_status', true).order('supplier_name');
     if (error) {
       setToast({ msg: 'Failed to load suppliers: ' + error.message, type: 'error', id: ++toastId.current });
     } else {
       setSuppliers((data ?? []) as Supplier[]);
     }
+    firstLoad.current = false;
     setLoading(false);
   }, []);
 

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import { supabase } from '@/lib/supabase';
@@ -43,14 +43,16 @@ export default function StaffPage() {
     window.location.href = '/admin';
   }
 
+  const firstLoad = useRef(true);
   const load = useCallback(async () => {
-    setLoading(true);
+    if (firstLoad.current) setLoading(true);
     const { data, error } = await supabase
       .from('app_users')
       .select('user_id, full_name, email, role, active_status, created_at')
       .order('created_at', { ascending: true });
     if (error) showToast(error.message, 'error');
     setUsers((data ?? []) as AppUser[]);
+    firstLoad.current = false;
     setLoading(false);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 

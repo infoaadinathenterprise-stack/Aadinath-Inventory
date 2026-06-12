@@ -86,8 +86,9 @@ function HistoryDashboard() {
     if (!ok || role !== 'admin') router.replace('/admin');
   }, [router]);
 
+  const firstLoad = useRef(true);
   const load = useCallback(async () => {
-    setLoading(true);
+    if (firstLoad.current) setLoading(true);
     setLoadError(null);
     const [movRes, reqRes, prodRes, locRes] = await Promise.all([
       supabase.from('stock_movements').select('movement_id, product_id, from_location_id, to_location_id, quantity, movement_type, reason, notes, movement_at').order('movement_id', { ascending: false }).limit(500),
@@ -140,6 +141,7 @@ function HistoryDashboard() {
       setLoadError(prodRes.error.message);
       setToast({ msg: 'Failed to load products: ' + prodRes.error.message, type: 'error', id: ++toastId.current });
     }
+    firstLoad.current = false;
     setLoading(false);
   }, []);
 

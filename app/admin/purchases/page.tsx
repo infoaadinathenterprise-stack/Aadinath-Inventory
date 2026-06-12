@@ -71,9 +71,12 @@ function PurchasesDashboard() {
   const [deleting,     setDeleting]     = useState(false);
   const [editTarget,   setEditTarget]   = useState<{ purchase: Purchase; items: PurchaseItem[] } | null>(null);
   const toastId = useRef(0);
+  // Full spinner only on first load — refreshes after save/edit/delete
+  // are silent so the list keeps its scroll/filter state.
+  const firstLoad = useRef(true);
 
   const load = useCallback(async () => {
-    setLoading(true);
+    if (firstLoad.current) setLoading(true);
     const [pr, sr, prd, lr] = await Promise.all([
       supabase.from('purchases').select('*').order('created_at', { ascending: false }),
       supabase.from('suppliers').select('*').eq('active_status', true).order('supplier_name'),
@@ -95,6 +98,7 @@ function PurchasesDashboard() {
         { location_id: 3, location_name: 'Main Store First Floor', active_status: true },
       ]);
     }
+    firstLoad.current = false;
     setLoading(false);
   }, []);
   useEffect(() => { load(); }, [load]);
