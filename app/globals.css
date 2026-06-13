@@ -2,18 +2,18 @@
 
 /* ─────────────────────────────────────────────────────────────────────
    Design tokens — the whole app derives from these.
-   Palette: deep slate-navy base, refined sky-cyan primary, warm amber
-   accent. Softer than the old neon set; reads "enterprise dashboard".
+   Deep blue-black base with ambient aurora light, refined sky-cyan
+   primary and champagne-gold accent. Premium, not neon.
    ──────────────────────────────────────────────────────────────────── */
 @theme {
-  --color-navy:     #0b1120;   /* page background  */
-  --color-surface:  #121b2e;   /* card             */
-  --color-surface2: #1a2740;   /* raised / inputs  */
-  --color-teal:     #38bdf8;   /* primary action   */
-  --color-gold:     #f5b544;   /* secondary accent */
+  --color-navy:     #070b15;   /* page background          */
+  --color-surface:  #0d1524;   /* card                     */
+  --color-surface2: #16213a;   /* raised / inputs          */
+  --color-teal:     #38bdf8;   /* primary action           */
+  --color-gold:     #f3b94d;   /* secondary accent         */
   --color-success:  #34d399;
-  --color-danger:   #f0524f;
-  --color-muted:    #8ca3c7;
+  --color-danger:   #f05252;
+  --color-muted:    #8da3c5;
 
   --font-display: var(--font-jakarta), var(--font-inter), system-ui, sans-serif;
 }
@@ -25,15 +25,21 @@ html {
   -moz-osx-font-smoothing: grayscale;
 }
 
+/* Ambient aurora — three soft light sources behind everything.
+   This is what separates "flat dark" from "premium dark". */
 body {
-  background: #0b1120;
-  -webkit-tap-highlight-color: transparent;   /* clean mobile taps */
+  background:
+    radial-gradient(1100px 700px at 85% -10%, rgba(79, 70, 229, 0.10), transparent 60%),
+    radial-gradient(900px 600px at -10% 15%,  rgba(56, 189, 248, 0.07), transparent 55%),
+    radial-gradient(1000px 800px at 50% 115%, rgba(243, 185, 77, 0.05), transparent 60%),
+    #070b15;
+  background-attachment: fixed;
+  -webkit-tap-highlight-color: transparent;
 }
 
 /* Headings get the display face */
 h1, h2, h3 { font-family: var(--font-display); letter-spacing: -0.02em; }
 
-/* Numbers line up in tables/cards by default */
 input[type="number"], .tabular-nums { font-variant-numeric: tabular-nums; }
 
 ::selection { background: rgba(56, 189, 248, 0.25); color: #f1f5f9; }
@@ -43,9 +49,57 @@ input[type="number"], .tabular-nums { font-variant-numeric: tabular-nums; }
 ::-webkit-scrollbar-thumb { background: #24426c; border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: #38bdf855; }
 
-/* Hide scrollbars on chip rows but keep them swipeable */
 .scrollbar-none { scrollbar-width: none; }
 .scrollbar-none::-webkit-scrollbar { display: none; }
+
+/* ─── Premium utilities ──────────────────────────────────────────────
+   Shared "materials" so every card/nav/button across the app carries
+   the same finish. */
+
+/* Lux card: gradient sheen + 1px inner top-light + deep soft shadow */
+.card-lux {
+  background:
+    linear-gradient(160deg, rgba(255,255,255,0.05) 0%, rgba(255,255,255,0.015) 40%, rgba(255,255,255,0) 100%),
+    #0d1524;
+  border: 1px solid rgba(148, 163, 200, 0.12);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.05),
+    0 12px 32px -16px rgba(0, 0, 0, 0.6);
+}
+
+/* Frosted glass for navbars / drawers / overlays */
+.glass {
+  background: rgba(9, 14, 26, 0.78);
+  backdrop-filter: blur(16px) saturate(1.3);
+  -webkit-backdrop-filter: blur(16px) saturate(1.3);
+  border-color: rgba(148, 163, 200, 0.10);
+}
+
+/* Gradient headline text */
+.text-gradient {
+  background: linear-gradient(100deg, #7dd3fc 0%, #38bdf8 45%, #818cf8 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.text-gradient-gold {
+  background: linear-gradient(100deg, #fcd28d 0%, #f3b94d 60%, #e09b2d 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* Primary gradient button */
+.btn-primary {
+  background: linear-gradient(135deg, #38bdf8 0%, #2563eb 100%);
+  color: #ffffff;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.25),
+    0 8px 24px -8px rgba(56, 189, 248, 0.5);
+  transition: filter 0.2s ease, transform 0.15s ease, box-shadow 0.2s ease;
+}
+.btn-primary:hover  { filter: brightness(1.1); }
+.btn-primary:active { transform: scale(0.98); }
 
 @keyframes float {
   0%, 100% { transform: translateY(0px) scale(1); opacity: 0.6; }

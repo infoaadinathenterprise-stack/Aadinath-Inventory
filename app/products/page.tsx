@@ -43,9 +43,9 @@ export default function ProductsPage() {
     <main className="min-h-screen pt-24 pb-20">
       <div className="max-w-7xl mx-auto px-4 sm:px-6">
         <div className="text-center mb-8 sm:mb-12">
-          <span className="text-[11px] sm:text-xs font-bold text-teal uppercase tracking-widest">Catalogue</span>
-          <h1 className="text-3xl sm:text-4xl md:text-5xl font-bold text-slate-100 mt-3 mb-3 tracking-tight">
-            Our <span className="text-teal">Products</span>
+          <span className="text-[11px] sm:text-xs font-bold text-teal uppercase tracking-[0.2em]">Catalogue</span>
+          <h1 className="text-3xl sm:text-4xl md:text-5xl font-extrabold text-slate-100 mt-4 mb-4 tracking-tight">
+            Our <span className="text-gradient">Products</span>
           </h1>
           <p className="text-muted max-w-lg mx-auto text-sm leading-relaxed px-2">
             Browse our full range of auto parts, lubricants, and consumables —

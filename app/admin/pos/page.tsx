@@ -666,7 +666,7 @@ function PosDashboard() {
 
   return (
     <div className="h-screen bg-navy flex flex-col overflow-hidden">
-      <header className="shrink-0 bg-surface border-b border-white/8 px-3 flex items-center gap-2 h-14">
+      <header className="shrink-0 glass border-b px-3 flex items-center gap-2 h-14">
         <Link href="/admin" className="text-muted hover:text-slate-100 text-sm px-3 py-1.5 rounded-lg bg-surface2 border border-white/8 transition-colors shrink-0">
           ← Back
         </Link>
@@ -709,21 +709,23 @@ function PosDashboard() {
         </button>
       </header>
 
-      {/* Dynamic location tabs */}
-      <div className="shrink-0 flex gap-2 px-3 pt-2.5 pb-2 border-b border-white/8 bg-surface overflow-x-auto scrollbar-none">
-        {locations.map(loc => (
-          <button
-            key={loc.location_id}
-            onClick={() => { setLocationId(loc.location_id); setCategory('All'); }}
-            className={`shrink-0 flex-1 py-2 rounded-xl border text-xs font-bold transition-all ${
-              locationId === loc.location_id
-                ? 'border-teal bg-teal/10 text-teal'
-                : 'border-white/8 bg-surface2 text-muted hover:border-white/20'
-            }`}
-          >
-            {loc.location_name}
-          </button>
-        ))}
+      {/* Dynamic location tabs — segmented control */}
+      <div className="shrink-0 px-3 pt-2.5 pb-2 border-b border-white/5 bg-surface/60">
+        <div className="flex gap-1 p-1 rounded-2xl card-lux overflow-x-auto scrollbar-none">
+          {locations.map(loc => (
+            <button
+              key={loc.location_id}
+              onClick={() => { setLocationId(loc.location_id); setCategory('All'); }}
+              className={`shrink-0 flex-1 py-2 px-3 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+                locationId === loc.location_id
+                  ? 'btn-primary'
+                  : 'text-muted hover:text-slate-100 hover:bg-white/5'
+              }`}
+            >
+              {loc.location_name}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* ── Restock notification strip ─────────────────────────────────── */}
@@ -853,7 +855,7 @@ function PosDashboard() {
               onClick={() => { setCartOpen(false); setTimeout(() => barcodeRef.current?.focus(), 100); }}
             />
             <motion.div
-              className="fixed right-0 top-0 bottom-0 w-[88vw] max-w-sm z-90 bg-surface border-l border-white/8 flex flex-col shadow-2xl"
+              className="fixed right-0 top-0 bottom-0 w-[88vw] max-w-sm z-90 glass border-l flex flex-col shadow-2xl"
               initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }}
               transition={{ type: 'spring', damping: 25, stiffness: 200 }}
             >
@@ -886,7 +888,7 @@ function PosDashboard() {
                   const atMax = item.qty >= max;
                   const unitLbl = unitLabel(item.product, item.unit);
                   return (
-                  <div key={item.product.product_id} className="bg-surface2 rounded-xl px-3 py-2.5 border border-white/5">
+                  <div key={item.product.product_id} className="card-lux rounded-xl px-3 py-2.5">
                     <div className="flex items-start justify-between mb-2">
                       <p className="text-xs font-semibold text-slate-100 leading-snug break-words line-clamp-2 flex-1 mr-2">{item.product.product_name}</p>
                       <button
@@ -1127,7 +1129,7 @@ function PosDashboard() {
                     if (total <= 0) return null;
                     const { base, vat } = splitVAT(total);
                     return (
-                      <div className="bg-surface2 border border-teal/20 rounded-xl px-3 py-2 flex flex-col gap-0.5">
+                      <div className="card-lux rounded-xl px-3.5 py-2.5 flex flex-col gap-1">
                         <div className="flex items-center justify-between">
                           <span className="text-[9px] text-muted">Excl. VAT</span>
                           <span className="text-[10px] text-muted tabular-nums">Ksh {base.toLocaleString('en-KE')}</span>
@@ -1136,9 +1138,11 @@ function PosDashboard() {
                           <span className="text-[9px] text-muted">VAT (16%)</span>
                           <span className="text-[10px] text-muted tabular-nums">Ksh {vat.toLocaleString('en-KE')}</span>
                         </div>
-                        <div className="flex items-center justify-between border-t border-white/8 pt-1 mt-0.5">
+                        <div className="flex items-center justify-between border-t border-white/8 pt-1.5 mt-0.5">
                           <span className="text-[10px] font-bold text-muted uppercase tracking-widest">Total (incl. VAT)</span>
-                          <span className="text-sm font-bold text-teal tabular-nums">Ksh {total.toLocaleString('en-KE')}</span>
+                          <span className="text-base font-extrabold text-gradient tabular-nums" style={{ fontFamily: 'var(--font-display)' }}>
+                            Ksh {total.toLocaleString('en-KE')}
+                          </span>
                         </div>
                       </div>
                     );
@@ -1298,15 +1302,15 @@ function PosProductCard({ product: p, index, locationId, locations, stockByLoc, 
       animate={{ opacity: 1, y: 0 }}
       transition={{ delay: Math.min(index * 0.02, 0.25), duration: 0.25 }}
       onClick={() => onAdjust(p, 'minus')}
-      className="flex flex-col rounded-2xl bg-surface border border-white/6 hover:border-teal/25 cursor-pointer transition-colors duration-200 overflow-hidden active:bg-surface2/60"
+      className="flex flex-col rounded-2xl card-lux hover:border-teal/30 cursor-pointer transition-colors duration-200 overflow-hidden active:bg-surface2/60"
     >
       {/* Name block — full width so long names wrap instead of clipping */}
-      <div className="px-3.5 pt-3 pb-2">
-        <p className="text-[15px] font-semibold text-slate-100 leading-snug break-words line-clamp-2">
+      <div className="px-4 pt-3.5 pb-2">
+        <p className="text-[15px] font-semibold text-slate-100 leading-snug break-words line-clamp-2" style={{ fontFamily: 'var(--font-display)' }}>
           {p.product_name}
         </p>
-        <p className="text-[11px] text-muted mt-1 flex items-center gap-1.5 min-w-0">
-          <span className="shrink-0 text-[9px] font-bold uppercase tracking-wider text-teal/80 bg-teal/8 border border-teal/15 rounded px-1.5 py-px">
+        <p className="text-[11px] text-muted mt-1.5 flex items-center gap-1.5 min-w-0">
+          <span className="shrink-0 text-[9px] font-bold uppercase tracking-wider text-teal/90 bg-teal/10 border border-teal/20 rounded-md px-1.5 py-0.5">
             {p.type || '—'}
           </span>
           {meta && <span className="truncate">{meta}</span>}
@@ -1314,7 +1318,7 @@ function PosProductCard({ product: p, index, locationId, locations, stockByLoc, 
       </div>
 
       {/* Stock status + tap controls */}
-      <div className="px-3.5 py-2 border-t border-white/5 bg-white/[0.015] flex items-center justify-between gap-3">
+      <div className="px-4 py-2 border-t border-white/6 bg-black/15 flex items-center justify-between gap-3">
         <div className="min-w-0">
           <p className={`text-xs font-semibold ${stockCls}`}>{stockTxt}</p>
           {showOtherBadge && (
@@ -1330,7 +1334,7 @@ function PosProductCard({ product: p, index, locationId, locations, stockByLoc, 
           >−</button>
 
           <div className="flex flex-col items-center min-w-9">
-            <span className="text-xl font-bold text-slate-100 tabular-nums leading-none">{bigNum}</span>
+            <span className="text-[22px] font-extrabold text-slate-100 tabular-nums leading-none" style={{ fontFamily: 'var(--font-display)' }}>{bigNum}</span>
             {fmt.unitBadge === 'BOX' && ppb > 0 && total % ppb > 0 && (
               <span className="text-[9px] text-muted leading-none mt-0.5">{`+${total % ppb}pc`}</span>
             )}
@@ -1340,7 +1344,7 @@ function PosProductCard({ product: p, index, locationId, locations, stockByLoc, 
           <button
             onClick={() => onAdjust(p, 'plus')}
             aria-label="Add stock"
-            className="w-10 h-10 rounded-xl bg-teal/10 border border-teal/25 text-teal text-xl font-bold flex items-center justify-center hover:bg-teal hover:text-navy transition-all active:scale-90"
+            className="w-10 h-10 rounded-xl btn-primary text-xl font-bold flex items-center justify-center"
           >+</button>
         </div>
       </div>

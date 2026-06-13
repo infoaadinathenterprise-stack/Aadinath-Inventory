@@ -64,7 +64,7 @@ export default function AdjustStockModal({
             initial={{ opacity: 0, y: 60 }} animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 60 }}
             transition={{ type: 'spring', damping: 20, stiffness: 260 }}
-            className="w-full max-w-sm bg-surface border border-white/8 rounded-t-3xl sm:rounded-2xl p-6 pb-8 sm:pb-6 shadow-2xl text-center"
+            className="w-full max-w-sm card-lux rounded-t-3xl sm:rounded-2xl p-6 pb-8 sm:pb-6 shadow-2xl text-center"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="w-9 h-1 bg-white/15 rounded-full mx-auto mb-5 sm:hidden" />
@@ -288,7 +288,7 @@ export default function AdjustStockModal({
           initial={{ opacity: 0, y: 60 }} animate={{ opacity: 1, y: 0 }}
           exit={{ opacity: 0, y: 60 }}
           transition={{ type: 'spring', damping: 20, stiffness: 260 }}
-          className="w-full max-w-sm bg-surface border border-white/8 rounded-t-3xl sm:rounded-2xl p-5 pb-8 sm:pb-5 shadow-2xl max-h-[90vh] overflow-y-auto"
+          className="w-full max-w-sm card-lux rounded-t-3xl sm:rounded-2xl p-5 pb-8 sm:pb-5 shadow-2xl max-h-[90vh] overflow-y-auto"
           onClick={(e) => e.stopPropagation()}
         >
           <div className="w-9 h-1 bg-white/15 rounded-full mx-auto mb-4 sm:hidden" />
@@ -427,8 +427,8 @@ export default function AdjustStockModal({
             <button onClick={confirm} disabled={!selectedAction || (needsPartner && !transferLocId) || saving}
               className={`flex-2 basis-2/3 py-3 rounded-xl text-sm font-bold text-white transition-all disabled:opacity-30 disabled:cursor-not-allowed ${
                 direction === 'minus'
-                  ? 'bg-linear-to-r from-danger to-red-600 shadow-[0_4px_14px_rgba(239,68,68,0.35)]'
-                  : 'bg-linear-to-r from-teal to-teal/70 shadow-[0_4px_14px_rgba(0,212,255,0.3)]'
+                  ? 'bg-gradient-to-r from-danger to-red-600 shadow-[0_8px_24px_-8px_rgba(240,82,82,0.5)] hover:brightness-110 active:scale-[0.98]'
+                  : 'btn-primary'
               }`}>
               {saving ? 'Saving…' : userRole === 'staff' ? 'Submit for Approval' : 'Confirm'}
             </button>

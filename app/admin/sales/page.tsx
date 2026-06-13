@@ -20,7 +20,7 @@ export default function SalesPage() {
     if (!ok || role !== 'admin') router.replace('/admin');
     else setAuthed(true);
   }, [router]);
-  if (authed === null) return <div className="min-h-screen bg-navy" />;
+  if (authed === null) return <div className="min-h-screen" />;
   return <SalesDashboard />;
 }
 
@@ -261,7 +261,7 @@ function SalesDashboard() {
   }
 
   return (
-    <div className="min-h-screen bg-navy">
+    <div className="min-h-screen">
       <AdminNavbar onLogout={handleLogout} />
       <main className="pt-14 max-w-7xl mx-auto w-full px-4 pb-10">
 

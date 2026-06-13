@@ -4,10 +4,10 @@ import { useEffect, useRef, useState } from 'react';
 import { motion, useInView } from 'framer-motion';
 
 const STATS = [
-  { value: 250, suffix: '+', label: 'Products',      icon: '📦' },
-  { value: 3,   suffix: '',  label: 'Locations',     icon: '📍' },
-  { value: 15,  suffix: '+', label: 'Categories',    icon: '🗂️' },
-  { value: 100, suffix: '%', label: 'Genuine Parts', icon: '✅' },
+  { value: 250, suffix: '+', label: 'Products' },
+  { value: 3,   suffix: '',  label: 'Locations' },
+  { value: 15,  suffix: '+', label: 'Categories' },
+  { value: 100, suffix: '%', label: 'Genuine Parts' },
 ];
 
 function Counter({ target, suffix, running }: { target: number; suffix: string; running: boolean }) {
@@ -35,24 +35,25 @@ export default function StatsCounter() {
   const inView = useInView(ref, { once: true, margin: '-80px' });
 
   return (
-    <section ref={ref} className="py-20 px-6">
-      <div className="max-w-5xl mx-auto grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-6">
-        {STATS.map((stat, i) => (
-          <motion.div
-            key={stat.label}
-            initial={{ opacity: 0, y: 30 }}
-            animate={inView ? { opacity: 1, y: 0 } : {}}
-            transition={{ delay: i * 0.12, duration: 0.5 }}
-            className="relative flex flex-col items-center text-center p-4 sm:p-6 rounded-2xl bg-surface border border-white/6 hover:border-teal/25 transition-colors duration-300"
-          >
-            <span className="text-2xl sm:text-3xl mb-2 sm:mb-3">{stat.icon}</span>
-            <span className="text-3xl sm:text-4xl font-bold text-teal mb-1 tabular-nums">
+    <section ref={ref} className="py-16 sm:py-20 px-5 sm:px-6">
+      <motion.div
+        initial={{ opacity: 0, y: 24 }}
+        animate={inView ? { opacity: 1, y: 0 } : {}}
+        transition={{ duration: 0.6 }}
+        className="max-w-4xl mx-auto card-lux rounded-3xl grid grid-cols-2 md:grid-cols-4 divide-x divide-y md:divide-y-0 divide-white/6 overflow-hidden"
+      >
+        {STATS.map((stat) => (
+          <div key={stat.label} className="flex flex-col items-center text-center px-4 py-7 sm:py-9">
+            <span
+              className="text-3xl sm:text-4xl font-extrabold text-gradient mb-1.5 tabular-nums"
+              style={{ fontFamily: 'var(--font-display)' }}
+            >
               <Counter target={stat.value} suffix={stat.suffix} running={inView} />
             </span>
-            <span className="text-xs sm:text-sm text-muted font-medium">{stat.label}</span>
-          </motion.div>
+            <span className="text-[11px] sm:text-xs text-muted font-semibold uppercase tracking-[0.14em]">{stat.label}</span>
+          </div>
         ))}
-      </div>
+      </motion.div>
     </section>
   );
 }

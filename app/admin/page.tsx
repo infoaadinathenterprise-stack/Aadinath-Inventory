@@ -143,45 +143,55 @@ function LoginForm({ onSuccess }: { onSuccess: () => void }) {
   }
 
   return (
-    <div className="min-h-screen bg-navy flex items-center justify-center px-4">
+    <div className="min-h-screen flex items-center justify-center px-4">
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        <div className="absolute top-1/4 left-1/2 -translate-x-1/2 w-96 h-96 bg-teal/5 rounded-full blur-3xl" />
-        <div className="absolute bottom-1/4 left-1/4 w-64 h-64 bg-gold/5 rounded-full blur-3xl" />
+        <div className="absolute top-1/4 left-1/2 -translate-x-1/2 w-[34rem] h-[34rem] rounded-full blur-3xl"
+          style={{ background: 'radial-gradient(circle, rgba(56,189,248,0.08), transparent 65%)' }} />
+        <div className="absolute bottom-1/4 left-1/4 w-72 h-72 rounded-full blur-3xl"
+          style={{ background: 'radial-gradient(circle, rgba(243,185,77,0.06), transparent 65%)' }} />
       </div>
       <motion.div initial={{ opacity: 0, y: 30 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }} className="relative w-full max-w-sm">
         <motion.form
           onSubmit={submit}
           animate={shake ? { x: [0, -8, 8, -8, 8, 0] } : { x: 0 }}
           transition={shake ? { duration: 0.4 } : {}}
-          className="bg-surface border border-white/8 rounded-2xl p-8 shadow-2xl"
+          className="card-lux rounded-3xl p-8 shadow-2xl"
         >
-          <div className="text-center mb-8">
-            <p className="font-bold text-2xl text-teal tracking-tight">Jay Aadinath<span className="text-gold">·</span></p>
-            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-gold/15 border border-gold/30 text-gold uppercase tracking-widest mt-1 inline-block">Staff Panel</span>
+          <div className="text-center mb-9">
+            <span
+              className="w-14 h-14 rounded-2xl mx-auto mb-4 flex items-center justify-center text-white font-extrabold text-lg shadow-[0_8px_24px_rgba(56,189,248,0.35)]"
+              style={{ background: 'linear-gradient(135deg, #38bdf8 0%, #2563eb 100%)', fontFamily: 'var(--font-display)' }}
+            >
+              JA
+            </span>
+            <p className="font-extrabold text-2xl text-slate-100 tracking-tight" style={{ fontFamily: 'var(--font-display)' }}>
+              Jay Aadinath
+            </p>
+            <span className="text-[10px] font-bold px-2.5 py-1 rounded-full bg-gold/12 border border-gold/30 text-gold uppercase tracking-[0.16em] mt-2 inline-block">Staff Panel</span>
           </div>
-          <p className="text-sm font-semibold text-slate-300 mb-1">Username</p>
+          <p className="text-xs font-bold text-muted uppercase tracking-widest mb-1.5">Username</p>
           <input
             ref={userRef} type="text" value={username}
             onChange={e => { setUsername(e.target.value); setErr(''); }}
             placeholder="Enter your username"
             autoComplete="username"
-            className="w-full px-4 py-3 rounded-xl bg-surface2 border border-white/10 text-slate-100 placeholder:text-muted/50 outline-none focus:border-teal/50 transition-colors mb-3 text-sm"
+            className="w-full px-4 py-3 rounded-xl bg-black/25 border border-white/10 text-slate-100 placeholder:text-muted/50 outline-none focus:border-teal/50 focus:ring-2 focus:ring-teal/15 transition-all mb-4 text-sm"
           />
-          <p className="text-sm font-semibold text-slate-300 mb-1">PIN / Password</p>
+          <p className="text-xs font-bold text-muted uppercase tracking-widest mb-1.5">PIN / Password</p>
           <input
             type="password" value={pin}
             onChange={e => { setPin(e.target.value); setErr(''); }}
             placeholder="Enter your PIN or password"
             autoComplete="current-password"
-            className="w-full px-4 py-3 rounded-xl bg-surface2 border border-white/10 text-slate-100 placeholder:text-muted/50 outline-none focus:border-teal/50 transition-colors mb-2 text-sm"
+            className="w-full px-4 py-3 rounded-xl bg-black/25 border border-white/10 text-slate-100 placeholder:text-muted/50 outline-none focus:border-teal/50 focus:ring-2 focus:ring-teal/15 transition-all mb-2 text-sm"
           />
           <AnimatePresence>
             {err && (
               <motion.p initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="text-xs text-danger mb-3">{err}</motion.p>
             )}
           </AnimatePresence>
-          <button type="submit" disabled={loading} className="w-full py-3 mt-2 rounded-xl bg-linear-to-r from-teal to-teal/70 text-navy text-sm font-bold shadow-[0_4px_14px_rgba(0,212,255,0.3)] hover:opacity-90 transition-opacity disabled:opacity-60 flex items-center justify-center gap-2">
-            {loading && <div className="w-4 h-4 rounded-full border-2 border-navy border-t-transparent animate-spin" />}
+          <button type="submit" disabled={loading} className="btn-primary w-full py-3.5 mt-3 rounded-xl text-sm font-bold disabled:opacity-60 flex items-center justify-center gap-2">
+            {loading && <div className="w-4 h-4 rounded-full border-2 border-white border-t-transparent animate-spin" />}
             Sign In
           </button>
         </motion.form>
@@ -506,7 +516,7 @@ function ProductModal({
         className="fixed inset-0 z-40 bg-black/70 backdrop-blur-sm" onClick={onClose} />
       <motion.div key="pmd" initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }}
         transition={{ type: 'spring', damping: 28, stiffness: 220 }}
-        className="fixed bottom-0 inset-x-0 z-50 max-w-lg mx-auto bg-surface border border-white/8 rounded-t-2xl p-5 pb-8 max-h-[95vh] overflow-y-auto"
+        className="fixed bottom-0 inset-x-0 z-50 max-w-lg mx-auto card-lux rounded-t-3xl p-5 pb-8 max-h-[95vh] overflow-y-auto"
       >
         <div className="w-8 h-1 rounded-full bg-white/10 mx-auto mb-4" />
         <h3 className="text-base font-bold text-slate-100 mb-4">{editing ? 'Edit Product' : 'Add Product'}</h3>
@@ -916,20 +926,20 @@ function Dashboard({ role }: { role: UserRole }) {
     // StatsBar + title row + ProductList's filter bar all live in the
     // non-scrollable region; only the product card list inside
     // ProductList scrolls (configured below in that component).
-    <div className="h-dvh landscape:h-auto bg-navy flex flex-col overflow-hidden landscape:overflow-y-auto">
+    <div className="h-dvh landscape:h-auto flex flex-col overflow-hidden landscape:overflow-y-auto">
       <AdminNavbar onLogout={handleLogout} />
 
       <main className="pt-14 max-w-7xl mx-auto w-full flex-1 flex flex-col min-h-0">
         <div className="shrink-0">
           <div className="px-4 pt-5 pb-3 flex items-center justify-between">
             <div>
-              <h2 className="text-base font-bold text-slate-100">Inventory</h2>
+              <h2 className="text-lg font-extrabold text-slate-100 tracking-tight" style={{ fontFamily: 'var(--font-display)' }}>Inventory</h2>
               <p className="text-xs text-muted mt-0.5">{products.length} active products</p>
             </div>
             {isAdmin && (
               <button
                 onClick={() => setProductModal({ editing: null })}
-                className="px-4 py-2 rounded-xl bg-teal/10 border border-teal/30 text-teal text-xs font-bold hover:bg-teal/20 transition-all"
+                className="btn-primary px-4 py-2 rounded-xl text-xs font-bold"
               >
                 + Add Product
               </button>

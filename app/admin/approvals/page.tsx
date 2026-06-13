@@ -125,7 +125,7 @@ export default function ApprovalsPage() {
   }
 
   return (
-    <div className="min-h-screen bg-navy">
+    <div className="min-h-screen">
       <AdminNavbar onLogout={handleLogout} />
       <main className="pt-14 max-w-4xl mx-auto px-4 pb-10">
         <div className="pt-5 pb-3 flex items-center justify-between">

@@ -120,16 +120,16 @@ export default function ProductList({
   return (
     <div className="px-4 flex flex-col flex-1 min-h-0">
       <div className="shrink-0">
-        {/* Dynamic location tabs */}
-        <div className="flex gap-2 mb-4 overflow-x-auto scrollbar-none">
+        {/* Dynamic location tabs — segmented control */}
+        <div className="flex gap-1 mb-4 p-1 rounded-2xl card-lux overflow-x-auto scrollbar-none">
           {locations.map(loc => (
             <button
               key={loc.location_id}
               onClick={() => setLocationId(loc.location_id)}
-              className={`shrink-0 flex-1 py-2.5 rounded-xl border text-xs font-bold transition-all ${
+              className={`shrink-0 flex-1 py-2.5 px-3 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
                 locationId === loc.location_id
-                  ? 'border-teal bg-teal/10 text-teal'
-                  : 'border-white/8 bg-surface2 text-muted hover:border-white/20'
+                  ? 'btn-primary'
+                  : 'text-muted hover:text-slate-100 hover:bg-white/5'
               }`}
             >
               {loc.location_name}
@@ -143,7 +143,7 @@ export default function ProductList({
             ref={barcodeRef} type="text" onKeyDown={handleBarcodeKey}
             placeholder="Scan barcode / type SKU + Enter"
             autoComplete="off" inputMode="text"
-            className="w-full pl-9 pr-4 py-2.5 bg-gold/5 border border-gold/30 rounded-xl text-sm text-slate-100 placeholder:text-gold/40 outline-none focus:border-gold focus:bg-gold/10 transition-colors font-mono"
+            className="w-full pl-9 pr-4 py-2.5 bg-gold/5 border border-gold/25 rounded-xl text-sm text-slate-100 placeholder:text-gold/40 outline-none focus:border-gold/60 focus:bg-gold/8 transition-colors font-mono"
           />
         </div>
         {scanMsg && (
@@ -156,7 +156,7 @@ export default function ProductList({
           <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted text-sm">🔍</span>
           <input type="text" value={search} onChange={e => setSearch(e.target.value)}
             placeholder="Search products…"
-            className="w-full pl-9 pr-4 py-2.5 bg-surface2 border border-white/8 rounded-xl text-sm text-slate-100 placeholder:text-muted/50 outline-none focus:border-teal/40 transition-colors"
+            className="w-full pl-9 pr-4 py-2.5 card-lux rounded-xl text-sm text-slate-100 placeholder:text-muted/50 outline-none focus:ring-2 focus:ring-teal/25 transition-all"
           />
           {search && (
             <button onClick={() => setSearch('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted hover:text-slate-100 text-lg leading-none">×</button>

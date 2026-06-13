@@ -46,16 +46,16 @@ export default function AdminProductCard({
       initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ delay: Math.min(index * 0.02, 0.25), duration: 0.25 }}
-      className="flex flex-col rounded-2xl bg-surface border border-white/6 hover:border-teal/25 transition-colors duration-200 overflow-hidden"
+      className="flex flex-col rounded-2xl card-lux hover:border-teal/30 transition-colors duration-200 overflow-hidden"
     >
       {/* ── Name block: full card width so long names wrap, never clip ── */}
-      <div className="px-3.5 pt-3 pb-2.5 flex items-start gap-2">
+      <div className="px-4 pt-3.5 pb-2.5 flex items-start gap-2">
         <div className="flex-1 min-w-0">
-          <p className="text-[15px] font-semibold text-slate-100 leading-snug break-words line-clamp-2">
+          <p className="text-[15px] font-semibold text-slate-100 leading-snug break-words line-clamp-2" style={{ fontFamily: 'var(--font-display)' }}>
             {p.product_name}
           </p>
-          <p className="text-[11px] text-muted mt-1 flex items-center gap-1.5 min-w-0">
-            <span className="shrink-0 text-[9px] font-bold uppercase tracking-wider text-teal/80 bg-teal/8 border border-teal/15 rounded px-1.5 py-px">
+          <p className="text-[11px] text-muted mt-1.5 flex items-center gap-1.5 min-w-0">
+            <span className="shrink-0 text-[9px] font-bold uppercase tracking-wider text-teal/90 bg-teal/10 border border-teal/20 rounded-md px-1.5 py-0.5">
               {p.type || '—'}
             </span>
             {meta && <span className="truncate">{meta}</span>}
@@ -64,7 +64,7 @@ export default function AdminProductCard({
         {onEdit && (
           <button
             onClick={() => onEdit(p)}
-            className="w-9 h-9 -mr-1 -mt-0.5 rounded-lg text-muted/70 hover:text-teal hover:bg-teal/10 flex items-center justify-center text-sm transition-colors shrink-0"
+            className="w-9 h-9 -mr-1.5 -mt-1 rounded-lg text-muted/70 hover:text-teal hover:bg-teal/10 flex items-center justify-center text-sm transition-colors shrink-0"
             title="Edit product"
             aria-label="Edit product"
           >✏️</button>
@@ -72,7 +72,7 @@ export default function AdminProductCard({
       </div>
 
       {/* ── Stock + controls row ── */}
-      <div className="px-3.5 py-2.5 border-t border-white/5 bg-white/[0.015] flex items-center justify-between gap-3">
+      <div className="px-4 py-2.5 border-t border-white/6 bg-black/15 flex items-center justify-between gap-3">
         <div className="min-w-0">
           <p className={`text-xs font-semibold ${stockClass}`}>
             {total <= reorder && total > 0 && '⚠ '}{stockLabel}
@@ -90,7 +90,7 @@ export default function AdminProductCard({
           >−</button>
 
           <div className="flex flex-col items-center min-w-10">
-            <span className="text-xl font-bold text-slate-100 tabular-nums leading-none">
+            <span className="text-[22px] font-extrabold text-slate-100 tabular-nums leading-none" style={{ fontFamily: 'var(--font-display)' }}>
               {fmt.unitBadge === 'BOX' && ppb > 0 ? Math.floor(total / ppb) : total}
             </span>
             {fmt.unitBadge === 'BOX' && ppb > 0 && total % ppb > 0 && (
@@ -102,7 +102,7 @@ export default function AdminProductCard({
           <button
             onClick={() => onAdjust(p, 'plus', locationId)}
             aria-label="Add stock"
-            className="w-10 h-10 rounded-xl bg-teal/10 border border-teal/25 text-teal text-xl font-bold flex items-center justify-center hover:bg-teal hover:text-navy transition-all duration-150 active:scale-90"
+            className="w-10 h-10 rounded-xl btn-primary text-xl font-bold flex items-center justify-center"
           >+</button>
         </div>
       </div>

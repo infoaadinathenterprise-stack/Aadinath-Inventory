@@ -28,7 +28,7 @@ export default function LabelsPage() {
     }
   }, [router]);
 
-  if (!ready) return <div className="min-h-screen bg-navy" />;
+  if (!ready) return <div className="min-h-screen" />;
   return <LabelsDashboard />;
 }
 
@@ -173,7 +173,7 @@ function LabelsDashboard() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-navy flex items-center justify-center">
+      <div className="min-h-screen flex items-center justify-center">
         <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1, ease: 'linear' }}
           className="w-8 h-8 border-2 border-teal border-t-transparent rounded-full" />
       </div>
@@ -182,7 +182,7 @@ function LabelsDashboard() {
 
   if (error) {
     return (
-      <div className="min-h-screen bg-navy flex items-center justify-center px-6">
+      <div className="min-h-screen flex items-center justify-center px-6">
         <div className="text-center">
           <p className="text-4xl mb-4">⚠️</p>
           <p className="text-danger text-sm">{error}</p>

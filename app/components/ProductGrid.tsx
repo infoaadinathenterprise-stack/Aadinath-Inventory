@@ -38,8 +38,8 @@ export default function ProductGrid({ products, categories }: Props) {
           placeholder="Search products, brands, SKUs…"
           value={query}
           onChange={e => setQuery(e.target.value)}
-          className="w-full pl-10 pr-4 py-3 rounded-full bg-surface border border-white/8 text-slate-100 placeholder:text-muted text-sm outline-none
-                     focus:border-teal/50 focus:ring-2 focus:ring-teal/10 transition-all duration-200"
+          className="w-full pl-11 pr-4 py-3.5 rounded-2xl card-lux text-slate-100 placeholder:text-muted/60 text-sm outline-none
+                     focus:ring-2 focus:ring-teal/25 transition-all duration-200"
         />
         {query && (
           <button
@@ -57,10 +57,10 @@ export default function ProductGrid({ products, categories }: Props) {
             key={cat}
             onClick={() => setActiveFilter(cat)}
             whileTap={{ scale: 0.95 }}
-            className={`relative px-4 py-2 rounded-full text-xs font-semibold transition-all duration-200 ${
+            className={`relative px-4 py-2 rounded-xl text-xs font-semibold transition-all duration-200 ${
               activeFilter === cat
-                ? 'text-navy bg-teal shadow-[0_0_12px_rgba(0,212,255,0.4)]'
-                : 'text-muted bg-surface border border-white/8 hover:border-teal/30 hover:text-slate-100'
+                ? 'text-white btn-primary'
+                : 'text-muted card-lux hover:text-slate-100'
             }`}
           >
             {cat}

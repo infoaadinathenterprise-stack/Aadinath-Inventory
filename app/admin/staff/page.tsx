@@ -111,7 +111,7 @@ export default function StaffPage() {
   }
 
   return (
-    <div className="min-h-screen bg-navy">
+    <div className="min-h-screen">
       <AdminNavbar onLogout={handleLogout} />
       <main className="pt-14 max-w-3xl mx-auto px-4 pb-10">
         <div className="pt-5 pb-4 flex items-center justify-between">

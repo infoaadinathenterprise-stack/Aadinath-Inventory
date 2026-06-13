@@ -94,7 +94,7 @@ export default function InventoryAuditPage() {
     else setAuthed(true);
   }, [router]);
 
-  if (authed === null) return <div className="min-h-screen bg-navy" />;
+  if (authed === null) return <div className="min-h-screen" />;
   return <InventoryAuditDashboard />;
 }
 
@@ -264,7 +264,7 @@ function InventoryAuditDashboard() {
   const today   = fmtDateLong(new Date());
 
   return (
-    <div className="min-h-screen bg-navy">
+    <div className="min-h-screen">
 
       {/* ═══════════════════════════════════════════════════════════════════
           PRINT-ONLY AUDIT SHEET
