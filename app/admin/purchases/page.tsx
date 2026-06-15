@@ -28,6 +28,19 @@ function splitVAT(totalIncl: number) {
   return { base, vat };
 }
 
+const VAT_RATE = 0.16;
+
+// Tax-inclusive line total for an item. When the row's price already
+// includes tax (checkbox checked, the historical default) the line is
+// qty×price. When it doesn't, we add 16% on top of that line only — so
+// the grand total stays a single tax-inclusive figure and splitVAT()
+// keeps working unchanged for the displayed breakdown.
+function lineInclusive(qty: number, unitPrice: number | null, taxInclusive: boolean): number {
+  if (unitPrice == null) return 0;
+  const base = qty * unitPrice;
+  return taxInclusive ? base : Math.round(base * (1 + VAT_RATE));
+}
+
 // The purchase_items primary-key column name varies by deployment —
 // some schemas use `id`, others follow the `<entity>_id` convention
 // (purchase_item_id). The TS type declares `id`, but the real column may
@@ -47,6 +60,29 @@ function detectItemPk(raw: Record<string, unknown>): { field: string; value: num
     if (k.endsWith('_id') && !fks.has(k) && typeof raw[k] === 'number') return { field: k, value: raw[k] as number };
   }
   return null;
+}
+
+// Insert a purchase_items row. If the `tax_inclusive` column doesn't
+// exist yet (migration not run), strip it and retry so the purchase
+// still saves — the flag just won't persist until the column is added.
+// Returns an error message string, or null on success.
+async function insertPurchaseItemRow(payload: Record<string, unknown>): Promise<string | null> {
+  let { error } = await supabase.from('purchase_items').insert(payload);
+  if (error && /tax_inclusive/i.test(error.message)) {
+    const { tax_inclusive: _drop, ...rest } = payload;
+    ({ error } = await supabase.from('purchase_items').insert(rest));
+  }
+  return error ? error.message : null;
+}
+
+// Update a purchase_items row with the same tax_inclusive fallback.
+async function updatePurchaseItemRow(pkField: string, pkValue: number, patch: Record<string, unknown>): Promise<string | null> {
+  let { error } = await supabase.from('purchase_items').update(patch).eq(pkField, pkValue);
+  if (error && /tax_inclusive/i.test(error.message)) {
+    const { tax_inclusive: _drop, ...rest } = patch;
+    ({ error } = await supabase.from('purchase_items').update(rest).eq(pkField, pkValue));
+  }
+  return error ? error.message : null;
 }
 
 // bill_image_url stores either a JSON-stringified array (new) or a single URL
@@ -510,15 +546,16 @@ function DetailDrawer({
 // ─── Edit purchase modal ──────────────────────────────────────────────────────
 
 interface EditItemRow {
-  rowKey:      number;          // stable local React key
-  pkField:     string | null;   // real PK column ('purchase_item_id' | 'id' | …); null = couldn't detect
-  pk:          number | null;   // PK value for UPDATE/DELETE
-  productId:   number | null;
-  productName: string;
-  qty:         number;
-  oldQty:      number;  // snapshot to compute stock delta
-  unitPrice:   number | null;
-  removed:     boolean; // marked for deletion — reverses its stock on save
+  rowKey:       number;          // stable local React key
+  pkField:      string | null;   // real PK column ('purchase_item_id' | 'id' | …); null = couldn't detect
+  pk:           number | null;   // PK value for UPDATE/DELETE
+  productId:    number | null;
+  productName:  string;
+  qty:          number;
+  oldQty:       number;  // snapshot to compute stock delta
+  unitPrice:    number | null;
+  taxInclusive: boolean; // entered price already includes 16% VAT
+  removed:      boolean;  // marked for deletion — reverses its stock on save
 }
 
 function EditPurchaseModal({
@@ -538,7 +575,10 @@ function EditPurchaseModal({
   const [notes, setNotes] = useState(data.purchase.notes ?? '');
   const [rows,  setRows]  = useState<EditItemRow[]>(() =>
     data.items.map((it, idx) => {
-      const pk = detectItemPk(it as unknown as Record<string, unknown>);
+      const raw = it as unknown as Record<string, unknown>;
+      const pk = detectItemPk(raw);
+      // Old rows (column missing / null) were saved tax-inclusive → default true.
+      const taxInclusive = raw.tax_inclusive == null ? true : Boolean(raw.tax_inclusive);
       return {
         rowKey:      idx,
         pkField:     pk?.field ?? null,
@@ -550,6 +590,7 @@ function EditPurchaseModal({
         qty:         it.quantity ?? 1,
         oldQty:      it.quantity ?? 1,
         unitPrice:   it.unit_price ?? null,
+        taxInclusive,
         removed:     false,
       };
     })
@@ -557,7 +598,7 @@ function EditPurchaseModal({
   // Brand-new line items added during this edit (not yet in the DB).
   const newRowCounter = useRef(1);
   function blankNewRow(): ItemRow {
-    return { rowId: newRowCounter.current++, productId: null, productName: '', qty: 1, unitPrice: null, locationId: locations[0]?.location_id ?? 2 };
+    return { rowId: newRowCounter.current++, productId: null, productName: '', qty: 1, unitPrice: null, locationId: locations[0]?.location_id ?? 2, taxInclusive: true };
   }
   const [newRows, setNewRows] = useState<ItemRow[]>([]);
   const [saving, setSaving] = useState(false);
@@ -582,10 +623,10 @@ function EditPurchaseModal({
   const computedTotal = useMemo(() => {
     let sum = 0;
     for (const r of rows) {
-      if (!r.removed && r.qty > 0 && r.unitPrice != null) sum += r.qty * r.unitPrice;
+      if (!r.removed && r.qty > 0 && r.unitPrice != null) sum += lineInclusive(r.qty, r.unitPrice, r.taxInclusive);
     }
     for (const r of newRows) {
-      if (r.qty > 0 && r.unitPrice != null) sum += r.qty * r.unitPrice;
+      if (r.qty > 0 && r.unitPrice != null) sum += lineInclusive(r.qty, r.unitPrice, r.taxInclusive);
     }
     return sum;
   }, [rows, newRows]);
@@ -638,8 +679,11 @@ function EditPurchaseModal({
         // previously let a failed delete reverse stock without removing
         // the row (the "minus twice" bug).
         const orig = data.items[row.rowKey];
+        const origRaw = orig as unknown as Record<string, unknown> | undefined;
+        const origTax = origRaw?.tax_inclusive == null ? true : Boolean(origRaw.tax_inclusive);
         const priceChanged = (orig?.unit_price ?? null) !== (row.unitPrice ?? null);
-        const needsWrite = row.removed || row.qty !== row.oldQty || priceChanged;
+        const taxChanged   = origTax !== row.taxInclusive;
+        const needsWrite = row.removed || row.qty !== row.oldQty || priceChanged || taxChanged;
         if (needsWrite && (!row.pkField || row.pk == null)) {
           throw new Error(
             `Cannot edit existing items: the purchase_items primary-key column was not found ` +
@@ -667,13 +711,14 @@ function EditPurchaseModal({
           continue;
         }
 
-        const totalPrice = row.unitPrice != null ? row.qty * row.unitPrice : null;
-        const { error: iErr } = await supabase.from('purchase_items').update({
-          quantity:    row.qty,
-          unit_price:  row.unitPrice,
-          total_price: totalPrice,
-        }).eq(row.pkField!, row.pk!);
-        if (iErr) throw new Error(iErr.message);
+        const totalPrice = row.unitPrice != null ? lineInclusive(row.qty, row.unitPrice, row.taxInclusive) : null;
+        const iErr = await updatePurchaseItemRow(row.pkField!, row.pk!, {
+          quantity:      row.qty,
+          unit_price:    row.unitPrice,
+          total_price:   totalPrice,
+          tax_inclusive: row.taxInclusive,
+        });
+        if (iErr) throw new Error(iErr);
 
         // Stock delta adjustment when qty changed
         if (row.productId && row.qty !== row.oldQty) {
@@ -725,16 +770,17 @@ function EditPurchaseModal({
           createdProducts++;
         }
 
-        const totalPrice = row.unitPrice != null ? row.qty * row.unitPrice : null;
-        const { error: iErr } = await supabase.from('purchase_items').insert({
+        const totalPrice = row.unitPrice != null ? lineInclusive(row.qty, row.unitPrice, row.taxInclusive) : null;
+        const iErr = await insertPurchaseItemRow({
           purchase_id:      purchaseId,
           product_id:       productId,
           product_name_raw: productId ? null : row.productName.trim(),
           quantity:         row.qty,
           unit_price:       row.unitPrice,
           total_price:      totalPrice,
+          tax_inclusive:    row.taxInclusive,
         });
-        if (iErr) throw new Error(iErr.message);
+        if (iErr) throw new Error(iErr);
 
         if (productId) {
           await logMovement(productId, null, row.locationId, row.qty, 'PURCHASE_IN', `Purchase #${purchaseId} edited · item added`);
@@ -879,10 +925,19 @@ function EditPurchaseModal({
                       <div>
                         <label className="text-[9px] font-bold text-muted uppercase block mb-0.5">Line</label>
                         <div className="px-2 py-1.5 rounded-lg bg-surface border border-white/8 text-teal text-xs font-bold tabular-nums min-w-20 text-right">
-                          {row.unitPrice != null ? Number(row.qty * row.unitPrice).toLocaleString('en-KE') : '—'}
+                          {row.unitPrice != null ? Number(lineInclusive(row.qty, row.unitPrice, row.taxInclusive)).toLocaleString('en-KE') : '—'}
                         </div>
                       </div>
                     </div>
+                  )}
+
+                  {!row.removed && (
+                    <TaxCheckbox
+                      checked={row.taxInclusive}
+                      qty={row.qty}
+                      unitPrice={row.unitPrice}
+                      onChange={v => updateRow(row.rowKey, { taxInclusive: v })}
+                    />
                   )}
                 </div>
               ))}
@@ -968,12 +1023,13 @@ function EditPurchaseModal({
 
 interface BillImage { thumb: string; b64: string; mime: string }
 interface ItemRow {
-  rowId:       number;
-  productId:   number | null;
-  productName: string;       // free-text fallback when productId is null
-  qty:         number;
-  unitPrice:   number | null;
-  locationId:  number;       // 1 = main, 2 = back
+  rowId:        number;
+  productId:    number | null;
+  productName:  string;       // free-text fallback when productId is null
+  qty:          number;
+  unitPrice:    number | null;
+  locationId:   number;       // 1 = main, 2 = back
+  taxInclusive: boolean;      // entered price already includes 16% VAT
 }
 
 // OCR.space free-tier API key — same one the previous Aadinath-Inventory
@@ -1009,7 +1065,7 @@ function NewPurchaseModal({
   const fileRef = useRef<HTMLInputElement>(null);
 
   function blankRow(): ItemRow {
-    return { rowId: rowCounter.current++, productId: null, productName: '', qty: 1, unitPrice: null, locationId: 2 };
+    return { rowId: rowCounter.current++, productId: null, productName: '', qty: 1, unitPrice: null, locationId: 2, taxInclusive: true };
   }
 
   const [supplierId, setSupplierId] = useState('');
@@ -1040,11 +1096,13 @@ function NewPurchaseModal({
   const [logCopied,  setLogCopied]  = useState(false);
 
   // Auto-computed total — always reflects current rows so the user
-  // doesn't have to keep a separate field in sync.
+  // doesn't have to keep a separate field in sync. Each line is resolved
+  // to its tax-inclusive amount (adds 16% for rows where the entered
+  // price excludes tax) so the grand total is a single inclusive figure.
   const computedTotal = useMemo(() => {
     let sum = 0;
     for (const r of items) {
-      if (r.qty > 0 && r.unitPrice != null) sum += r.qty * r.unitPrice;
+      if (r.qty > 0 && r.unitPrice != null) sum += lineInclusive(r.qty, r.unitPrice, r.taxInclusive);
     }
     return sum;
   }, [items]);
@@ -1222,6 +1280,7 @@ ${rawText}`;
         qty:         Math.max(1, Math.round(it.quantity || 1)),
         unitPrice:   it.unit_price ?? null,
         locationId:  2,
+        taxInclusive: true,
       }));
       log(`Parsed ${newRows.length} item(s) from Gemini`);
       if (newRows.length === 0) {
@@ -1353,16 +1412,17 @@ ${rawText}`;
           createdProducts++;
         }
 
-        const totalPrice = row.unitPrice != null ? row.qty * row.unitPrice : null;
-        const { error: iErr } = await supabase.from('purchase_items').insert({
+        const totalPrice = row.unitPrice != null ? lineInclusive(row.qty, row.unitPrice, row.taxInclusive) : null;
+        const iErr = await insertPurchaseItemRow({
           purchase_id:      purchaseId,
           product_id:       productId,
           product_name_raw: productId ? null : row.productName.trim(),
           quantity:         row.qty,
           unit_price:       row.unitPrice,
           total_price:      totalPrice,
+          tax_inclusive:    row.taxInclusive,
         });
-        if (iErr) throw new Error(iErr.message);
+        if (iErr) throw new Error(iErr);
 
         if (productId) {
           const { data: existing } = await supabase
@@ -1664,7 +1724,7 @@ function ItemRowEditor({
     ).slice(0, 6);
   }, [search, products]);
 
-  const lineTotal = row.unitPrice != null ? row.qty * row.unitPrice : null;
+  const lineTotal = row.unitPrice != null ? lineInclusive(row.qty, row.unitPrice, row.taxInclusive) : null;
   const matched = row.productId != null;
 
   return (
@@ -1743,6 +1803,14 @@ function ItemRowEditor({
         </div>
       </div>
 
+      {/* Tax-inclusive toggle */}
+      <TaxCheckbox
+        checked={row.taxInclusive}
+        qty={row.qty}
+        unitPrice={row.unitPrice}
+        onChange={v => onChange({ taxInclusive: v })}
+      />
+
       {/* Location */}
       <div className="mt-2">
         <label className="text-[9px] font-bold text-muted uppercase block mb-0.5">Goes to</label>
@@ -1761,5 +1829,42 @@ function ItemRowEditor({
         </div>
       </div>
     </div>
+  );
+}
+
+// ─── Tax-inclusive checkbox (shared by new + existing item rows) ───────────────
+
+function TaxCheckbox({
+  checked, qty, unitPrice, onChange,
+}: {
+  checked:   boolean;
+  qty:       number;
+  unitPrice: number | null;
+  onChange:  (v: boolean) => void;
+}) {
+  // Show the user what the line resolves to so the tax handling is obvious.
+  const hint = unitPrice == null ? null : (() => {
+    const base = qty * unitPrice;
+    if (checked) {
+      const vat = Math.round(base * 16 / 116);
+      return `Incl. tax · VAT portion ${fmtKsh(vat)}`;
+    }
+    const vat = Math.round(base * VAT_RATE);
+    return `+16% tax (${fmtKsh(vat)}) → ${fmtKsh(base + vat)}`;
+  })();
+
+  return (
+    <label className="mt-2 flex items-start gap-2 cursor-pointer select-none">
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={e => onChange(e.target.checked)}
+        className="mt-0.5 w-4 h-4 shrink-0 accent-teal cursor-pointer"
+      />
+      <span className="text-[11px] leading-tight">
+        <span className="font-semibold text-slate-200">Price includes 16% tax</span>
+        {hint && <span className={`block text-[10px] mt-0.5 ${checked ? 'text-muted' : 'text-gold'}`}>{hint}</span>}
+      </span>
+    </label>
   );
 }
