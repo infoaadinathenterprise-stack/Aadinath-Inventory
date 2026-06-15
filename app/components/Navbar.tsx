@@ -32,7 +32,18 @@ export default function Navbar() {
 
   useMotionValueEvent(scrollY, 'change', (latest) => {
     const prev = scrollY.getPrevious() ?? 0;
-    if (!open) setHidden(latest > prev && latest > 80);
+    const delta = latest - prev;
+    // Keep the bar visible while the menu is open, near the top, or when
+    // the scroll movement is tiny (jitter). Without the jitter guard, a
+    // 1-2px scroll while reaching for the burger would slide it off-
+    // screen and the tap would miss — the "tap several times" bug.
+    if (!open) {
+      if (latest < 200 || Math.abs(delta) < 8) {
+        if (latest < 200) setHidden(false);
+      } else {
+        setHidden(delta > 0);
+      }
+    }
     setScrolled(latest > 20);
   });
 

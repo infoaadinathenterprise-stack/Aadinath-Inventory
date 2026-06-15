@@ -37,6 +37,13 @@ body {
   -webkit-tap-highlight-color: transparent;
 }
 
+/* Mobile tap reliability: `manipulation` disables the browser's
+   double-tap-to-zoom wait (~300ms) so the FIRST tap on any button/link
+   registers immediately instead of needing repeated taps. */
+button, a, [role="button"], input, select, textarea, label {
+  touch-action: manipulation;
+}
+
 /* Headings get the display face */
 h1, h2, h3 { font-family: var(--font-display); letter-spacing: -0.02em; }
 

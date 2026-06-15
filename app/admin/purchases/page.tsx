@@ -128,6 +128,26 @@ function PurchasesDashboard() {
     setToast({ msg, type, id: ++toastId.current });
   }
 
+  // Re-fetch ONLY the products list (+ suppliers, in case one was just
+  // added too) without touching any other dashboard state. Used by the
+  // purchase modals so a product added in another browser tab shows up
+  // in the item picker mid-entry, without losing the in-progress form.
+  // Returns the new product count so the modal can show "N loaded".
+  const refreshProducts = useCallback(async (): Promise<number> => {
+    const [prd, sr] = await Promise.all([
+      supabase.from('products').select('*').eq('active_status', true).order('product_name'),
+      supabase.from('suppliers').select('*').eq('active_status', true).order('supplier_name'),
+    ]);
+    if (prd.error) {
+      setToast({ msg: 'Refresh failed: ' + prd.error.message, type: 'error', id: ++toastId.current });
+      return products.length;
+    }
+    const list = (prd.data ?? []) as Product[];
+    setProducts(list);
+    if (!sr.error) setSuppliers((sr.data ?? []) as Supplier[]);
+    return list.length;
+  }, [products.length]);
+
   function handleLogout() {
     localStorage.removeItem(SESSION_KEY);
     window.location.href = '/admin';
@@ -340,6 +360,7 @@ function PurchasesDashboard() {
             suppliers={suppliers}
             products={products}
             locations={locations}
+            onRefreshProducts={refreshProducts}
             onClose={() => setNewOpen(false)}
             onSaved={() => { setNewOpen(false); load(); showToast('Purchase saved ✓', 'success'); }}
             onError={msg => showToast(msg, 'error')}
@@ -368,6 +389,7 @@ function PurchasesDashboard() {
             suppliers={suppliers}
             products={products}
             locations={locations}
+            onRefreshProducts={refreshProducts}
             onClose={() => setEditTarget(null)}
             onSaved={(msg) => { setEditTarget(null); load(); showToast(msg, 'success'); }}
             onError={(msg) => showToast(msg, 'error')}
@@ -500,12 +522,13 @@ interface EditItemRow {
 }
 
 function EditPurchaseModal({
-  data, suppliers, products, locations, onClose, onSaved, onError,
+  data, suppliers, products, locations, onRefreshProducts, onClose, onSaved, onError,
 }: {
   data:      { purchase: Purchase; items: PurchaseItem[] };
   suppliers: Supplier[];
   products:  Product[];
   locations: LocationInfo[];
+  onRefreshProducts: () => Promise<number>;
   onClose:   () => void;
   onSaved:   (msg: string) => void;
   onError:   (msg: string) => void;
@@ -538,6 +561,19 @@ function EditPurchaseModal({
   }
   const [newRows, setNewRows] = useState<ItemRow[]>([]);
   const [saving, setSaving] = useState(false);
+  const [refreshingProducts, setRefreshingProducts] = useState(false);
+  const [refreshHint, setRefreshHint] = useState<string | null>(null);
+
+  async function handleRefreshProducts() {
+    setRefreshingProducts(true);
+    setRefreshHint(null);
+    const before = products.length;
+    const after  = await onRefreshProducts();
+    const added  = after - before;
+    setRefreshHint(added > 0 ? `✓ ${added} new product${added === 1 ? '' : 's'} loaded` : '✓ Up to date');
+    setRefreshingProducts(false);
+    setTimeout(() => setRefreshHint(null), 4000);
+  }
 
   // Drain order for reversing stock when an item is removed / reduced —
   // prefer the first location (usually Back Godown), then the rest.
@@ -762,13 +798,31 @@ function EditPurchaseModal({
 
           {/* Existing items */}
           <div>
-            <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center justify-between mb-2 gap-2">
               <span className="text-[10px] font-bold text-muted uppercase tracking-widest">Items ({activeRowCount})</span>
-              <button
-                onClick={() => setNewRows(r => [...r, blankNewRow()])}
-                className="text-[11px] font-bold text-teal px-3 py-1 rounded-lg bg-teal/10 border border-teal/20 hover:bg-teal/20 transition-colors"
-              >+ Add Item</button>
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={handleRefreshProducts}
+                  disabled={refreshingProducts}
+                  title="Reload products from database (e.g. after adding one in another tab)"
+                  className="text-[11px] font-bold text-gold px-2.5 py-1 rounded-lg bg-gold/10 border border-gold/20 hover:bg-gold/20 transition-colors disabled:opacity-50 flex items-center gap-1.5"
+                >
+                  {refreshingProducts
+                    ? <span className="w-3 h-3 rounded-full border-2 border-gold border-t-transparent animate-spin" />
+                    : <span>🔄</span>}
+                  Refresh
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setNewRows(r => [...r, blankNewRow()])}
+                  className="text-[11px] font-bold text-teal px-3 py-1 rounded-lg bg-teal/10 border border-teal/20 hover:bg-teal/20 transition-colors"
+                >+ Add Item</button>
+              </div>
             </div>
+            {refreshHint && (
+              <p className="text-[10px] text-success mb-2 font-semibold">{refreshHint}</p>
+            )}
 
             <div className="flex flex-col gap-2">
               {rows.map((row, idx) => (
@@ -937,11 +991,12 @@ const OCR_SPACE_KEY = 'K89615870288957';
 const GEMINI_PROXY_URL = 'https://aadinath-proxy.info-aadinathenterprise.workers.dev/api/gemini';
 
 function NewPurchaseModal({
-  suppliers, products, locations, onClose, onSaved, onError,
+  suppliers, products, locations, onRefreshProducts, onClose, onSaved, onError,
 }: {
   suppliers: Supplier[];
   products:  Product[];
   locations: LocationInfo[];
+  onRefreshProducts: () => Promise<number>;
   onClose:   () => void;
   onSaved:   () => void;
   onError:   (msg: string) => void;
@@ -963,6 +1018,19 @@ function NewPurchaseModal({
   const [images,     setImages]     = useState<BillImage[]>([]);
   const [items,      setItems]      = useState<ItemRow[]>(() => [blankRow()]);
   const [saving,     setSaving]     = useState(false);
+  const [refreshingProducts, setRefreshingProducts] = useState(false);
+  const [refreshHint, setRefreshHint] = useState<string | null>(null);
+
+  async function handleRefreshProducts() {
+    setRefreshingProducts(true);
+    setRefreshHint(null);
+    const before = products.length;
+    const after  = await onRefreshProducts();
+    const added  = after - before;
+    setRefreshHint(added > 0 ? `✓ ${added} new product${added === 1 ? '' : 's'} loaded` : '✓ Up to date');
+    setRefreshingProducts(false);
+    setTimeout(() => setRefreshHint(null), 4000);
+  }
   const [scanning,   setScanning]   = useState(false);
   const [scanInfo,   setScanInfo]   = useState<{ msg: string; ok: boolean } | null>(null);
   // Captured per-step traces from the last scan attempt — surfaced in
@@ -1475,13 +1543,31 @@ ${rawText}`;
 
           {/* Items */}
           <div>
-            <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center justify-between mb-2 gap-2">
               <span className="text-[10px] font-bold text-muted uppercase tracking-widest">Items</span>
-              <button
-                onClick={() => setItems(r => [...r, blankRow()])}
-                className="text-[11px] font-bold text-teal px-3 py-1 rounded-lg bg-teal/10 border border-teal/20 hover:bg-teal/20 transition-colors"
-              >+ Add Item</button>
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={handleRefreshProducts}
+                  disabled={refreshingProducts}
+                  title="Reload products from database (e.g. after adding one in another tab)"
+                  className="text-[11px] font-bold text-gold px-2.5 py-1 rounded-lg bg-gold/10 border border-gold/20 hover:bg-gold/20 transition-colors disabled:opacity-50 flex items-center gap-1.5"
+                >
+                  {refreshingProducts
+                    ? <span className="w-3 h-3 rounded-full border-2 border-gold border-t-transparent animate-spin" />
+                    : <span>🔄</span>}
+                  Refresh
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setItems(r => [...r, blankRow()])}
+                  className="text-[11px] font-bold text-teal px-3 py-1 rounded-lg bg-teal/10 border border-teal/20 hover:bg-teal/20 transition-colors"
+                >+ Add Item</button>
+              </div>
             </div>
+            {refreshHint && (
+              <p className="text-[10px] text-success mb-2 font-semibold">{refreshHint}</p>
+            )}
             <div className="flex flex-col gap-2">
               {items.map((row, idx) => (
                 <ItemRowEditor
