@@ -346,6 +346,7 @@ function PurchasesDashboard() {
             data={editTarget}
             suppliers={suppliers}
             products={products}
+            locations={locations}
             onClose={() => setEditTarget(null)}
             onSaved={(msg) => { setEditTarget(null); load(); showToast(msg, 'success'); }}
             onError={(msg) => showToast(msg, 'error')}
@@ -466,20 +467,22 @@ function DetailDrawer({
 // ─── Edit purchase modal ──────────────────────────────────────────────────────
 
 interface EditItemRow {
-  id:          number;  // purchase_items.id — used for UPDATE
+  id:          number;  // purchase_items.id — used for UPDATE/DELETE
   productId:   number | null;
   productName: string;
   qty:         number;
   oldQty:      number;  // snapshot to compute stock delta
   unitPrice:   number | null;
+  removed:     boolean; // marked for deletion — reverses its stock on save
 }
 
 function EditPurchaseModal({
-  data, suppliers, products, onClose, onSaved, onError,
+  data, suppliers, products, locations, onClose, onSaved, onError,
 }: {
   data:      { purchase: Purchase; items: PurchaseItem[] };
   suppliers: Supplier[];
   products:  Product[];
+  locations: LocationInfo[];
   onClose:   () => void;
   onSaved:   (msg: string) => void;
   onError:   (msg: string) => void;
@@ -497,26 +500,63 @@ function EditPurchaseModal({
       qty:         it.quantity ?? 1,
       oldQty:      it.quantity ?? 1,
       unitPrice:   it.unit_price ?? null,
+      removed:     false,
     }))
   );
+  // Brand-new line items added during this edit (not yet in the DB).
+  const newRowCounter = useRef(1);
+  function blankNewRow(): ItemRow {
+    return { rowId: newRowCounter.current++, productId: null, productName: '', qty: 1, unitPrice: null, locationId: locations[0]?.location_id ?? 2 };
+  }
+  const [newRows, setNewRows] = useState<ItemRow[]>([]);
   const [saving, setSaving] = useState(false);
+
+  // Drain order for reversing stock when an item is removed / reduced —
+  // prefer the first location (usually Back Godown), then the rest.
+  const drainOrder = locations.length > 0 ? locations.map(l => l.location_id) : [2, 1];
 
   const computedTotal = useMemo(() => {
     let sum = 0;
     for (const r of rows) {
+      if (!r.removed && r.qty > 0 && r.unitPrice != null) sum += r.qty * r.unitPrice;
+    }
+    for (const r of newRows) {
       if (r.qty > 0 && r.unitPrice != null) sum += r.qty * r.unitPrice;
     }
     return sum;
-  }, [rows]);
+  }, [rows, newRows]);
 
   function updateRow(id: number, patch: Partial<EditItemRow>) {
     setRows(rs => rs.map(r => r.id === id ? { ...r, ...patch } : r));
+  }
+  function updateNewRow(rowId: number, patch: Partial<ItemRow>) {
+    setNewRows(rs => rs.map(r => r.rowId === rowId ? { ...r, ...patch } : r));
+  }
+
+  // Drain `qty` pieces of a product across locations (back-first). Used
+  // when an item is removed or its quantity reduced.
+  async function reverseStock(productId: number, qty: number) {
+    let remaining = qty;
+    for (const locId of drainOrder) {
+      if (remaining <= 0) break;
+      const { data: stockRow } = await supabase
+        .from('stock_by_location').select('id, quantity')
+        .eq('product_id', productId).eq('location_id', locId).maybeSingle();
+      if (!stockRow) continue;
+      const current = stockRow.quantity ?? 0;
+      const take = Math.min(current, remaining);
+      if (take > 0) {
+        await supabase.from('stock_by_location').update({ quantity: current - take }).eq('id', stockRow.id);
+        remaining -= take;
+      }
+    }
   }
 
   async function save() {
     setSaving(true);
     try {
       const purchaseId = data.purchase.purchase_id;
+      let removedCount = 0, addedCount = 0, createdProducts = 0;
 
       // ── Update purchase header ─────────────────────────────────────────
       const { error: hErr } = await supabase.from('purchases').update({
@@ -527,8 +567,22 @@ function EditPurchaseModal({
       }).eq('purchase_id', purchaseId);
       if (hErr) throw new Error(hErr.message);
 
-      // ── Update each line item + adjust stock for qty changes ───────────
+      // ── Handle existing rows: remove, or update + qty delta ────────────
       for (const row of rows) {
+        if (row.removed) {
+          // Reverse the full quantity this row added, then delete it.
+          // logMovement FIRST so history records the reversal even if a
+          // later step fails (no silent stock change without a record).
+          if (row.productId && row.qty > 0) {
+            await logMovement(row.productId, row.productId ? drainOrder[0] : null, null, row.qty, 'ADJUSTMENT_OUT', `Purchase #${purchaseId} edited · item removed`);
+            await reverseStock(row.productId, row.qty);
+          }
+          const { error: dErr } = await supabase.from('purchase_items').delete().eq('id', row.id);
+          if (dErr) throw new Error(dErr.message);
+          removedCount++;
+          continue;
+        }
+
         const totalPrice = row.unitPrice != null ? row.qty * row.unitPrice : null;
         const { error: iErr } = await supabase.from('purchase_items').update({
           quantity:    row.qty,
@@ -541,34 +595,19 @@ function EditPurchaseModal({
         if (row.productId && row.qty !== row.oldQty) {
           const delta = row.qty - row.oldQty;
           if (delta > 0) {
-            // Add stock to back godown (loc 2) by default
+            const locId = drainOrder[0];
+            await logMovement(row.productId, null, locId, delta, 'PURCHASE_IN', `Purchase #${purchaseId} edited · qty increased`);
             const { data: stockRow } = await supabase
               .from('stock_by_location').select('id, quantity')
-              .eq('product_id', row.productId).eq('location_id', 2).maybeSingle();
+              .eq('product_id', row.productId).eq('location_id', locId).maybeSingle();
             if (stockRow) {
               await supabase.from('stock_by_location').update({ quantity: (stockRow.quantity ?? 0) + delta }).eq('id', stockRow.id);
             } else {
-              await supabase.from('stock_by_location').insert({ product_id: row.productId, location_id: 2, quantity: delta });
+              await supabase.from('stock_by_location').insert({ product_id: row.productId, location_id: locId, quantity: delta });
             }
-            await logMovement(row.productId, null, 2, delta, 'PURCHASE_IN', `Purchase #${purchaseId} edited`);
           } else {
-            // Remove stock — drain from wherever available (back first, then main)
-            const removeQty = -delta;
-            for (const locId of [2, 1] as const) {
-              const { data: stockRow } = await supabase
-                .from('stock_by_location').select('id, quantity')
-                .eq('product_id', row.productId).eq('location_id', locId).maybeSingle();
-              if (!stockRow) continue;
-              const current = stockRow.quantity ?? 0;
-              if (current >= removeQty) {
-                await supabase.from('stock_by_location').update({ quantity: current - removeQty }).eq('id', stockRow.id);
-                break;
-              }
-              if (current > 0) {
-                await supabase.from('stock_by_location').update({ quantity: 0 }).eq('id', stockRow.id);
-              }
-            }
-            await logMovement(row.productId, null, null, removeQty, 'ADJUSTMENT_OUT', `Purchase #${purchaseId} edited`);
+            await logMovement(row.productId, drainOrder[0], null, -delta, 'ADJUSTMENT_OUT', `Purchase #${purchaseId} edited · qty reduced`);
+            await reverseStock(row.productId, -delta);
           }
         }
 
@@ -576,22 +615,68 @@ function EditPurchaseModal({
         if (row.productId && row.unitPrice != null && row.unitPrice > 0) {
           const original = data.items.find(i => i.id === row.id);
           if (!original || original.unit_price !== row.unitPrice) {
-            const { error: priceErr } = await supabase
-              .from('products')
-              .update({ buying_price: row.unitPrice })
-              .eq('product_id', row.productId);
-            if (priceErr) {
-              onError(
-                'Purchase updated, but syncing buying price failed: ' + priceErr.message +
-                '. Likely Row-Level Security — run in Supabase SQL editor:\n' +
-                'CREATE POLICY "Allow public update" ON products FOR UPDATE TO anon USING (true) WITH CHECK (true);'
-              );
-            }
+            await supabase.from('products').update({ buying_price: row.unitPrice }).eq('product_id', row.productId);
           }
         }
       }
 
-      onSaved(`Purchase #${purchaseId} updated ✓`);
+      // ── Handle brand-new rows: create product if needed, insert item,
+      //    add stock, log PURCHASE_IN ─────────────────────────────────────
+      const validNew = newRows.filter(r => (r.productId || r.productName.trim()) && r.qty > 0);
+      for (const row of validNew) {
+        let productId = row.productId;
+        if (!productId && row.productName.trim()) {
+          const { data: newProd, error: createErr } = await supabase
+            .from('products')
+            .insert({
+              product_name:    row.productName.trim(),
+              type:            'Bill Import',
+              unit_of_measure: 'Piece',
+              unit_type:       'piece',
+              buying_price:    row.unitPrice,
+              reorder_level:   0,
+              active_status:   true,
+            })
+            .select('product_id')
+            .single();
+          if (createErr || !newProd) throw new Error(`Could not create product "${row.productName.trim()}": ${createErr?.message ?? 'no row'}`);
+          productId = (newProd as { product_id: number }).product_id;
+          createdProducts++;
+        }
+
+        const totalPrice = row.unitPrice != null ? row.qty * row.unitPrice : null;
+        const { error: iErr } = await supabase.from('purchase_items').insert({
+          purchase_id:      purchaseId,
+          product_id:       productId,
+          product_name_raw: productId ? null : row.productName.trim(),
+          quantity:         row.qty,
+          unit_price:       row.unitPrice,
+          total_price:      totalPrice,
+        });
+        if (iErr) throw new Error(iErr.message);
+
+        if (productId) {
+          await logMovement(productId, null, row.locationId, row.qty, 'PURCHASE_IN', `Purchase #${purchaseId} edited · item added`);
+          const { data: existing } = await supabase
+            .from('stock_by_location').select('id, quantity')
+            .eq('product_id', productId).eq('location_id', row.locationId).maybeSingle();
+          if (existing) {
+            await supabase.from('stock_by_location').update({ quantity: (existing.quantity ?? 0) + row.qty }).eq('id', existing.id);
+          } else {
+            await supabase.from('stock_by_location').insert({ product_id: productId, location_id: row.locationId, quantity: row.qty });
+          }
+          if (row.productId && row.unitPrice != null && row.unitPrice > 0) {
+            await supabase.from('products').update({ buying_price: row.unitPrice }).eq('product_id', productId);
+          }
+        }
+        addedCount++;
+      }
+
+      const parts = [`Purchase #${purchaseId} updated ✓`];
+      if (addedCount > 0)   parts.push(`${addedCount} added`);
+      if (removedCount > 0) parts.push(`${removedCount} removed`);
+      if (createdProducts > 0) parts.push(`${createdProducts} new product${createdProducts === 1 ? '' : 's'}`);
+      onSaved(parts.join(' · '));
     } catch (e) {
       onError('Error: ' + (e instanceof Error ? e.message : 'Unknown'));
     } finally {
@@ -599,13 +684,15 @@ function EditPurchaseModal({
     }
   }
 
+  const activeRowCount = rows.filter(r => !r.removed).length + newRows.length;
+
   return (
     <>
       <motion.div key="ebd" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
         className="fixed inset-0 z-40 bg-black/70 backdrop-blur-sm" onClick={onClose} />
       <motion.div key="emd" initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }}
         transition={{ type: 'spring', damping: 28, stiffness: 220 }}
-        className="fixed bottom-0 inset-x-0 z-50 max-w-lg mx-auto bg-surface border border-white/8 rounded-t-2xl p-5 pb-8 max-h-[95vh] overflow-y-auto"
+        className="fixed bottom-0 inset-x-0 z-50 max-w-lg mx-auto card-lux rounded-t-3xl p-5 pb-8 max-h-[95vh] overflow-y-auto"
       >
         <div className="w-8 h-1 rounded-full bg-white/10 mx-auto mb-4" />
         <h3 className="text-base font-bold text-slate-100 mb-4">✏️ Edit Purchase #{data.purchase.purchase_id}</h3>
@@ -628,47 +715,91 @@ function EditPurchaseModal({
               className="w-full px-3 py-2.5 rounded-xl bg-surface2 border border-white/8 text-slate-100 text-sm outline-none focus:border-teal/40" />
           </div>
 
-          {/* Items */}
+          {/* Existing items */}
           <div>
-            <span className="text-[10px] font-bold text-muted uppercase tracking-widest">Items ({rows.length})</span>
-            <div className="flex flex-col gap-2 mt-2">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-[10px] font-bold text-muted uppercase tracking-widest">Items ({activeRowCount})</span>
+              <button
+                onClick={() => setNewRows(r => [...r, blankNewRow()])}
+                className="text-[11px] font-bold text-teal px-3 py-1 rounded-lg bg-teal/10 border border-teal/20 hover:bg-teal/20 transition-colors"
+              >+ Add Item</button>
+            </div>
+
+            <div className="flex flex-col gap-2">
               {rows.map((row, idx) => (
-                <div key={row.id} className="rounded-xl border border-white/8 bg-surface2 p-3">
-                  <div className="text-[10px] font-bold text-muted uppercase tracking-widest mb-2">
-                    #{idx + 1} · {row.productName || '—'}
+                <div key={row.id} className={`rounded-xl border p-3 transition-colors ${
+                  row.removed ? 'border-danger/30 bg-danger/5 opacity-70' : 'border-white/8 bg-surface2'
+                }`}>
+                  <div className="flex items-center justify-between mb-2">
+                    <span className={`text-[10px] font-bold uppercase tracking-widest ${row.removed ? 'text-danger line-through' : 'text-muted'}`}>
+                      #{idx + 1} · {row.productName || '—'}
+                    </span>
+                    {row.removed ? (
+                      <button onClick={() => updateRow(row.id, { removed: false })}
+                        className="text-[10px] font-bold text-teal px-2 py-0.5 rounded-md bg-teal/10 border border-teal/20 hover:bg-teal/20 transition-colors">
+                        Undo
+                      </button>
+                    ) : (
+                      <button onClick={() => updateRow(row.id, { removed: true })}
+                        className="text-muted hover:text-danger text-sm transition-colors" title="Remove this item">
+                        🗑
+                      </button>
+                    )}
                   </div>
-                  <div className="grid grid-cols-[1fr_1fr_auto] gap-2 items-end">
-                    <div>
-                      <label className="text-[9px] font-bold text-muted uppercase block mb-0.5">Qty</label>
-                      <input
-                        type="number" min={1} value={row.qty}
-                        onChange={e => updateRow(row.id, { qty: Math.max(1, parseInt(e.target.value) || 1) })}
-                        onWheel={e => e.currentTarget.blur()}
-                        className="w-full px-2 py-1.5 rounded-lg bg-surface border border-white/8 text-slate-100 text-xs outline-none focus:border-teal/40"
-                      />
-                      {row.qty !== row.oldQty && (
-                        <p className="text-[9px] text-gold mt-0.5">
-                          {row.qty > row.oldQty ? `+${row.qty - row.oldQty} stock ↑` : `${row.qty - row.oldQty} stock ↓`}
-                        </p>
-                      )}
-                    </div>
-                    <div>
-                      <label className="text-[9px] font-bold text-muted uppercase block mb-0.5">Unit Price (Ksh)</label>
-                      <input
-                        type="number" min={0} step="0.01" value={row.unitPrice ?? ''}
-                        placeholder="0.00"
-                        onChange={e => updateRow(row.id, { unitPrice: e.target.value ? parseFloat(e.target.value) : null })}
-                        onWheel={e => e.currentTarget.blur()}
-                        className="w-full px-2 py-1.5 rounded-lg bg-surface border border-white/8 text-slate-100 text-xs outline-none focus:border-teal/40"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-[9px] font-bold text-muted uppercase block mb-0.5">Line</label>
-                      <div className="px-2 py-1.5 rounded-lg bg-surface border border-white/8 text-teal text-xs font-bold tabular-nums min-w-20 text-right">
-                        {row.unitPrice != null ? Number(row.qty * row.unitPrice).toLocaleString('en-KE') : '—'}
+
+                  {row.removed ? (
+                    <p className="text-[10px] text-danger">
+                      Will be removed · {row.qty} pcs of stock reversed
+                    </p>
+                  ) : (
+                    <div className="grid grid-cols-[1fr_1fr_auto] gap-2 items-end">
+                      <div>
+                        <label className="text-[9px] font-bold text-muted uppercase block mb-0.5">Qty</label>
+                        <input
+                          type="number" min={1} value={row.qty}
+                          onChange={e => updateRow(row.id, { qty: Math.max(1, parseInt(e.target.value) || 1) })}
+                          onWheel={e => e.currentTarget.blur()}
+                          className="w-full px-2 py-1.5 rounded-lg bg-surface border border-white/8 text-slate-100 text-xs outline-none focus:border-teal/40"
+                        />
+                        {row.qty !== row.oldQty && (
+                          <p className="text-[9px] text-gold mt-0.5">
+                            {row.qty > row.oldQty ? `+${row.qty - row.oldQty} stock ↑` : `${row.qty - row.oldQty} stock ↓`}
+                          </p>
+                        )}
+                      </div>
+                      <div>
+                        <label className="text-[9px] font-bold text-muted uppercase block mb-0.5">Unit Price (Ksh)</label>
+                        <input
+                          type="number" min={0} step="0.01" value={row.unitPrice ?? ''}
+                          placeholder="0.00"
+                          onChange={e => updateRow(row.id, { unitPrice: e.target.value ? parseFloat(e.target.value) : null })}
+                          onWheel={e => e.currentTarget.blur()}
+                          className="w-full px-2 py-1.5 rounded-lg bg-surface border border-white/8 text-slate-100 text-xs outline-none focus:border-teal/40"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[9px] font-bold text-muted uppercase block mb-0.5">Line</label>
+                        <div className="px-2 py-1.5 rounded-lg bg-surface border border-white/8 text-teal text-xs font-bold tabular-nums min-w-20 text-right">
+                          {row.unitPrice != null ? Number(row.qty * row.unitPrice).toLocaleString('en-KE') : '—'}
+                        </div>
                       </div>
                     </div>
-                  </div>
+                  )}
+                </div>
+              ))}
+
+              {/* New items — full picker so you can choose any product + location */}
+              {newRows.map((row, idx) => (
+                <div key={row.rowId} className="relative">
+                  <span className="absolute -top-1.5 left-3 z-10 text-[8px] font-bold uppercase tracking-widest text-success bg-surface px-1.5 rounded">New item</span>
+                  <ItemRowEditor
+                    row={row}
+                    index={rows.filter(r => !r.removed).length + idx}
+                    products={products}
+                    locations={locations}
+                    onChange={patch => updateNewRow(row.rowId, patch)}
+                    onRemove={() => setNewRows(rs => rs.filter(r => r.rowId !== row.rowId))}
+                  />
                 </div>
               ))}
             </div>
@@ -720,11 +851,14 @@ function EditPurchaseModal({
               Cancel
             </button>
             <button onClick={save} disabled={saving}
-              className="flex-1 py-2.5 rounded-xl bg-teal/15 border border-teal/30 text-teal text-sm font-bold disabled:opacity-50 flex items-center justify-center gap-2">
-              {saving && <span className="w-3.5 h-3.5 rounded-full border-2 border-teal border-t-transparent animate-spin" />}
+              className="flex-1 py-2.5 rounded-xl btn-primary text-sm font-bold disabled:opacity-50 flex items-center justify-center gap-2">
+              {saving && <span className="w-3.5 h-3.5 rounded-full border-2 border-white border-t-transparent animate-spin" />}
               ✓ Save Changes
             </button>
           </div>
+          <p className="text-[10px] text-muted/70 text-center mt-1 leading-relaxed">
+            Removing an item reverses its stock and logs it in History. Added items are recorded as new purchase entries.
+          </p>
         </div>
       </motion.div>
     </>
