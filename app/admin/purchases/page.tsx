@@ -28,6 +28,27 @@ function splitVAT(totalIncl: number) {
   return { base, vat };
 }
 
+// The purchase_items primary-key column name varies by deployment —
+// some schemas use `id`, others follow the `<entity>_id` convention
+// (purchase_item_id). The TS type declares `id`, but the real column may
+// differ, which silently made row.id `undefined` and produced
+// "column purchase_items.id does not exist" on UPDATE/DELETE. Detect the
+// real PK from the loaded row so UPDATE/DELETE always target a real
+// column. NEVER fall back to a guess for write operations — callers must
+// treat a null result as "cannot safely write".
+function detectItemPk(raw: Record<string, unknown>): { field: string; value: number } | null {
+  const candidates = ['purchase_item_id', 'item_id', 'id', 'purchaseitem_id'];
+  for (const c of candidates) {
+    if (c in raw && typeof raw[c] === 'number') return { field: c, value: raw[c] as number };
+  }
+  // Fallback: any *_id numeric column that isn't a known foreign key.
+  const fks = new Set(['purchase_id', 'product_id', 'location_id', 'supplier_id']);
+  for (const k of Object.keys(raw)) {
+    if (k.endsWith('_id') && !fks.has(k) && typeof raw[k] === 'number') return { field: k, value: raw[k] as number };
+  }
+  return null;
+}
+
 // bill_image_url stores either a JSON-stringified array (new) or a single URL
 // (old). Parse defensively so old purchases still display.
 function parseBillUrls(s: string | null): string[] {
@@ -389,8 +410,8 @@ function DetailDrawer({
         </div>
 
         <div className="text-[10px] font-bold text-muted uppercase tracking-widest mb-2">Items ({data.items.length})</div>
-        {data.items.map(item => (
-          <div key={item.id} className="flex justify-between py-2.5 border-b border-white/5 text-sm">
+        {data.items.map((item, i) => (
+          <div key={i} className="flex justify-between py-2.5 border-b border-white/5 text-sm">
             <div>
               <div className="font-semibold text-slate-100">{productName(item.product_id, item.product_name_raw)}</div>
               <div className="text-xs text-muted">
@@ -467,7 +488,9 @@ function DetailDrawer({
 // ─── Edit purchase modal ──────────────────────────────────────────────────────
 
 interface EditItemRow {
-  id:          number;  // purchase_items.id — used for UPDATE/DELETE
+  rowKey:      number;          // stable local React key
+  pkField:     string | null;   // real PK column ('purchase_item_id' | 'id' | …); null = couldn't detect
+  pk:          number | null;   // PK value for UPDATE/DELETE
   productId:   number | null;
   productName: string;
   qty:         number;
@@ -491,17 +514,22 @@ function EditPurchaseModal({
   const [date,  setDate]  = useState(data.purchase.purchase_date ?? '');
   const [notes, setNotes] = useState(data.purchase.notes ?? '');
   const [rows,  setRows]  = useState<EditItemRow[]>(() =>
-    data.items.map(it => ({
-      id:          it.id,
-      productId:   it.product_id,
-      productName: it.product_id
-        ? (products.find(p => p.product_id === it.product_id)?.product_name ?? it.product_name_raw ?? '')
-        : (it.product_name_raw ?? ''),
-      qty:         it.quantity ?? 1,
-      oldQty:      it.quantity ?? 1,
-      unitPrice:   it.unit_price ?? null,
-      removed:     false,
-    }))
+    data.items.map((it, idx) => {
+      const pk = detectItemPk(it as unknown as Record<string, unknown>);
+      return {
+        rowKey:      idx,
+        pkField:     pk?.field ?? null,
+        pk:          pk?.value ?? null,
+        productId:   it.product_id,
+        productName: it.product_id
+          ? (products.find(p => p.product_id === it.product_id)?.product_name ?? it.product_name_raw ?? '')
+          : (it.product_name_raw ?? ''),
+        qty:         it.quantity ?? 1,
+        oldQty:      it.quantity ?? 1,
+        unitPrice:   it.unit_price ?? null,
+        removed:     false,
+      };
+    })
   );
   // Brand-new line items added during this edit (not yet in the DB).
   const newRowCounter = useRef(1);
@@ -526,8 +554,8 @@ function EditPurchaseModal({
     return sum;
   }, [rows, newRows]);
 
-  function updateRow(id: number, patch: Partial<EditItemRow>) {
-    setRows(rs => rs.map(r => r.id === id ? { ...r, ...patch } : r));
+  function updateRow(rowKey: number, patch: Partial<EditItemRow>) {
+    setRows(rs => rs.map(r => r.rowKey === rowKey ? { ...r, ...patch } : r));
   }
   function updateNewRow(rowId: number, patch: Partial<ItemRow>) {
     setNewRows(rs => rs.map(r => r.rowId === rowId ? { ...r, ...patch } : r));
@@ -569,16 +597,36 @@ function EditPurchaseModal({
 
       // ── Handle existing rows: remove, or update + qty delta ────────────
       for (const row of rows) {
+        // Any existing-row write needs a real PK. If we couldn't detect
+        // one, abort the WHOLE save before touching stock — this is what
+        // previously let a failed delete reverse stock without removing
+        // the row (the "minus twice" bug).
+        const orig = data.items[row.rowKey];
+        const priceChanged = (orig?.unit_price ?? null) !== (row.unitPrice ?? null);
+        const needsWrite = row.removed || row.qty !== row.oldQty || priceChanged;
+        if (needsWrite && (!row.pkField || row.pk == null)) {
+          throw new Error(
+            `Cannot edit existing items: the purchase_items primary-key column was not found ` +
+            `(expected one of purchase_item_id / item_id / id). No stock was changed. ` +
+            `Adding NEW items still works. Share your purchase_items columns to fix this permanently.`
+          );
+        }
+
         if (row.removed) {
-          // Reverse the full quantity this row added, then delete it.
-          // logMovement FIRST so history records the reversal even if a
-          // later step fails (no silent stock change without a record).
+          // DELETE FIRST. Only reverse stock AFTER the row is confirmed
+          // gone (.select() returns the deleted rows). If the delete is
+          // rejected by schema or RLS, we throw here and stock is never
+          // touched — no half-applied reversal, no double minus.
+          const { data: del, error: dErr } = await supabase
+            .from('purchase_items').delete().eq(row.pkField!, row.pk!).select();
+          if (dErr) throw new Error(dErr.message);
+          if (!del || del.length === 0) {
+            throw new Error('Item could not be removed (no row deleted — likely RLS). No stock was changed.');
+          }
           if (row.productId && row.qty > 0) {
-            await logMovement(row.productId, row.productId ? drainOrder[0] : null, null, row.qty, 'ADJUSTMENT_OUT', `Purchase #${purchaseId} edited · item removed`);
+            await logMovement(row.productId, drainOrder[0], null, row.qty, 'ADJUSTMENT_OUT', `Purchase #${purchaseId} edited · item removed`);
             await reverseStock(row.productId, row.qty);
           }
-          const { error: dErr } = await supabase.from('purchase_items').delete().eq('id', row.id);
-          if (dErr) throw new Error(dErr.message);
           removedCount++;
           continue;
         }
@@ -588,7 +636,7 @@ function EditPurchaseModal({
           quantity:    row.qty,
           unit_price:  row.unitPrice,
           total_price: totalPrice,
-        }).eq('id', row.id);
+        }).eq(row.pkField!, row.pk!);
         if (iErr) throw new Error(iErr.message);
 
         // Stock delta adjustment when qty changed
@@ -612,11 +660,8 @@ function EditPurchaseModal({
         }
 
         // Keep buying_price in sync when unit price changes
-        if (row.productId && row.unitPrice != null && row.unitPrice > 0) {
-          const original = data.items.find(i => i.id === row.id);
-          if (!original || original.unit_price !== row.unitPrice) {
-            await supabase.from('products').update({ buying_price: row.unitPrice }).eq('product_id', row.productId);
-          }
+        if (row.productId && row.unitPrice != null && row.unitPrice > 0 && priceChanged) {
+          await supabase.from('products').update({ buying_price: row.unitPrice }).eq('product_id', row.productId);
         }
       }
 
@@ -727,7 +772,7 @@ function EditPurchaseModal({
 
             <div className="flex flex-col gap-2">
               {rows.map((row, idx) => (
-                <div key={row.id} className={`rounded-xl border p-3 transition-colors ${
+                <div key={row.rowKey} className={`rounded-xl border p-3 transition-colors ${
                   row.removed ? 'border-danger/30 bg-danger/5 opacity-70' : 'border-white/8 bg-surface2'
                 }`}>
                   <div className="flex items-center justify-between mb-2">
@@ -735,12 +780,12 @@ function EditPurchaseModal({
                       #{idx + 1} · {row.productName || '—'}
                     </span>
                     {row.removed ? (
-                      <button onClick={() => updateRow(row.id, { removed: false })}
+                      <button onClick={() => updateRow(row.rowKey, { removed: false })}
                         className="text-[10px] font-bold text-teal px-2 py-0.5 rounded-md bg-teal/10 border border-teal/20 hover:bg-teal/20 transition-colors">
                         Undo
                       </button>
                     ) : (
-                      <button onClick={() => updateRow(row.id, { removed: true })}
+                      <button onClick={() => updateRow(row.rowKey, { removed: true })}
                         className="text-muted hover:text-danger text-sm transition-colors" title="Remove this item">
                         🗑
                       </button>
@@ -757,7 +802,7 @@ function EditPurchaseModal({
                         <label className="text-[9px] font-bold text-muted uppercase block mb-0.5">Qty</label>
                         <input
                           type="number" min={1} value={row.qty}
-                          onChange={e => updateRow(row.id, { qty: Math.max(1, parseInt(e.target.value) || 1) })}
+                          onChange={e => updateRow(row.rowKey, { qty: Math.max(1, parseInt(e.target.value) || 1) })}
                           onWheel={e => e.currentTarget.blur()}
                           className="w-full px-2 py-1.5 rounded-lg bg-surface border border-white/8 text-slate-100 text-xs outline-none focus:border-teal/40"
                         />
@@ -772,7 +817,7 @@ function EditPurchaseModal({
                         <input
                           type="number" min={0} step="0.01" value={row.unitPrice ?? ''}
                           placeholder="0.00"
-                          onChange={e => updateRow(row.id, { unitPrice: e.target.value ? parseFloat(e.target.value) : null })}
+                          onChange={e => updateRow(row.rowKey, { unitPrice: e.target.value ? parseFloat(e.target.value) : null })}
                           onWheel={e => e.currentTarget.blur()}
                           className="w-full px-2 py-1.5 rounded-lg bg-surface border border-white/8 text-slate-100 text-xs outline-none focus:border-teal/40"
                         />
