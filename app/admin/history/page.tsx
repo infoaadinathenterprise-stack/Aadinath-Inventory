@@ -93,7 +93,7 @@ function HistoryDashboard() {
     const [movRes, reqRes, prodRes, locRes] = await Promise.all([
       supabase.from('stock_movements').select('movement_id, product_id, from_location_id, to_location_id, quantity, movement_type, reason, notes, movement_at').order('movement_id', { ascending: false }).limit(500),
       supabase.from('stock_requests').select('*').neq('status', 'PENDING').order('request_id', { ascending: false }).limit(500),
-      supabase.from('products').select('product_id, product_name, brand, model, unit_of_measure, display_unit, pieces_per_box, selling_price, buying_price, box_selling_price'),
+      supabase.from('products').select('product_id, product_name, stock_keeping_unit, type, brand, model, unit_of_measure, display_unit, pieces_per_box, selling_price, buying_price, box_selling_price'),
       supabase.from('locations').select('location_id, location_name'),
     ]);
     // Update module-level LOC_NAME with DB values
@@ -158,11 +158,24 @@ function HistoryDashboard() {
 
   const filtered = movements.filter(m => {
     if (typeFilter !== 'ALL' && m.movement_type !== typeFilter) return false;
-    if (search) {
-      const name = productName(m.product_id).toLowerCase();
-      if (!name.includes(search.toLowerCase()) && !(m.reason ?? '').toLowerCase().includes(search.toLowerCase())) return false;
-    }
-    return true;
+    const q = search.trim().toLowerCase();
+    if (!q) return true;
+    // Build the searchable text from the product's own fields plus the
+    // CLEANED reason. We deliberately exclude the raw reason's "[user]"
+    // prefix and the "(was: X → now: Y)" snapshot — matching those made
+    // a username or a stray number match every row, so the list never
+    // narrowed.
+    const p = products.find(pr => pr.product_id === m.product_id);
+    const { rest: cleanReason } = parseReason(m.reason);
+    const hay = [
+      p?.product_name,
+      p?.stock_keeping_unit,
+      p?.brand,
+      p?.model,
+      p?.type,
+      cleanReason,
+    ].filter(Boolean).join(' ').toLowerCase();
+    return hay.includes(q);
   });
 
   return (
