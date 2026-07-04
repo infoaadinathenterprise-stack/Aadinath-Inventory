@@ -4,18 +4,17 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { supabase } from '@/lib/supabase';
 import type { Product, UserRole, StockMap } from '@/lib/types';
-import { SESSION_KEY, USER_KEY, ROLE_KEY } from '@/lib/types';
+import { ROLE_KEY } from '@/lib/types';
 import { useProductComponents } from '@/lib/hooks/useProductComponents';
 import { useProducts } from '@/lib/hooks/useProducts';
 import { logMovement } from '@/lib/stockActions';
+import { login as apiLogin, logout as apiLogout, isAuthenticated } from '@/lib/auth';
 import { useSearchParams } from 'next/navigation';
 import { Suspense } from 'react';
 import AdminNavbar      from './components/AdminNavbar';
 import ProductList      from './components/ProductList';
 import AdjustStockModal from './components/AdjustStockModal';
 import Toast, { type ToastState } from './components/Toast';
-
-const PASS = process.env.NEXT_PUBLIC_ADMIN_PASSWORD ?? 'admin123';
 
 interface ModalState {
   product:    Product;
@@ -102,38 +101,15 @@ function LoginForm({ onSuccess }: { onSuccess: () => void }) {
     setLoading(true);
     setErr('');
     try {
-      // 1. Check app_users table — match by email or full_name + PIN
-      const { data: allUsers } = await supabase
-        .from('app_users')
-        .select('full_name, role, active_status, email')
-        .eq('pin', p)
-        .eq('active_status', true);
-
-      const loginId = u.toLowerCase();
-      const appUser = (allUsers ?? []).find(
-        row => row.email?.toLowerCase() === loginId
-            || row.full_name.toLowerCase() === loginId,
-      );
-
-      if (appUser) {
-        localStorage.setItem(SESSION_KEY, '1');
-        localStorage.setItem(USER_KEY,    appUser.full_name);
-        localStorage.setItem(ROLE_KEY,    appUser.role);
+      // Credentials are verified server-side by /api/login, which checks the
+      // hashed PIN and returns a signed token. Nothing sensitive (PIN hashes,
+      // the app_users table) is ever exposed to the browser.
+      const result = await apiLogin(u, p);
+      if (result.ok) {
         onSuccess();
         return;
       }
-
-      // 2. Legacy fallback: env-var admin password (backward compat)
-      if (p === PASS) {
-        localStorage.setItem(SESSION_KEY, '1');
-        localStorage.setItem(USER_KEY,    u || 'Admin');
-        localStorage.setItem(ROLE_KEY,    'admin');
-        onSuccess();
-        return;
-      }
-
-      // Wrong credentials
-      setErr('Incorrect username or PIN');
+      setErr(result.error || 'Incorrect username or PIN');
       setShake(true);
       setPin('');
       setTimeout(() => setShake(false), 500);
@@ -906,9 +882,7 @@ function Dashboard({ role }: { role: UserRole }) {
   const isAdmin = role === 'admin';
 
   function handleLogout() {
-    localStorage.removeItem(SESSION_KEY);
-    localStorage.removeItem(USER_KEY);
-    localStorage.removeItem(ROLE_KEY);
+    apiLogout();
     window.location.reload();
   }
 
@@ -1008,9 +982,11 @@ export default function AdminPage() {
   const [role,   setRole]   = useState<UserRole>('admin');
 
   useEffect(() => {
-    const ok = typeof window !== 'undefined' && localStorage.getItem(SESSION_KEY) === '1';
+    // Require a valid (non-expired) signed token, not just the session flag.
+    const ok = isAuthenticated();
     setAuthed(ok);
     if (ok) setRole((localStorage.getItem(ROLE_KEY) as UserRole) || 'admin');
+    else apiLogout();
   }, []);
 
   function onLoginSuccess() {

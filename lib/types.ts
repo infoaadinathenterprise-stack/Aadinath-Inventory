@@ -43,6 +43,9 @@ export type Location = number;
 export const SESSION_KEY = 'aad_admin_auth';
 export const USER_KEY    = 'aad_admin_user';
 export const ROLE_KEY    = 'aad_user_role';
+// Signed login token minted by /api/login. Sent as the Supabase access
+// token on every request; the role inside it is what the database trusts.
+export const TOKEN_KEY   = 'aad_session_token';
 
 export type UserRole = 'admin' | 'staff';
 

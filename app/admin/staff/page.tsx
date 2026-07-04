@@ -3,8 +3,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
-import { supabase } from '@/lib/supabase';
-import { SESSION_KEY, ROLE_KEY } from '@/lib/types';
+import { ROLE_KEY } from '@/lib/types';
+import { logout as apiLogout, isAuthenticated, staffApi } from '@/lib/auth';
 import AdminNavbar from '../components/AdminNavbar';
 import Toast, { type ToastState } from '../components/Toast';
 
@@ -39,25 +39,22 @@ export default function StaffPage() {
   }
 
   function handleLogout() {
-    localStorage.removeItem(SESSION_KEY);
+    apiLogout();
     window.location.href = '/admin';
   }
 
   const firstLoad = useRef(true);
   const load = useCallback(async () => {
     if (firstLoad.current) setLoading(true);
-    const { data, error } = await supabase
-      .from('app_users')
-      .select('user_id, full_name, email, role, active_status, created_at')
-      .order('created_at', { ascending: true });
-    if (error) showToast(error.message, 'error');
-    setUsers((data ?? []) as AppUser[]);
+    const res = await staffApi<{ users: AppUser[] }>('list');
+    if (!res.ok) showToast(res.error || 'Could not load staff', 'error');
+    setUsers((res.data?.users ?? []) as AppUser[]);
     firstLoad.current = false;
     setLoading(false);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-    const ok   = typeof window !== 'undefined' && localStorage.getItem(SESSION_KEY) === '1';
+    const ok   = isAuthenticated();
     const role = (typeof window !== 'undefined' ? localStorage.getItem(ROLE_KEY) : null) ?? 'admin';
     if (!ok || role !== 'admin') { router.replace('/admin'); return; }
     load();
@@ -70,14 +67,13 @@ export default function StaffPage() {
     }
     setSaving(true);
     try {
-      const { error } = await supabase.from('app_users').insert({
-        full_name:     fullName.trim(),
-        email:         email.trim() || null,
-        pin:           pin.trim(),
-        role:          newRole,
-        active_status: true,
+      const res = await staffApi('create', {
+        full_name: fullName.trim(),
+        email:     email.trim() || null,
+        pin:       pin.trim(),
+        role:      newRole,
       });
-      if (error) throw new Error(error.message);
+      if (!res.ok) throw new Error(res.error || 'Error adding user');
       showToast(`${fullName} added ✓`, 'success');
       setFullName(''); setEmail(''); setPin(''); setNewRole('staff');
       setShowForm(false);
@@ -90,11 +86,8 @@ export default function StaffPage() {
   }
 
   async function toggleActive(user: AppUser) {
-    const { error } = await supabase
-      .from('app_users')
-      .update({ active_status: !user.active_status })
-      .eq('user_id', user.user_id);
-    if (error) { showToast(error.message, 'error'); return; }
+    const res = await staffApi('set-active', { user_id: user.user_id, active: !user.active_status });
+    if (!res.ok) { showToast(res.error || 'Could not update account', 'error'); return; }
     setUsers(u => u.map(m => m.user_id === user.user_id ? { ...m, active_status: !m.active_status } : m));
     showToast(user.active_status ? 'Account deactivated' : 'Account activated', 'success');
   }
@@ -102,11 +95,8 @@ export default function StaffPage() {
   async function resetPin(user: AppUser) {
     const newPin = window.prompt(`Set new PIN for ${user.full_name}:`);
     if (!newPin?.trim()) return;
-    const { error } = await supabase
-      .from('app_users')
-      .update({ pin: newPin.trim() })
-      .eq('user_id', user.user_id);
-    if (error) showToast(error.message, 'error');
+    const res = await staffApi('reset-pin', { user_id: user.user_id, pin: newPin.trim() });
+    if (!res.ok) showToast(res.error || 'Could not reset PIN', 'error');
     else showToast(`PIN updated for ${user.full_name} ✓`, 'success');
   }
 
