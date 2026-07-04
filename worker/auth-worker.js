@@ -166,7 +166,7 @@ async function handleLogin(request, env) {
 
   const res = await sbFetch(
     env,
-    'app_users?select=user_id,full_name,email,role,active_status,pin,pin_hash&active_status=eq.true',
+    'app_users?select=user_id,full_name,email,role,active_status,pin_hash&active_status=eq.true',
   );
   if (!res.ok) return json({ error: 'Login service unavailable' }, 502);
   const users = await res.json();
@@ -179,15 +179,19 @@ async function handleLogin(request, env) {
   for (const user of candidates) {
     let ok = await verifyPin(pin, user.pin_hash);
 
-    // Legacy fallback: no hash yet but plaintext pin matches -> upgrade to a hash.
-    if (!ok && user.pin_hash == null && user.pin != null && user.pin === pin) {
+    // Legacy fallback: a plaintext value sitting in pin_hash (a row that was
+    // never hashed) that matches what was typed -> accept it once and upgrade
+    // it to a real hash so it's stored securely from now on.
+    if (!ok && user.pin_hash != null
+        && !String(user.pin_hash).startsWith('pbkdf2$')
+        && String(user.pin_hash) === pin) {
       ok = true;
       try {
         const newHash = await hashPin(pin);
         await sbFetch(env, `app_users?user_id=eq.${user.user_id}`, {
           method: 'PATCH',
           headers: { Prefer: 'return=minimal' },
-          body: JSON.stringify({ pin_hash: newHash, pin: null }),
+          body: JSON.stringify({ pin_hash: newHash }),
         });
       } catch { /* non-fatal */ }
     }
@@ -251,7 +255,7 @@ async function handleStaff(request, env) {
       const pin_hash = await hashPin(pin);
       const res = await sbFetch(env, `app_users?user_id=eq.${body.user_id}`, {
         method: 'PATCH', headers: { Prefer: 'return=minimal' },
-        body: JSON.stringify({ pin_hash, pin: null }),
+        body: JSON.stringify({ pin_hash }),
       });
       if (!res.ok) return json({ error: await errText(res, 'Could not reset PIN') }, 502);
       return json({ ok: true });

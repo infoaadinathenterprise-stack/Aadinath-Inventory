@@ -16,8 +16,7 @@ interface UserRow {
   email:         string | null;
   role:          'admin' | 'staff';
   active_status: boolean;
-  pin:           string | null;       // legacy plaintext (auto-migrated on login)
-  pin_hash:      string | null;
+  pin_hash:      string | null;       // may hold a legacy plaintext value; auto-upgraded on login
 }
 
 export const onRequestOptions: PagesFunction = async () =>
@@ -47,7 +46,7 @@ export const onRequestPost: PagesFunction<AuthEnv> = async (context) => {
   // mirroring the app's existing login behavior. Service role → RLS bypassed.
   const res = await sbFetch(
     env,
-    'app_users?select=user_id,full_name,email,role,active_status,pin,pin_hash&active_status=eq.true',
+    'app_users?select=user_id,full_name,email,role,active_status,pin_hash&active_status=eq.true',
   );
   if (!res.ok) return json({ error: 'Login service unavailable' }, 502);
   const users = (await res.json()) as UserRow[];
@@ -61,16 +60,18 @@ export const onRequestPost: PagesFunction<AuthEnv> = async (context) => {
   for (const user of candidates) {
     let ok = await verifyPin(pin, user.pin_hash);
 
-    // Legacy fallback: no hash yet but the stored plaintext PIN matches.
-    // Upgrade it to a hash immediately so plaintext stops being used.
-    if (!ok && user.pin_hash == null && user.pin != null && user.pin === pin) {
+    // Legacy fallback: a plaintext value sitting in pin_hash (never hashed)
+    // that matches what was typed. Accept once and upgrade it to a real hash.
+    if (!ok && user.pin_hash != null
+        && !String(user.pin_hash).startsWith('pbkdf2$')
+        && String(user.pin_hash) === pin) {
       ok = true;
       try {
         const newHash = await hashPin(pin);
         await sbFetch(env, `app_users?user_id=eq.${user.user_id}`, {
           method: 'PATCH',
           headers: { Prefer: 'return=minimal' },
-          body: JSON.stringify({ pin_hash: newHash, pin: null }),
+          body: JSON.stringify({ pin_hash: newHash }),
         });
       } catch { /* non-fatal: login still succeeds, migrate next time */ }
     }

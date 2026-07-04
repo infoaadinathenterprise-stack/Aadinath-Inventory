@@ -83,7 +83,7 @@ export const onRequestPost: PagesFunction<AuthEnv> = async (context) => {
       const res = await sbFetch(env, `app_users?user_id=eq.${body.user_id}`, {
         method: 'PATCH',
         headers: { Prefer: 'return=minimal' },
-        body: JSON.stringify({ pin_hash, pin: null }),
+        body: JSON.stringify({ pin_hash }),
       });
       if (!res.ok) return json({ error: await errText(res, 'Could not reset PIN') }, 502);
       return json({ ok: true });
