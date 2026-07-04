@@ -9,6 +9,14 @@
 
 import { SESSION_KEY, USER_KEY, ROLE_KEY, TOKEN_KEY, type UserRole } from '@/lib/types';
 
+// Auth runs on a standalone Cloudflare Worker (Pages Functions don't
+// reliably materialize on this project — same reason Gemini uses a
+// separate worker). Override with NEXT_PUBLIC_AUTH_BASE if you name the
+// worker differently; the default assumes it's deployed as "aadinath-auth"
+// on the info-aadinathenterprise.workers.dev subdomain.
+const AUTH_BASE = (process.env.NEXT_PUBLIC_AUTH_BASE
+  || 'https://aadinath-auth.info-aadinathenterprise.workers.dev').replace(/\/+$/, '');
+
 export interface LoginResult {
   ok:         boolean;
   error?:     string;
@@ -29,7 +37,7 @@ function decodePayload(token: string): { app_role?: string; full_name?: string; 
 export async function login(username: string, pin: string): Promise<LoginResult> {
   let res: Response;
   try {
-    res = await fetch('/api/login', {
+    res = await fetch(`${AUTH_BASE}/login`, {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
       body:    JSON.stringify({ username, pin }),
@@ -91,7 +99,7 @@ export async function staffApi<T = unknown>(
   if (!token) return { ok: false, error: 'Not signed in' };
   let res: Response;
   try {
-    res = await fetch('/api/staff', {
+    res = await fetch(`${AUTH_BASE}/staff`, {
       method:  'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
       body:    JSON.stringify({ action, ...payload }),

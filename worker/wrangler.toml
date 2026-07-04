@@ -1,0 +1,18 @@
+# Wrangler config for the standalone auth Worker.
+# Deploy from this folder with:  npx wrangler deploy
+# (or paste auth-worker.js into a new Worker in the Cloudflare dashboard.)
+#
+# The name below determines the URL:
+#   https://aadinath-auth.<your-subdomain>.workers.dev
+# If you change the name, also set NEXT_PUBLIC_AUTH_BASE on the Pages site
+# to the new URL and redeploy the site.
+
+name = "aadinath-auth"
+main = "auth-worker.js"
+compatibility_date = "2026-01-01"
+
+# Secrets are NOT stored here. Set them once with:
+#   npx wrangler secret put SUPABASE_URL
+#   npx wrangler secret put SUPABASE_SERVICE_ROLE_KEY
+#   npx wrangler secret put SUPABASE_JWT_SECRET
+# (or in the dashboard: Worker -> Settings -> Variables and Secrets)
