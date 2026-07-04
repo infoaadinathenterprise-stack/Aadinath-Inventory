@@ -129,7 +129,10 @@ async function requireAuth(request, secret) {
 // ── Supabase REST (service role — bypasses RLS) ──────────────────────────────
 
 function sbFetch(env, path, init = {}) {
-  return fetch(`${env.SUPABASE_URL}/rest/v1/${path}`, {
+  // Tolerate a SUPABASE_URL that has a trailing slash or already includes
+  // /rest/v1 — either would otherwise build an invalid path (PGRST125).
+  const base = String(env.SUPABASE_URL || '').trim().replace(/\/+$/, '').replace(/\/rest\/v1$/, '');
+  return fetch(`${base}/rest/v1/${path}`, {
     ...init,
     headers: {
       apikey:         env.SUPABASE_SERVICE_ROLE_KEY,
@@ -168,7 +171,9 @@ async function handleLogin(request, env) {
     env,
     'app_users?select=user_id,full_name,email,role,active_status,pin_hash&active_status=eq.true',
   );
-  if (!res.ok) return json({ error: 'Login service unavailable' }, 502);
+  // db_status helps diagnose config problems (401/403 = wrong service key,
+  // 404 = wrong URL) without exposing anything sensitive.
+  if (!res.ok) return json({ error: 'Login service unavailable', db_status: res.status }, 502);
   const users = await res.json();
 
   const id = username.toLowerCase();

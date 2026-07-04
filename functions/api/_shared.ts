@@ -147,7 +147,9 @@ export async function requireAuth(request: Request, secret: string): Promise<App
 export async function sbFetch(
   env: AuthEnv, path: string, init: RequestInit & { headers?: Record<string, string> } = {},
 ): Promise<Response> {
-  return fetch(`${env.SUPABASE_URL}/rest/v1/${path}`, {
+  // Tolerate a SUPABASE_URL with a trailing slash or an included /rest/v1.
+  const base = String(env.SUPABASE_URL || '').trim().replace(/\/+$/, '').replace(/\/rest\/v1$/, '');
+  return fetch(`${base}/rest/v1/${path}`, {
     ...init,
     headers: {
       apikey:          env.SUPABASE_SERVICE_ROLE_KEY,
