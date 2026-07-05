@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { formatStock } from '@/lib/formatStock';
-import { upsertStock, logMovement, submitPendingRequest } from '@/lib/stockActions';
+import { stockTxn, submitPendingRequest, type StockOp } from '@/lib/stockActions';
 import type { Product, StockByLoc, AdjAction, LocationInfo, ComponentMap, UserRole } from '@/lib/types';
 
 interface Props {
@@ -182,37 +182,55 @@ export default function AdjustStockModal({
 
       const partnerName = transferLocId ? (locations.find(l => l.location_id === transferLocId)?.location_name ?? '') : '';
 
+      // Build every stock change, then apply them in ONE atomic, race-safe
+      // database transaction (see stockTxn / 03_stock_functions.sql).
+      const ops: StockOp[] = [];
+
       if (selectedAction === 'sold') {
         const newState = deductFrom(curPcs, curBox);
-        const before = curPool;
-        const after  = newState.quantity + newState.box_quantity * ppb;
-        await logMovement(product.product_id, locationId, null, movQty, 'SALE', `Sold from ${locName}`, { before, after });
-        await upsertStock(product.product_id, locationId, newState);
+        ops.push({
+          product_id: product.product_id, location_id: locationId,
+          dq: newState.quantity - curPcs, db: newState.box_quantity - curBox,
+          mov_type: 'SALE', mov_qty: movQty, mov_from: locationId, mov_to: null,
+          reason: `Sold from ${locName}`,
+        });
 
       } else if (selectedAction === 'transfer') {
         const newCur = deductFrom(curPcs, curBox);
         const newDst = addTo(tPcs, tBox);
-        const before = curPool;
-        const after  = newCur.quantity + newCur.box_quantity * ppb;
-        await logMovement(product.product_id, locationId, transferLocId!, movQty, 'TRANSFER', `Transferred from ${locName} to ${partnerName}`, { before, after });
-        await upsertStock(product.product_id, locationId,    newCur);
-        await upsertStock(product.product_id, transferLocId!, newDst);
+        ops.push({
+          product_id: product.product_id, location_id: locationId,
+          dq: newCur.quantity - curPcs, db: newCur.box_quantity - curBox,
+          mov_type: 'TRANSFER', mov_qty: movQty, mov_from: locationId, mov_to: transferLocId!,
+          reason: `Transferred from ${locName} to ${partnerName}`,
+        });
+        ops.push({
+          product_id: product.product_id, location_id: transferLocId!,
+          dq: newDst.quantity - tPcs, db: newDst.box_quantity - tBox,
+        });
 
       } else if (selectedAction === 'receive') {
         const newSrc = deductFrom(tPcs, tBox);
         const newCur = addTo(curPcs, curBox);
-        const before = tPool;
-        const after  = newSrc.quantity + newSrc.box_quantity * ppb;
-        await logMovement(product.product_id, transferLocId!, locationId, movQty, 'TRANSFER', `Transferred from ${partnerName} to ${locName}`, { before, after });
-        await upsertStock(product.product_id, transferLocId!, newSrc);
-        await upsertStock(product.product_id, locationId,     newCur);
+        ops.push({
+          product_id: product.product_id, location_id: transferLocId!,
+          dq: newSrc.quantity - tPcs, db: newSrc.box_quantity - tBox,
+          mov_type: 'TRANSFER', mov_qty: movQty, mov_from: transferLocId!, mov_to: locationId,
+          reason: `Transferred from ${partnerName} to ${locName}`,
+        });
+        ops.push({
+          product_id: product.product_id, location_id: locationId,
+          dq: newCur.quantity - curPcs, db: newCur.box_quantity - curBox,
+        });
 
       } else if (selectedAction === 'stockin') {
         const newState = addTo(curPcs, curBox);
-        const before = curPool;
-        const after  = newState.quantity + newState.box_quantity * ppb;
-        await logMovement(product.product_id, null, locationId, movQty, 'ADJUSTMENT_IN', `Stock added to ${locName}`, { before, after });
-        await upsertStock(product.product_id, locationId, newState);
+        ops.push({
+          product_id: product.product_id, location_id: locationId,
+          dq: newState.quantity - curPcs, db: newState.box_quantity - curBox,
+          mov_type: 'ADJUSTMENT_IN', mov_qty: movQty, mov_from: null, mov_to: locationId,
+          reason: `Stock added to ${locName}`,
+        });
       }
 
       // Components for sold / transfer
@@ -239,21 +257,30 @@ export default function AdjustStockModal({
           const srcPcs  = (stockByLoc[locationId] ?? {})[cid] ?? 0;
           const srcBx   = (boxByLoc[locationId]   ?? {})[cid] ?? 0;
           const newSrc  = deductCompPieces(srcPcs, srcBx, movComp, cPpb);
-          const cBefore = srcPcs + srcBx * cPpb;
-          const cAfter  = newSrc.quantity + newSrc.box_quantity * cPpb;
 
           if (isTransfer) {
-            const dPcs = (stockByLoc[transferLocId!] ?? {})[cid] ?? 0;
-            const dBx  = (boxByLoc[transferLocId!]   ?? {})[cid] ?? 0;
-            await logMovement(cid, locationId, transferLocId!, movComp, 'TRANSFER', `Auto: component of ${product.product_name}`, { before: cBefore, after: cAfter });
-            await upsertStock(cid, locationId,    newSrc);
-            await upsertStock(cid, transferLocId!, { quantity: dPcs + movComp, box_quantity: dBx });
+            ops.push({
+              product_id: cid, location_id: locationId,
+              dq: newSrc.quantity - srcPcs, db: newSrc.box_quantity - srcBx,
+              mov_type: 'TRANSFER', mov_qty: movComp, mov_from: locationId, mov_to: transferLocId!,
+              reason: `Auto: component of ${product.product_name}`,
+            });
+            ops.push({
+              product_id: cid, location_id: transferLocId!,
+              dq: movComp, db: 0,
+            });
           } else {
-            await logMovement(cid, locationId, null, movComp, 'AUTO_DEDUCT', `Auto: component of ${product.product_name}`, { before: cBefore, after: cAfter });
-            await upsertStock(cid, locationId, newSrc);
+            ops.push({
+              product_id: cid, location_id: locationId,
+              dq: newSrc.quantity - srcPcs, db: newSrc.box_quantity - srcBx,
+              mov_type: 'AUTO_DEDUCT', mov_qty: movComp, mov_from: locationId, mov_to: null,
+              reason: `Auto: component of ${product.product_name}`,
+            });
           }
         }
       }
+
+      await stockTxn(ops);
 
       const unitLabel = isBoxUnit ? `box${qty !== 1 ? 'es' : ''}` : `unit${qty !== 1 ? 's' : ''}`;
       const actionLabel: Record<AdjAction, string> = {

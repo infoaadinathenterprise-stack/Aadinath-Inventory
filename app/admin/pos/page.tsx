@@ -7,13 +7,12 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useProducts } from '@/lib/hooks/useProducts';
 import { useProductComponents } from '@/lib/hooks/useProductComponents';
 import { formatStock } from '@/lib/formatStock';
-import { supabase } from '@/lib/supabase';
-import { upsertStock, logMovement } from '@/lib/stockActions';
+import { stockTxn, type StockOp, type SalePayload } from '@/lib/stockActions';
 import AdjustStockModal from '@/app/admin/components/AdjustStockModal';
 import BarcodeScanner   from '@/app/admin/components/BarcodeScanner';
 import Toast, { type ToastState } from '@/app/admin/components/Toast';
 import type { Product, LocationInfo } from '@/lib/types';
-import { SESSION_KEY, USER_KEY } from '@/lib/types';
+import { SESSION_KEY } from '@/lib/types';
 
 // ── Auth guard ─────────────────────────────────────────────────────────────────
 
@@ -302,13 +301,19 @@ function PosDashboard() {
   // differ from the catalog selling_price due to a discount or markup
   // at checkout). It's appended to the movement note so the History
   // page can show what each line actually sold for.
-  async function sellOneItem(
+  // Build the atomic stock operations for selling one cart line. Pure
+  // computation from the current cache — no DB writes here. The ops are a
+  // set of deltas the database applies atomically (see stockTxn). Throws
+  // early if there clearly isn't enough stock, so the user sees a clean
+  // message before anything is attempted.
+  function buildSellOps(
     p: Product,
     qty: number,
     unit: CartUnit,
     sellPrice: number | null,
     groupChoices: Record<string, number> = {},
-  ) {
+  ): StockOp[] {
+    const ops: StockOp[] = [];
     const pid = p.product_id;
     const ppb = p.pieces_per_box ?? 0;
     const isBoxMode = unit === 'box' && ppb > 0;
@@ -352,9 +357,7 @@ function PosDashboard() {
       .filter((c): c is NonNullable<typeof c> => Boolean(c));
     const activeComps = [...alwaysComps, ...pickedFromGroups];
 
-    // ── Pre-validate component stock before ANY DB write ─────────────────
-    // If the combined stock (selling location + other location) is still not
-    // enough, block the entire sale now — no partial DB writes will happen.
+    // ── Pre-validate component stock (friendly early error) ──────────────
     for (const comp of activeComps) {
       const cid       = comp.component_product_id;
       const cPpb      = products.find(pr => pr.product_id === cid)?.pieces_per_box ?? 0;
@@ -381,29 +384,28 @@ function PosDashboard() {
       : '';
 
     if (fromCurPieces > 0) {
-      let newState: { quantity: number; box_quantity: number };
-      if (isBoxMode && fromCurPieces === movPieces) {
-        newState = deductFromLocation(curPcs, curBx, qty, 'box', ppb);
-      } else {
-        newState = deductFromLocation(curPcs, curBx, fromCurPieces, 'piece', ppb);
-      }
-      const before = curPcs + curBx * ppb;
-      const after  = newState.quantity + newState.box_quantity * ppb;
-      await logMovement(pid, locId, null, fromCurPieces, 'SALE', `Sold from ${saleLocName}${priceSuffix}`, { before, after });
-      await upsertStock(pid, locId, newState);
+      const newState = (isBoxMode && fromCurPieces === movPieces)
+        ? deductFromLocation(curPcs, curBx, qty, 'box', ppb)
+        : deductFromLocation(curPcs, curBx, fromCurPieces, 'piece', ppb);
+      ops.push({
+        product_id: pid, location_id: locId,
+        dq: newState.quantity - curPcs, db: newState.box_quantity - curBx,
+        mov_type: 'SALE', mov_qty: fromCurPieces, mov_from: locId, mov_to: null,
+        reason: `Sold from ${saleLocName}${priceSuffix}`,
+      });
     }
 
     if (fromOtherPieces > 0) {
       const newState = deductFromLocation(otherPcs, otherBx, fromOtherPieces, 'piece', ppb);
-      const before = otherPcs + otherBx * ppb;
-      const after  = newState.quantity + newState.box_quantity * ppb;
-      await logMovement(pid, otherId, null, fromOtherPieces, 'SALE', `Sold from ${otherName} (POS overflow)${priceSuffix}`, { before, after });
-      await upsertStock(pid, otherId, newState);
+      ops.push({
+        product_id: pid, location_id: otherId,
+        dq: newState.quantity - otherPcs, db: newState.box_quantity - otherBx,
+        mov_type: 'SALE', mov_qty: fromOtherPieces, mov_from: otherId, mov_to: null,
+        reason: `Sold from ${otherName} (POS overflow)${priceSuffix}`,
+      });
     }
 
-    // ── Deduct components — pull shortfall from other location if needed ──
-    // Same overflow logic as the main product: drain current location first,
-    // then take the remainder from the other location.
+    // ── Components — drain current location first, overflow to the other ──
     for (const comp of activeComps) {
       const cid      = comp.component_product_id;
       const cPpb     = products.find(pr => pr.product_id === cid)?.pieces_per_box ?? 0;
@@ -418,31 +420,38 @@ function PosDashboard() {
       const fromOther = movComp - fromSrc;
 
       if (fromSrc > 0) {
-        const raw    = deductFromLocation(srcPcs, srcBx, fromSrc, 'piece', cPpb);
-        const before = srcTotal;
-        const after  = raw.quantity + raw.box_quantity * cPpb;
-        await logMovement(cid, locId, null, fromSrc, 'AUTO_DEDUCT', `Auto: component of ${p.product_name}`, { before, after });
-        await upsertStock(cid, locId, raw);
+        const raw = deductFromLocation(srcPcs, srcBx, fromSrc, 'piece', cPpb);
+        ops.push({
+          product_id: cid, location_id: locId,
+          dq: raw.quantity - srcPcs, db: raw.box_quantity - srcBx,
+          mov_type: 'AUTO_DEDUCT', mov_qty: fromSrc, mov_from: locId, mov_to: null,
+          reason: `Auto: component of ${p.product_name}`,
+        });
       }
 
       if (fromOther > 0) {
-        const raw    = deductFromLocation(othPcs, othBx, fromOther, 'piece', cPpb);
-        const before = othPcs + othBx * cPpb;
-        const after  = raw.quantity + raw.box_quantity * cPpb;
-        await logMovement(cid, otherId, null, fromOther, 'AUTO_DEDUCT', `Auto: component of ${p.product_name} (pulled from ${otherName})`, { before, after });
-        await upsertStock(cid, otherId, raw);
+        const raw = deductFromLocation(othPcs, othBx, fromOther, 'piece', cPpb);
+        ops.push({
+          product_id: cid, location_id: otherId,
+          dq: raw.quantity - othPcs, db: raw.box_quantity - othBx,
+          mov_type: 'AUTO_DEDUCT', mov_qty: fromOther, mov_from: otherId, mov_to: null,
+          reason: `Auto: component of ${p.product_name} (pulled from ${otherName})`,
+        });
       }
     }
+    return ops;
   }
 
-  // Transfer `qty` of `unit` for `p` from current location to `destLocationId`.
-  async function transferOneItem(
+  // Build the atomic stock operations for transferring one cart line from
+  // the current location to `destLocationId`. Pure computation, no writes.
+  function buildTransferOps(
     p: Product,
     qty: number,
     unit: CartUnit,
     destLocationId: number,
     groupChoices: Record<string, number> = {},
-  ) {
+  ): StockOp[] {
+    const ops: StockOp[] = [];
     const pid = p.product_id;
     const ppb = p.pieces_per_box ?? 0;
     const srcId   = locationId;
@@ -463,9 +472,16 @@ function PosDashboard() {
 
     const newSrc = deductFromLocation(srcPcs, srcBx, qty, unit, ppb);
     const newDst = addToLocation(dstPcs, dstBx, qty, unit);
-    await logMovement(pid, srcId, dstId, movPieces, 'TRANSFER', `Moved from ${srcName} to ${dstName}`, { before: srcTotal, after: newSrc.quantity + newSrc.box_quantity * ppb });
-    await upsertStock(pid, srcId, newSrc);
-    await upsertStock(pid, dstId, newDst);
+    ops.push({
+      product_id: pid, location_id: srcId,
+      dq: newSrc.quantity - srcPcs, db: newSrc.box_quantity - srcBx,
+      mov_type: 'TRANSFER', mov_qty: movPieces, mov_from: srcId, mov_to: dstId,
+      reason: `Moved from ${srcName} to ${dstName}`,
+    });
+    ops.push({
+      product_id: pid, location_id: dstId,
+      dq: newDst.quantity - dstPcs, db: newDst.box_quantity - dstBx,
+    });
 
     // Move components with the product
     const productComps = componentMap[pid] ?? [];
@@ -484,73 +500,42 @@ function PosDashboard() {
         const movComp = movPieces * comp.quantity;
         const cSrcPcs = (stockByLoc[srcId] ?? {})[cid] ?? 0;
         const cSrcBx  = (boxByLoc[srcId]   ?? {})[cid] ?? 0;
-        const cDstPcs = (stockByLoc[dstId] ?? {})[cid] ?? 0;
-        const cDstBx  = (boxByLoc[dstId]   ?? {})[cid] ?? 0;
         const rawSrc = deductFromLocation(cSrcPcs, cSrcBx, movComp, 'piece', cPpb);
-        const newSrcState = { quantity: Math.max(0, rawSrc.quantity), box_quantity: Math.max(0, rawSrc.box_quantity) };
-        const cBefore = cSrcPcs + cSrcBx * cPpb;
-        const cAfter  = newSrcState.quantity + newSrcState.box_quantity * cPpb;
-        await logMovement(cid, srcId, dstId, movComp, 'TRANSFER', `Auto: component of ${p.product_name}`, { before: cBefore, after: cAfter });
-        await upsertStock(cid, srcId, newSrcState);
-        await upsertStock(cid, dstId, { quantity: cDstPcs + movComp, box_quantity: cDstBx });
+        const newSrcQ = Math.max(0, rawSrc.quantity);
+        const newSrcB = Math.max(0, rawSrc.box_quantity);
+        ops.push({
+          product_id: cid, location_id: srcId,
+          dq: newSrcQ - cSrcPcs, db: newSrcB - cSrcBx,
+          mov_type: 'TRANSFER', mov_qty: movComp, mov_from: srcId, mov_to: dstId,
+          reason: `Auto: component of ${p.product_name}`,
+        });
+        ops.push({
+          product_id: cid, location_id: dstId,
+          dq: movComp, db: 0,   // add loose pieces to destination (matches prior behavior)
+        });
       }
     }
+    return ops;
   }
 
-  // Writes a single `sales` row + N `sale_items` rows so each
-  // POS checkout shows up on the Sales page and can be queried for
-  // daily/weekly/monthly totals without parsing movement notes.
-  async function recordSale(items: CartItem[]) {
-    const total = items.reduce((s, i) => s + (i.sellPrice ?? 0) * i.qty, 0);
-    const itemCount = items.reduce((s, i) => s + i.qty, 0);
-    const performedBy = (typeof window !== 'undefined' && localStorage.getItem(USER_KEY)) || 'Admin';
-    const locId = locationId;
-
-    const { data: saleRow, error: saleErr } = await supabase.from('sales').insert({
+  // Build the sales header + line items payload for a checkout. The actual
+  // insert happens inside stockTxn so it's atomic with the stock changes.
+  function buildSalePayload(items: CartItem[]): SalePayload {
+    return {
       sale_date:    new Date().toISOString().split('T')[0],
-      performed_by: performedBy,
-      location_id:  locId,
-      total_amount: total,
-      item_count:   itemCount,
-      status:       'COMPLETED',
-    }).select('sale_id').single();
-    if (saleErr || !saleRow) {
-      // Don't fail the whole checkout if the sales-table write fails —
-      // the stock + movement already happened. Show a warning instead.
-      showToast('Sale recorded for stock but not the Sales journal: ' + (saleErr?.message ?? 'no row returned'), 'error');
-      return;
-    }
-    const saleId = (saleRow as { sale_id: number }).sale_id;
-
-    // Snapshot product names AND cost prices so the Sales page can
-    // compute profit-at-time-of-sale correctly even if the product's
-    // buying_price is updated later.
-    const rows = items.map(i => ({
-      sale_id:      saleId,
-      product_id:   i.product.product_id,
-      product_name: i.product.product_name,
-      quantity:     i.qty,
-      unit:         unitLabel(i.product, i.unit),
-      unit_price:   i.sellPrice ?? null,
-      cost_price:   i.product.buying_price ?? null,
-      line_total:   i.sellPrice != null ? i.sellPrice * i.qty : null,
-    }));
-    let { error: itemsErr } = await supabase.from('sale_items').insert(rows);
-    // Older deployments don't have the cost_price column yet. Schema
-    // cache errors come back as "Could not find the 'cost_price'
-    // column of 'sale_items'…" — strip it and retry so line items
-    // still land in the DB and the Sales page shows the breakdown.
-    if (itemsErr && /cost_price/i.test(itemsErr.message)) {
-      const rowsNoCost = rows.map(({ cost_price: _cp, ...rest }) => rest);
-      const retry = await supabase.from('sale_items').insert(rowsNoCost);
-      itemsErr = retry.error;
-      if (!itemsErr) {
-        showToast('Line items saved without cost_price. Run the migration to enable profit tracking.', 'error');
-      }
-    }
-    if (itemsErr) {
-      showToast('Sale header saved but line items failed: ' + itemsErr.message, 'error');
-    }
+      location_id:  locationId,
+      total_amount: items.reduce((s, i) => s + (i.sellPrice ?? 0) * i.qty, 0),
+      item_count:   items.reduce((s, i) => s + i.qty, 0),
+      items: items.map(i => ({
+        product_id:   i.product.product_id,
+        product_name: i.product.product_name,
+        quantity:     i.qty,
+        unit:         unitLabel(i.product, i.unit),
+        unit_price:   i.sellPrice ?? null,
+        cost_price:   i.product.buying_price ?? null,
+        line_total:   i.sellPrice != null ? i.sellPrice * i.qty : null,
+      })),
+    };
   }
 
   function getMissingChoices(item: CartItem): string[] {
@@ -576,14 +561,15 @@ function PosDashboard() {
     }
     setProcessing(true);
     try {
+      // Build every stock change for the whole cart, then apply them in ONE
+      // atomic transaction (with the sale). Nothing is half-written.
+      const ops: StockOp[] = [];
       for (const item of cart) {
-        if (action === 'sold') {
-          await sellOneItem(item.product, item.qty, item.unit, item.sellPrice, item.groupChoices);
-        } else {
-          await transferOneItem(item.product, item.qty, item.unit, item.transferDestId!, item.groupChoices);
-        }
+        ops.push(...(action === 'sold'
+          ? buildSellOps(item.product, item.qty, item.unit, item.sellPrice, item.groupChoices)
+          : buildTransferOps(item.product, item.qty, item.unit, item.transferDestId!, item.groupChoices)));
       }
-      if (action === 'sold') await recordSale(cart);
+      await stockTxn(ops, action === 'sold' ? buildSalePayload(cart) : null);
       showToast(`${action === 'sold' ? 'Sold' : 'Moved'} ${cart.length} item(s) ✓`, 'success');
       // Restock alert: after a sale, show items available elsewhere
       if (action === 'sold') {
@@ -603,6 +589,7 @@ function PosDashboard() {
       setTimeout(() => barcodeRef.current?.focus(), 100);
     } catch (e) {
       showToast(e instanceof Error ? e.message : 'Error processing cart', 'error');
+      refresh();  // re-sync stock so a retry uses fresh numbers (nothing was written)
     } finally {
       setProcessing(false);
     }
@@ -620,12 +607,10 @@ function PosDashboard() {
     }
     setProcessing(true);
     try {
-      if (action === 'sold') {
-        await sellOneItem(item.product, item.qty, item.unit, item.sellPrice, item.groupChoices);
-        await recordSale([item]);
-      } else {
-        await transferOneItem(item.product, item.qty, item.unit, item.transferDestId!, item.groupChoices);
-      }
+      const ops = action === 'sold'
+        ? buildSellOps(item.product, item.qty, item.unit, item.sellPrice, item.groupChoices)
+        : buildTransferOps(item.product, item.qty, item.unit, item.transferDestId!, item.groupChoices);
+      await stockTxn(ops, action === 'sold' ? buildSalePayload([item]) : null);
       setCart(c => c.filter(i => i.product.product_id !== item.product.product_id));
       showToast(`${action === 'sold' ? 'Sold' : 'Moved'}: ${item.product.product_name} ✓`, 'success');
       if (action === 'sold') {
@@ -637,6 +622,7 @@ function PosDashboard() {
       refresh();
     } catch (e) {
       showToast(e instanceof Error ? e.message : 'Error', 'error');
+      refresh();  // re-sync stock so a retry uses fresh numbers (nothing was written)
     } finally {
       setProcessing(false);
     }

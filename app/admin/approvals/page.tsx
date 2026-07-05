@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import { supabase } from '@/lib/supabase';
-import { upsertStock } from '@/lib/stockActions';
+import { approveRequest, rejectRequest } from '@/lib/stockActions';
 import { SESSION_KEY, ROLE_KEY } from '@/lib/types';
 import type { Product } from '@/lib/types';
 import AdminNavbar from '../components/AdminNavbar';
@@ -76,22 +76,9 @@ export default function ApprovalsPage() {
   async function approve(req: PendingRequest) {
     setActing(req.request_id);
     try {
-      const locId = req.to_location_id ?? 1;
-      // Read current stock first
-      const { data: stockRow } = await supabase
-        .from('stock_by_location')
-        .select('quantity, box_quantity')
-        .eq('product_id', req.product_id)
-        .eq('location_id', locId)
-        .single();
-      const curQty = (stockRow as { quantity: number; box_quantity: number } | null)?.quantity ?? 0;
-      // Add as loose pieces
-      await upsertStock(req.product_id, locId, { quantity: curQty + req.quantity });
-      // Mark approved
-      await supabase
-        .from('stock_requests')
-        .update({ status: 'APPROVED', approved_at: new Date().toISOString() })
-        .eq('request_id', req.request_id);
+      // One atomic DB function: locks the request, guards against double-approval,
+      // adds the stock, and marks it approved.
+      await approveRequest(req.request_id);
       showToast('Approved ✓ — stock updated', 'success');
       setRequests(r => r.filter(x => x.request_id !== req.request_id));
     } catch (e) {
@@ -104,10 +91,7 @@ export default function ApprovalsPage() {
   async function reject(req: PendingRequest) {
     setActing(req.request_id);
     try {
-      await supabase
-        .from('stock_requests')
-        .update({ status: 'REJECTED', approved_at: new Date().toISOString() })
-        .eq('request_id', req.request_id);
+      await rejectRequest(req.request_id);
       showToast('Request rejected', 'success');
       setRequests(r => r.filter(x => x.request_id !== req.request_id));
     } catch (e) {
