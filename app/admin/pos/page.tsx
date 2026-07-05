@@ -251,28 +251,43 @@ function PosDashboard() {
     }
   }
 
+  // Match a scanned / typed barcode EXACTLY: SKU first, then exact product
+  // name. No fuzzy "name contains code" fallback — that could silently grab
+  // and sell the wrong product. If more than one product matches, we refuse
+  // rather than guess.
+  function findByCode(code: string): { match: Product | null; ambiguous: boolean } {
+    const c = code.trim().toLowerCase();
+    if (!c) return { match: null, ambiguous: false };
+    const bySku = products.filter(p => (p.stock_keeping_unit ?? '').trim().toLowerCase() === c);
+    if (bySku.length === 1) return { match: bySku[0], ambiguous: false };
+    if (bySku.length > 1)   return { match: null, ambiguous: true };
+    const byName = products.filter(p => p.product_name.trim().toLowerCase() === c);
+    if (byName.length === 1) return { match: byName[0], ambiguous: false };
+    if (byName.length > 1)   return { match: null, ambiguous: true };
+    return { match: null, ambiguous: false };
+  }
+
+  function resolveScan(code: string): Product | null {
+    const { match, ambiguous } = findByCode(code);
+    if (ambiguous) { showToast(`More than one product matches "${code}" — use search instead`, 'error'); return null; }
+    if (!match) { showToast('No product found: ' + code, 'error'); return null; }
+    const hasStock = (sm[match.product_id] || 0) > 0 || (bm[match.product_id] || 0) > 0;
+    if (!hasStock) { showToast(`Not in ${locName}: ${match.product_name}`, 'error'); return null; }
+    return match;
+  }
+
   function handleBarcodeKey(e: React.KeyboardEvent<HTMLInputElement>) {
     if (e.key !== 'Enter') return;
     const code = e.currentTarget.value.trim();
     e.currentTarget.value = '';
     if (!code) return;
-    const match =
-      products.find(p => (p.stock_keeping_unit ?? '').toLowerCase() === code.toLowerCase()) ??
-      products.find(p => p.product_name.toLowerCase().includes(code.toLowerCase()));
-    if (!match) { showToast('No product found: ' + code, 'error'); return; }
-    const hasStock = (sm[match.product_id] || 0) > 0 || (bm[match.product_id] || 0) > 0;
-    if (!hasStock) { showToast(`Not in ${locName}: ${match.product_name}`, 'error'); return; }
-    addToCart(match);
+    const match = resolveScan(code);
+    if (match) addToCart(match);
   }
 
   function handleScan(code: string) {
-    const match =
-      products.find(p => (p.stock_keeping_unit ?? '').toLowerCase() === code.toLowerCase()) ??
-      products.find(p => p.product_name.toLowerCase().includes(code.toLowerCase()));
-    if (!match) { showToast('No product found: ' + code, 'error'); return; }
-    const hasStock = (sm[match.product_id] || 0) > 0 || (bm[match.product_id] || 0) > 0;
-    if (!hasStock) { showToast(`Not in ${locName}: ${match.product_name}`, 'error'); return; }
-    addToCart(match);
+    const match = resolveScan(code);
+    if (match) addToCart(match);
   }
 
   function openModal(product: Product, direction: 'plus' | 'minus') {

@@ -6,7 +6,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { supabase } from '@/lib/supabase';
 import type { Purchase, PurchaseItem, Supplier, Product, LocationInfo } from '@/lib/types';
 import { SESSION_KEY, ROLE_KEY } from '@/lib/types';
-import { logMovement } from '@/lib/stockActions';
+import { logMovement, stockTxn } from '@/lib/stockActions';
 import AdminNavbar from '../components/AdminNavbar';
 import Toast, { type ToastState } from '../components/Toast';
 
@@ -245,35 +245,36 @@ function PurchasesDashboard() {
       // ghost row.
       const productsToRetire: number[] = [];
 
-      // Reverse stock for every item that hit stock_by_location at
-      // save time. product_name_raw rows had no stock impact, so skip
-      // those. We can't perfectly know which location was used (we
-      // dropped that column earlier), so subtract from wherever the
-      // item currently has at least row.qty available, preferring
-      // back godown first then main store.
+      // Reverse stock for every item that hit stock_by_location at save
+      // time. product_name_raw rows had no stock impact, so skip those.
+      // Reverse from the location the item was purchased into (now recorded
+      // on the purchase_items row). Old rows with no location fall back to
+      // draining in the known order. Uses the atomic engine so the reversal
+      // is row-locked, logged, and never pushes below zero (stock may have
+      // sold since the purchase).
       const drainOrder = locations.length > 0 ? locations.map(l => l.location_id) : [2, 1];
       for (const it of data.items) {
         if (!it.product_id || !it.quantity) continue;
-        const qty = it.quantity;
-        for (const locId of drainOrder) {
+        const targetLocs = it.location_id != null ? [it.location_id] : drainOrder;
+        let remaining = it.quantity;
+        for (const locId of targetLocs) {
+          if (remaining <= 0) break;
           const { data: row } = await supabase
             .from('stock_by_location')
-            .select('id, quantity')
+            .select('quantity')
             .eq('product_id', it.product_id)
             .eq('location_id', locId)
             .maybeSingle();
-          if (!row) continue;
-          const current = row.quantity ?? 0;
-          if (current >= qty) {
-            await supabase.from('stock_by_location').update({ quantity: current - qty }).eq('id', row.id);
-            break;
-          }
-          // Partial — drain this row and continue with the remainder
-          // on the other location.
-          if (current > 0) {
-            await supabase.from('stock_by_location').update({ quantity: 0 }).eq('id', row.id);
-            // (Remainder of qty stays uncovered if no location has
-            // enough stock; we don't go negative.)
+          const current = row?.quantity ?? 0;
+          const take = Math.min(remaining, current);
+          if (take > 0) {
+            await stockTxn([{
+              product_id: it.product_id, location_id: locId,
+              dq: -take, db: 0,
+              mov_type: 'ADJUSTMENT_OUT', mov_qty: take, mov_from: locId, mov_to: null,
+              reason: `Reversed purchase #${data.purchase.purchase_id} (deleted)`,
+            }]);
+            remaining -= take;
           }
         }
 
@@ -804,6 +805,7 @@ function EditPurchaseModal({
           quantity:         row.qty,
           unit_price:       row.unitPrice,
           total_price:      totalPrice,
+          location_id:      row.locationId,   // record WHERE the stock landed, so deletion reverses the right location
           tax_inclusive:    row.taxInclusive,
           discount_pct:     row.discountPct,
         });
@@ -1460,6 +1462,7 @@ ${rawText}`;
           quantity:         row.qty,
           unit_price:       row.unitPrice,
           total_price:      totalPrice,
+          location_id:      row.locationId,   // record WHERE the stock landed, so deletion reverses the right location
           tax_inclusive:    row.taxInclusive,
           discount_pct:     row.discountPct,
         });

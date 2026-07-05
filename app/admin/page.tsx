@@ -394,9 +394,19 @@ function ProductModal({
         if (error) throw error;
         productId = editing.product_id;
       } else {
-        const { data, error } = await supabase.from('products').insert(payload).select('product_id').single();
+        // Insert first WITHOUT the SKU (which was guessed from a predicted
+        // id and could collide with another product created at the same
+        // time), then set a collision-free SKU derived from the real,
+        // unique product_id.
+        const { data, error } = await supabase.from('products')
+          .insert({ ...payload, stock_keeping_unit: null })
+          .select('product_id').single();
         if (error || !data) throw error ?? new Error('No product returned');
         productId = (data as { product_id: number }).product_id;
+        const finalSku = generateSKU(form.type.trim(), form.brand.trim(), products, productId);
+        if (finalSku) {
+          await supabase.from('products').update({ stock_keeping_unit: finalSku }).eq('product_id', productId);
+        }
       }
 
       // Write stock for every location. The form value is the TOTAL
