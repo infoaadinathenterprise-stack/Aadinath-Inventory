@@ -19,6 +19,28 @@ returns boolean language sql stable as $$
   select public.app_role() = 'admin'
 $$;
 
+-- Clean slate: drop every existing policy on the tables we manage, so old
+-- policies (e.g. an anon-only read policy that blocks logged-in users, or a
+-- leftover open write policy) can't linger and conflict with the ones below.
+do $$
+declare
+  t text;
+  pol record;
+  tbls text[] := array[
+    'products','locations','stock_by_location','product_components',
+    'stock_requests','stock_movements','sales','sale_items','withdrawals',
+    'purchases','purchase_items','suppliers','app_users'
+  ];
+begin
+  foreach t in array tbls loop
+    if to_regclass('public.' || t) is not null then
+      for pol in select policyname from pg_policies where schemaname = 'public' and tablename = t loop
+        execute format('drop policy %I on public.%I', pol.policyname, t);
+      end loop;
+    end if;
+  end loop;
+end $$;
+
 -- ── products ────────────────────────────────────────────────────────────────
 -- Public storefront reads them. Only admins create/edit. No hard deletes
 -- (the app soft-deletes via active_status = false).
@@ -72,6 +94,11 @@ drop policy if exists p_req_upd  on public.stock_requests;
 create policy p_req_read on public.stock_requests for select using (public.app_role() in ('admin','staff'));
 create policy p_req_ins  on public.stock_requests for insert with check (public.app_role() in ('admin','staff'));
 create policy p_req_upd  on public.stock_requests for update using (public.is_admin()) with check (public.is_admin());
+
+-- ── stock_movements (legacy movement log read by the History page) ──────────
+alter table public.stock_movements enable row level security;
+create policy p_mov_read on public.stock_movements for select using (public.app_role() in ('admin','staff'));
+create policy p_mov_ins  on public.stock_movements for insert with check (public.app_role() in ('admin','staff'));
 
 -- ── sales ───────────────────────────────────────────────────────────────────
 -- Any logged-in user records a sale (POS). Staff can read back only their
