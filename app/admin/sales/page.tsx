@@ -220,12 +220,14 @@ function SalesDashboard() {
   async function addWithdrawal() {
     const amt = parseFloat(wAmount);
     if (!amt || amt <= 0) { showToast('Enter a positive amount', 'error'); return; }
+    if (!wReason.trim())  { showToast('Enter a reason for the withdrawal', 'error'); return; }
     setWSaving(true);
-    const { error: e } = await supabase.from('withdrawals').insert({
-      withdrawal_date: day,
-      amount:          amt,
-      reason:          wReason.trim() || null,
-      performed_by:    (typeof window !== 'undefined' && localStorage.getItem(USER_KEY)) || 'Admin',
+    // Server RPC records the actor from the signed login token (can't be
+    // attributed to someone else) and enforces the reason + positive amount.
+    const { error: e } = await supabase.rpc('add_withdrawal', {
+      p_amount: amt,
+      p_reason: wReason.trim(),
+      p_date:   day,
     });
     setWSaving(false);
     if (e) { showToast('Could not record: ' + e.message, 'error'); return; }
@@ -246,10 +248,16 @@ function SalesDashboard() {
   }
 
   async function voidSale(sale: Sale) {
-    if (!window.confirm(`Void this sale?\n\nTotal: ${fmtKsh(sale.total_amount)}\n${sale.item_count} item(s)\n\nThis marks the sale as voided in the journal. It does NOT restock the items — adjust inventory manually if needed.`)) return;
-    const { error: e } = await supabase.from('sales').update({ status: 'VOIDED' }).eq('sale_id', sale.sale_id);
+    const reason = window.prompt(
+      `Void this sale (${fmtKsh(sale.total_amount)}, ${sale.item_count} item(s))?\n\n` +
+      `This REVERSES the sale: the items are put back into stock, and the void is ` +
+      `logged with your name, the time, and this reason.\n\nEnter a reason:`,
+    );
+    if (reason == null) return;                 // cancelled
+    if (!reason.trim()) { showToast('A reason is required to void a sale', 'error'); return; }
+    const { error: e } = await supabase.rpc('void_sale', { p_sale_id: sale.sale_id, p_reason: reason.trim() });
     if (e) { showToast('Could not void: ' + e.message, 'error'); return; }
-    showToast('Sale voided ✓', 'success');
+    showToast('Sale voided & items restocked ✓', 'success');
     load();
   }
 

@@ -35,7 +35,7 @@ export interface LocationInfo {
   active_status: boolean;
 }
 
-export type AdjAction = 'sold' | 'transfer' | 'receive' | 'stockin';
+export type AdjAction = 'sold' | 'writeoff' | 'transfer' | 'receive' | 'stockin';
 
 /** @deprecated use location_id (number) directly */
 export type Location = number;

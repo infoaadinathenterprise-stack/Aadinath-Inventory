@@ -26,7 +26,11 @@ type AdjUnit = 'piece' | 'box';
 
 function getActions(direction: 'plus' | 'minus'): { key: AdjAction; icon: string; label: string }[] {
   if (direction === 'minus') return [
-    { key: 'sold',     icon: '💰', label: 'Sold' },
+    // "Sold" was removed: selling from here bypassed the Sales journal (no
+    // revenue recorded). Real sales go through the POS. This is only for
+    // legitimate losses — breakage, expiry, theft write-off — and needs a
+    // reason so it's an accountable, visible loss rather than a quiet exit.
+    { key: 'writeoff', icon: '🗑️', label: 'Write-off' },
     { key: 'transfer', icon: '📦', label: 'Transfer to…' },
   ];
   return [
@@ -48,6 +52,7 @@ export default function AdjustStockModal({
   const [qty,            setQty]            = useState(1);
   const [saving,         setSaving]         = useState(false);
   const [groupChoices,   setGroupChoices]   = useState<Record<string, number>>({});
+  const [writeoffReason, setWriteoffReason] = useState('');
 
   if (!product || !direction) return null;
 
@@ -134,14 +139,14 @@ export default function AdjustStockModal({
     if (needsPartner && !transferLocId) { onError('Select a destination location'); return; }
 
     // Validate component choice groups
-    if (selectedAction === 'sold' || selectedAction === 'transfer') {
+    if (selectedAction === 'writeoff' || selectedAction === 'transfer') {
       for (const g of choiceGroupNames) {
         if (groupChoices[g] == null) { onError(`Pick a ${g} before confirming`); return; }
       }
     }
 
     // Stock sufficiency checks
-    if ((selectedAction === 'sold' || selectedAction === 'transfer') && movQty > curPool) {
+    if ((selectedAction === 'writeoff' || selectedAction === 'transfer') && movQty > curPool) {
       onError(`Not enough stock at ${locName}`); return;
     }
     if (selectedAction === 'receive' && movQty > tPool) {
@@ -149,8 +154,13 @@ export default function AdjustStockModal({
       onError(`Not enough stock at ${partnerName}`); return;
     }
 
+    // A write-off is a loss — require a reason so it's accountable.
+    if (selectedAction === 'writeoff' && !writeoffReason.trim()) {
+      onError('Enter a reason for the write-off (e.g. damaged, expired)'); return;
+    }
+
     // Component validation for outbound actions
-    if (selectedAction === 'sold' || selectedAction === 'transfer') {
+    if (selectedAction === 'writeoff' || selectedAction === 'transfer') {
       const pickedCheck = choiceGroupNames
         .map(g => choiceGroupMap[g].find(c => c.component_product_id === groupChoices[g]))
         .filter((c): c is NonNullable<typeof c> => Boolean(c));
@@ -186,13 +196,13 @@ export default function AdjustStockModal({
       // database transaction (see stockTxn / 03_stock_functions.sql).
       const ops: StockOp[] = [];
 
-      if (selectedAction === 'sold') {
+      if (selectedAction === 'writeoff') {
         const newState = deductFrom(curPcs, curBox);
         ops.push({
           product_id: product.product_id, location_id: locationId,
           dq: newState.quantity - curPcs, db: newState.box_quantity - curBox,
-          mov_type: 'SALE', mov_qty: movQty, mov_from: locationId, mov_to: null,
-          reason: `Sold from ${locName}`,
+          mov_type: 'DAMAGED', mov_qty: movQty, mov_from: locationId, mov_to: null,
+          reason: `Write-off: ${writeoffReason.trim()}`,
         });
 
       } else if (selectedAction === 'transfer') {
@@ -234,7 +244,7 @@ export default function AdjustStockModal({
       }
 
       // Components for sold / transfer
-      if (selectedAction === 'sold' || selectedAction === 'transfer') {
+      if (selectedAction === 'writeoff' || selectedAction === 'transfer') {
         const isTransfer = selectedAction === 'transfer';
         const pickedFromGroups = choiceGroupNames
           .map(g => choiceGroupMap[g].find(c => c.component_product_id === groupChoices[g]))
@@ -284,7 +294,7 @@ export default function AdjustStockModal({
 
       const unitLabel = isBoxUnit ? `box${qty !== 1 ? 'es' : ''}` : `unit${qty !== 1 ? 's' : ''}`;
       const actionLabel: Record<AdjAction, string> = {
-        sold: 'Sold', transfer: 'Transferred', receive: 'Received', stockin: 'Stock added',
+        sold: 'Sold', writeoff: 'Written off', transfer: 'Transferred', receive: 'Received', stockin: 'Stock added',
       };
       onSuccess(`${actionLabel[selectedAction]} — ${qty} ${unitLabel}`);
       onClose();
@@ -392,7 +402,7 @@ export default function AdjustStockModal({
           )}
 
           {/* Component pickers */}
-          {selectedAction && (selectedAction === 'sold' || selectedAction === 'transfer') && productComponents.length > 0 && (
+          {selectedAction && (selectedAction === 'writeoff' || selectedAction === 'transfer') && productComponents.length > 0 && (
             <div className="mb-4 flex flex-col gap-2">
               {alwaysComps.length > 0 && (
                 <div className="rounded-xl bg-surface2 border border-white/8 px-3 py-2.5">
@@ -429,6 +439,21 @@ export default function AdjustStockModal({
                   </div>
                 );
               })}
+            </div>
+          )}
+
+          {selectedAction === 'writeoff' && (
+            <div className="mb-4">
+              <p className="text-[10px] font-bold text-muted uppercase tracking-widest mb-2">Reason for write-off *</p>
+              <input
+                value={writeoffReason}
+                onChange={e => setWriteoffReason(e.target.value)}
+                placeholder="e.g. damaged, expired, breakage"
+                className="w-full px-3 py-2.5 rounded-xl bg-surface2 border border-white/8 text-slate-100 text-sm placeholder:text-muted/40 outline-none focus:border-danger/40 transition-colors"
+              />
+              <p className="text-[10px] text-muted/70 mt-1 leading-relaxed">
+                This records a <b>loss</b> (not a sale). For an actual sale, use the POS so revenue is recorded.
+              </p>
             </div>
           )}
 
