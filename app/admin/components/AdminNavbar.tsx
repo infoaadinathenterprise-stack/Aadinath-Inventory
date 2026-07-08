@@ -13,6 +13,7 @@ interface Props {
 const ALL_LINKS = [
   { emoji: '📦', label: 'Inventory', href: '/admin',                   roles: ['admin', 'staff'] as UserRole[] },
   { emoji: '💲', label: 'Pricing',   href: '/admin/pricing',           roles: ['admin'] as UserRole[] },
+  { emoji: '🖼️', label: 'Images',    href: '/admin/images',            roles: ['admin'] as UserRole[] },
   { emoji: '📊', label: 'Stats',     href: '/admin/stats',             roles: ['admin'] as UserRole[] },
   { emoji: '🛒', label: 'Sales',     href: '/admin/sales',             roles: ['admin'] as UserRole[] },
   { emoji: '📋', label: 'History',   href: '/admin/history',           roles: ['admin'] as UserRole[] },
