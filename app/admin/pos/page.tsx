@@ -1316,6 +1316,9 @@ function PosProductCard({ product: p, index, locationId, locations, stockByLoc, 
           </span>
           {meta && <span className="truncate">{meta}</span>}
         </p>
+        {p.selling_price != null && (
+          <p className="text-[12px] font-bold text-gold mt-1.5">Ksh {p.selling_price.toLocaleString('en-KE')}</p>
+        )}
       </div>
 
       {/* Stock status + tap controls */}
