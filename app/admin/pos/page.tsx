@@ -1013,10 +1013,10 @@ function PosDashboard() {
                         className="w-7 h-7 rounded bg-surface border border-white/10 text-slate-300 text-sm font-bold flex items-center justify-center hover:bg-danger/20 hover:text-danger transition-all"
                       >−</button>
                       <input
-                        type="number"
-                        min={1}
-                        max={max}
+                        type="text"
+                        inputMode="numeric"
                         value={item.qty}
+                        onFocus={e => e.currentTarget.select()}
                         onChange={e => {
                           const raw = parseInt(e.target.value) || 1;
                           const v = Math.max(1, Math.min(raw, max));
@@ -1050,11 +1050,11 @@ function PosDashboard() {
                     <div className="flex items-center gap-2 mb-2">
                       <span className="text-[9px] font-bold text-muted uppercase tracking-widest shrink-0">@ Ksh</span>
                       <input
-                        type="number"
-                        min={0}
-                        step="0.01"
+                        type="text"
+                        inputMode="decimal"
                         value={item.sellPrice ?? ''}
                         placeholder="0.00"
+                        onFocus={e => e.currentTarget.select()}
                         onChange={e => {
                           const v = e.target.value === '' ? null : parseFloat(e.target.value);
                           setCart(c => c.map(i => i.product.product_id === item.product.product_id ? { ...i, sellPrice: Number.isNaN(v) ? null : v } : i));

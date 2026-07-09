@@ -463,7 +463,8 @@ export default function AdjustStockModal({
           <div className="flex items-center gap-3 mb-5">
             <button onClick={() => setQty(q => Math.max(1, q - 1))}
               className="w-11 h-11 rounded-xl border border-white/8 bg-surface2 text-slate-100 text-2xl font-bold flex items-center justify-center hover:border-teal/40 transition-colors">−</button>
-            <input type="number" min={1} value={qty}
+            <input type="text" inputMode="numeric" value={qty}
+              onFocus={e => e.currentTarget.select()}
               onChange={e => setQty(Math.max(1, parseInt(e.target.value) || 1))}
               onWheel={e => e.currentTarget.blur()}
               className="flex-1 text-center text-2xl font-bold bg-surface2 border border-white/10 rounded-xl py-2.5 text-slate-100 outline-none focus:border-teal/50 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
