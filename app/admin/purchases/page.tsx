@@ -930,7 +930,8 @@ function EditPurchaseModal({
                       <div>
                         <label className="text-[9px] font-bold text-muted uppercase block mb-0.5">Qty</label>
                         <input
-                          type="number" min={1} value={row.qty}
+                          type="text" inputMode="numeric" value={row.qty}
+                          onFocus={e => e.currentTarget.select()}
                           onChange={e => updateRow(row.rowKey, { qty: Math.max(1, parseInt(e.target.value) || 1) })}
                           onWheel={e => e.currentTarget.blur()}
                           className="w-full px-2 py-1.5 rounded-lg bg-surface border border-white/8 text-slate-100 text-xs outline-none focus:border-teal/40"
@@ -944,8 +945,9 @@ function EditPurchaseModal({
                       <div>
                         <label className="text-[9px] font-bold text-muted uppercase block mb-0.5">Unit Price (Ksh)</label>
                         <input
-                          type="number" min={0} step="0.01" value={row.unitPrice ?? ''}
+                          type="text" inputMode="decimal" value={row.unitPrice ?? ''}
                           placeholder="0.00"
+                          onFocus={e => e.currentTarget.select()}
                           onChange={e => updateRow(row.rowKey, { unitPrice: e.target.value ? parseFloat(e.target.value) : null })}
                           onWheel={e => e.currentTarget.blur()}
                           className="w-full px-2 py-1.5 rounded-lg bg-surface border border-white/8 text-slate-100 text-xs outline-none focus:border-teal/40"
@@ -954,8 +956,9 @@ function EditPurchaseModal({
                       <div>
                         <label className="text-[9px] font-bold text-muted uppercase block mb-0.5">Discount %</label>
                         <input
-                          type="number" min={0} max={100} step="0.5" value={row.discountPct || ''}
+                          type="text" inputMode="decimal" value={row.discountPct || ''}
                           placeholder="0"
+                          onFocus={e => e.currentTarget.select()}
                           onChange={e => updateRow(row.rowKey, { discountPct: Math.min(100, Math.max(0, parseFloat(e.target.value) || 0)) })}
                           onWheel={e => e.currentTarget.blur()}
                           className="w-full px-2 py-1.5 rounded-lg bg-surface border border-white/8 text-slate-100 text-xs outline-none focus:border-gold/50"
@@ -1823,7 +1826,8 @@ function ItemRowEditor({
         <div>
           <label className="text-[9px] font-bold text-muted uppercase block mb-0.5">Qty</label>
           <input
-            type="number" min={1} value={row.qty}
+            type="text" inputMode="numeric" value={row.qty}
+            onFocus={e => e.currentTarget.select()}
             onChange={e => onChange({ qty: Math.max(1, parseInt(e.target.value) || 1) })}
             onWheel={e => e.currentTarget.blur()}
             className="w-full px-2 py-1.5 rounded-lg bg-surface border border-white/8 text-slate-100 text-xs outline-none focus:border-teal/40"
@@ -1832,8 +1836,9 @@ function ItemRowEditor({
         <div>
           <label className="text-[9px] font-bold text-muted uppercase block mb-0.5">Unit Price (Ksh)</label>
           <input
-            type="number" min={0} step="0.01" value={row.unitPrice ?? ''}
+            type="text" inputMode="decimal" value={row.unitPrice ?? ''}
             placeholder="0.00"
+            onFocus={e => e.currentTarget.select()}
             onChange={e => onChange({ unitPrice: e.target.value ? parseFloat(e.target.value) : null })}
             onWheel={e => e.currentTarget.blur()}
             className="w-full px-2 py-1.5 rounded-lg bg-surface border border-white/8 text-slate-100 text-xs outline-none focus:border-teal/40"
@@ -1842,8 +1847,9 @@ function ItemRowEditor({
         <div>
           <label className="text-[9px] font-bold text-muted uppercase block mb-0.5">Discount %</label>
           <input
-            type="number" min={0} max={100} step="0.5" value={row.discountPct || ''}
+            type="text" inputMode="decimal" value={row.discountPct || ''}
             placeholder="0"
+            onFocus={e => e.currentTarget.select()}
             onChange={e => onChange({ discountPct: Math.min(100, Math.max(0, parseFloat(e.target.value) || 0)) })}
             onWheel={e => e.currentTarget.blur()}
             className="w-full px-2 py-1.5 rounded-lg bg-surface border border-white/8 text-slate-100 text-xs outline-none focus:border-gold/50"
