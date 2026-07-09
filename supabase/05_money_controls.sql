@@ -91,7 +91,7 @@ begin
   if p_sale is not null then
     insert into sales(sale_date, performed_by, location_id, total_amount, item_count, notes, status)
     values (
-      coalesce(p_sale->>'sale_date', to_char(now(), 'YYYY-MM-DD')),
+      coalesce(nullif(p_sale->>'sale_date', ''), to_char(now(), 'YYYY-MM-DD'))::date,
       v_user,
       nullif(p_sale->>'location_id', '')::int,
       coalesce((p_sale->>'total_amount')::numeric, 0),
