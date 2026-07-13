@@ -35,6 +35,18 @@ export interface LocationInfo {
   active_status: boolean;
 }
 
+export interface Company {
+  company_id:    number;
+  company_name:  string;
+  active_status: boolean;
+}
+
+// Aadinath owns all pre-existing stock. Jay Aadinath is company 2.
+export const DEFAULT_COMPANY_ID = 1;
+
+// Per-company stock: company_id → location_id → product_id → qty
+export type StockByCompany = Record<number, StockByLoc>;
+
 export type AdjAction = 'sold' | 'writeoff' | 'transfer' | 'receive' | 'stockin';
 
 /** @deprecated use location_id (number) directly */
