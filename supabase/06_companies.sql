@@ -34,7 +34,7 @@ begin
   for r in
     select conname from pg_constraint
     where conrelid = 'public.stock_by_location'::regclass and contype = 'u'
-      and (select array(select a.attname from unnest(conkey) as k(attnum)
+      and (select array(select a.attname::text from unnest(conkey) as k(attnum)
                         join pg_attribute a on a.attrelid = conrelid and a.attnum = k.attnum
                         order by a.attname)) = array['location_id','product_id']
   loop
@@ -45,7 +45,7 @@ begin
     join pg_class ic on ic.oid = i.indexrelid
     where i.indrelid = 'public.stock_by_location'::regclass and i.indisunique
       and not exists (select 1 from pg_constraint c where c.conindid = i.indexrelid)
-      and (select array(select a.attname from unnest(i.indkey) as k(attnum)
+      and (select array(select a.attname::text from unnest(i.indkey) as k(attnum)
                         join pg_attribute a on a.attrelid = i.indrelid and a.attnum = k.attnum
                         order by a.attname)) = array['location_id','product_id']
   loop
