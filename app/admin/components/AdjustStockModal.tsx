@@ -16,6 +16,7 @@ interface Props {
   componentMap?: ComponentMap;
   allProducts?:  Product[];
   userRole?:    UserRole;
+  companyId?:   number;   // which company's stock to adjust (default Aadinath)
   onClose:      () => void;
   onSuccess:    (msg: string) => void;
   onError:      (msg: string) => void;
@@ -44,6 +45,7 @@ export default function AdjustStockModal({
   locations, stockByLoc, boxByLoc,
   componentMap = {}, allProducts = [],
   userRole = 'admin',
+  companyId = 1,
   onClose, onSuccess, onError, onDone,
 }: Props) {
   const [selectedAction, setSelectedAction] = useState<AdjAction | null>(null);
@@ -290,7 +292,7 @@ export default function AdjustStockModal({
         }
       }
 
-      await stockTxn(ops);
+      await stockTxn(ops.map(o => ({ ...o, company_id: companyId })));
 
       const unitLabel = isBoxUnit ? `box${qty !== 1 ? 'es' : ''}` : `unit${qty !== 1 ? 's' : ''}`;
       const actionLabel: Record<AdjAction, string> = {

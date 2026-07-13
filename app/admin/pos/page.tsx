@@ -40,6 +40,7 @@ interface CartItem {
   unit:            CartUnit;
   sellPrice:       number | null;
   groupChoices:    Record<string, number>;
+  companyId:       number;  // which company's stock this line sells from
   transferDestId?: number;  // selected destination for → Move action
 }
 
@@ -112,7 +113,7 @@ interface ModalState {
 }
 
 function PosDashboard() {
-  const { products, locations, stockByLoc, boxByLoc, loading, error, refresh } = useProducts();
+  const { products, locations, companies, stockByLoc, boxByLoc, stockByCompany, boxByCompany, loading, error, refresh } = useProducts();
   const componentMap = useProductComponents();
 
   // locationId: default to first location once loaded
@@ -163,12 +164,27 @@ function PosDashboard() {
   const bm = boxByLoc[locationId]   ?? {};
   const locName = locations.find(l => l.location_id === locationId)?.location_name ?? '';
 
-  // Max across ALL locations combined (overflow logic)
-  function maxForProduct(p: Product, unit: CartUnit = 'piece'): number {
+  // Total pieces a product has in one company across all locations.
+  function companyTotalPieces(p: Product, companyId: number): number {
     const ppb = p.pieces_per_box ?? 0;
-    const totalPcs = locations.reduce((s, l) => s + ((stockByLoc[l.location_id] ?? {})[p.product_id] ?? 0), 0);
-    const totalBx  = locations.reduce((s, l) => s + ((boxByLoc[l.location_id]   ?? {})[p.product_id] ?? 0), 0);
-    const pool = totalPcs + totalBx * ppb;
+    const sc = stockByCompany[companyId] ?? {};
+    const bc = boxByCompany[companyId]   ?? {};
+    return locations.reduce((s, l) => s + ((sc[l.location_id] ?? {})[p.product_id] ?? 0) + ((bc[l.location_id] ?? {})[p.product_id] ?? 0) * ppb, 0);
+  }
+
+  // Default company for a new cart line: the one with stock (Aadinath first).
+  function defaultCompanyFor(p: Product): number {
+    const withStock = companies
+      .map(c => c.company_id)
+      .filter(cid => companyTotalPieces(p, cid) > 0)
+      .sort((a, b) => a - b);
+    return withStock[0] ?? (companies[0]?.company_id ?? 1);
+  }
+
+  // Max sellable of a product IN A GIVEN COMPANY (across all locations).
+  function maxForProduct(p: Product, unit: CartUnit = 'piece', companyId = 1): number {
+    const ppb = p.pieces_per_box ?? 0;
+    const pool = companyTotalPieces(p, companyId);
     if (unit === 'box' && ppb > 0) return Math.floor(pool / ppb);
     return pool;
   }
@@ -225,8 +241,8 @@ function PosDashboard() {
     setCart(prev => {
       const existing = prev.find(c => c.product.product_id === product.product_id);
       if (existing) {
-        // Use the existing row's unit when bumping the count.
-        const max = maxForProduct(product, existing.unit);
+        // Use the existing row's unit + company when bumping the count.
+        const max = maxForProduct(product, existing.unit, existing.companyId);
         if (existing.qty >= max) {
           blocked = true; blockedMax = max; blockedUnit = existing.unit;
           return prev;
@@ -235,12 +251,11 @@ function PosDashboard() {
           c.product.product_id === product.product_id ? { ...c, qty: c.qty + 1 } : c
         );
       }
-      // Default new rows to 'piece' — most quick scans are individual
-      // items. User can toggle the unit on the row if they're selling
-      // a whole box/roll.
-      const max = maxForProduct(product, 'piece');
+      // Default new rows to 'piece' and to the company that has stock.
+      const companyId = defaultCompanyFor(product);
+      const max = maxForProduct(product, 'piece', companyId);
       if (max < 1) { blocked = true; blockedMax = 0; blockedUnit = 'piece'; return prev; }
-      return [...prev, { product, qty: 1, unit: 'piece', sellPrice: defaultSellPrice(product, 'piece'), groupChoices: {} }];
+      return [...prev, { product, qty: 1, unit: 'piece', sellPrice: defaultSellPrice(product, 'piece'), groupChoices: {}, companyId }];
     });
     barcodeRef.current?.focus();
     if (blocked) {
@@ -327,7 +342,12 @@ function PosDashboard() {
     unit: CartUnit,
     sellPrice: number | null,
     groupChoices: Record<string, number> = {},
+    companyId = 1,
   ): StockOp[] {
+    // Sell only from the chosen company's stock: alias the location maps to
+    // that company's maps so all the overflow/box logic below is unchanged.
+    const stockByLoc = stockByCompany[companyId] ?? {};
+    const boxByLoc   = boxByCompany[companyId]   ?? {};
     const ops: StockOp[] = [];
     const pid = p.product_id;
     const ppb = p.pieces_per_box ?? 0;
@@ -403,7 +423,7 @@ function PosDashboard() {
         ? deductFromLocation(curPcs, curBx, qty, 'box', ppb)
         : deductFromLocation(curPcs, curBx, fromCurPieces, 'piece', ppb);
       ops.push({
-        product_id: pid, location_id: locId,
+        product_id: pid, location_id: locId, company_id: companyId,
         dq: newState.quantity - curPcs, db: newState.box_quantity - curBx,
         mov_type: 'SALE', mov_qty: fromCurPieces, mov_from: locId, mov_to: null,
         reason: `Sold from ${saleLocName}${priceSuffix}`,
@@ -413,7 +433,7 @@ function PosDashboard() {
     if (fromOtherPieces > 0) {
       const newState = deductFromLocation(otherPcs, otherBx, fromOtherPieces, 'piece', ppb);
       ops.push({
-        product_id: pid, location_id: otherId,
+        product_id: pid, location_id: otherId, company_id: companyId,
         dq: newState.quantity - otherPcs, db: newState.box_quantity - otherBx,
         mov_type: 'SALE', mov_qty: fromOtherPieces, mov_from: otherId, mov_to: null,
         reason: `Sold from ${otherName} (POS overflow)${priceSuffix}`,
@@ -437,7 +457,7 @@ function PosDashboard() {
       if (fromSrc > 0) {
         const raw = deductFromLocation(srcPcs, srcBx, fromSrc, 'piece', cPpb);
         ops.push({
-          product_id: cid, location_id: locId,
+          product_id: cid, location_id: locId, company_id: companyId,
           dq: raw.quantity - srcPcs, db: raw.box_quantity - srcBx,
           mov_type: 'AUTO_DEDUCT', mov_qty: fromSrc, mov_from: locId, mov_to: null,
           reason: `Auto: component of ${p.product_name}`,
@@ -447,7 +467,7 @@ function PosDashboard() {
       if (fromOther > 0) {
         const raw = deductFromLocation(othPcs, othBx, fromOther, 'piece', cPpb);
         ops.push({
-          product_id: cid, location_id: otherId,
+          product_id: cid, location_id: otherId, company_id: companyId,
           dq: raw.quantity - othPcs, db: raw.box_quantity - othBx,
           mov_type: 'AUTO_DEDUCT', mov_qty: fromOther, mov_from: otherId, mov_to: null,
           reason: `Auto: component of ${p.product_name} (pulled from ${otherName})`,
@@ -465,7 +485,11 @@ function PosDashboard() {
     unit: CartUnit,
     destLocationId: number,
     groupChoices: Record<string, number> = {},
+    companyId = 1,
   ): StockOp[] {
+    // Transfer within the chosen company's stock.
+    const stockByLoc = stockByCompany[companyId] ?? {};
+    const boxByLoc   = boxByCompany[companyId]   ?? {};
     const ops: StockOp[] = [];
     const pid = p.product_id;
     const ppb = p.pieces_per_box ?? 0;
@@ -488,13 +512,13 @@ function PosDashboard() {
     const newSrc = deductFromLocation(srcPcs, srcBx, qty, unit, ppb);
     const newDst = addToLocation(dstPcs, dstBx, qty, unit);
     ops.push({
-      product_id: pid, location_id: srcId,
+      product_id: pid, location_id: srcId, company_id: companyId,
       dq: newSrc.quantity - srcPcs, db: newSrc.box_quantity - srcBx,
       mov_type: 'TRANSFER', mov_qty: movPieces, mov_from: srcId, mov_to: dstId,
       reason: `Moved from ${srcName} to ${dstName}`,
     });
     ops.push({
-      product_id: pid, location_id: dstId,
+      product_id: pid, location_id: dstId, company_id: companyId,
       dq: newDst.quantity - dstPcs, db: newDst.box_quantity - dstBx,
     });
 
@@ -519,13 +543,13 @@ function PosDashboard() {
         const newSrcQ = Math.max(0, rawSrc.quantity);
         const newSrcB = Math.max(0, rawSrc.box_quantity);
         ops.push({
-          product_id: cid, location_id: srcId,
+          product_id: cid, location_id: srcId, company_id: companyId,
           dq: newSrcQ - cSrcPcs, db: newSrcB - cSrcBx,
           mov_type: 'TRANSFER', mov_qty: movComp, mov_from: srcId, mov_to: dstId,
           reason: `Auto: component of ${p.product_name}`,
         });
         ops.push({
-          product_id: cid, location_id: dstId,
+          product_id: cid, location_id: dstId, company_id: companyId,
           dq: movComp, db: 0,   // add loose pieces to destination (matches prior behavior)
         });
       }
@@ -549,6 +573,7 @@ function PosDashboard() {
         unit_price:   i.sellPrice ?? null,
         cost_price:   i.product.buying_price ?? null,
         line_total:   i.sellPrice != null ? i.sellPrice * i.qty : null,
+        company_id:   i.companyId,
       })),
     };
   }
@@ -581,8 +606,8 @@ function PosDashboard() {
       const ops: StockOp[] = [];
       for (const item of cart) {
         ops.push(...(action === 'sold'
-          ? buildSellOps(item.product, item.qty, item.unit, item.sellPrice, item.groupChoices)
-          : buildTransferOps(item.product, item.qty, item.unit, item.transferDestId!, item.groupChoices)));
+          ? buildSellOps(item.product, item.qty, item.unit, item.sellPrice, item.groupChoices, item.companyId)
+          : buildTransferOps(item.product, item.qty, item.unit, item.transferDestId!, item.groupChoices, item.companyId)));
       }
       await stockTxn(ops, action === 'sold' ? buildSalePayload(cart) : null);
       showToast(`${action === 'sold' ? 'Sold' : 'Moved'} ${cart.length} item(s) ✓`, 'success');
@@ -623,8 +648,8 @@ function PosDashboard() {
     setProcessing(true);
     try {
       const ops = action === 'sold'
-        ? buildSellOps(item.product, item.qty, item.unit, item.sellPrice, item.groupChoices)
-        : buildTransferOps(item.product, item.qty, item.unit, item.transferDestId!, item.groupChoices);
+        ? buildSellOps(item.product, item.qty, item.unit, item.sellPrice, item.groupChoices, item.companyId)
+        : buildTransferOps(item.product, item.qty, item.unit, item.transferDestId!, item.groupChoices, item.companyId);
       await stockTxn(ops, action === 'sold' ? buildSalePayload([item]) : null);
       setCart(c => c.filter(i => i.product.product_id !== item.product.product_id));
       showToast(`${action === 'sold' ? 'Sold' : 'Moved'}: ${item.product.product_name} ✓`, 'success');
@@ -885,7 +910,7 @@ function PosDashboard() {
                 {cart.map(item => {
                   const hasBulk = hasBulkUnit(item.product);
                   const ppb = item.product.pieces_per_box ?? 0;
-                  const max = maxForProduct(item.product, item.unit);
+                  const max = maxForProduct(item.product, item.unit, item.companyId);
                   const atMax = item.qty >= max;
                   const unitLbl = unitLabel(item.product, item.unit);
                   return (
@@ -910,7 +935,7 @@ function PosDashboard() {
                               key={u}
                               onClick={() => setCart(c => c.map(i => {
                                 if (i.product.product_id !== item.product.product_id) return i;
-                                const newMax = maxForProduct(i.product, u);
+                                const newMax = maxForProduct(i.product, u, i.companyId);
                                 const wasDefault = i.sellPrice == null || i.sellPrice === defaultSellPrice(i.product, i.unit);
                                 return {
                                   ...i,
@@ -931,6 +956,39 @@ function PosDashboard() {
                               <span className="text-[8px] font-normal opacity-70 leading-tight">
                                 {u === 'box' ? `×${ppb} pcs` : '×1 pc'}
                               </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+
+                    {/* Company toggle — which company's stock this line sells
+                        from. Disabled for a company with none of this product. */}
+                    {companies.length > 1 && (
+                      <div className="flex gap-1 mb-2">
+                        {companies.map(co => {
+                          const avail = maxForProduct(item.product, item.unit, co.company_id);
+                          const isSel = item.companyId === co.company_id;
+                          const disabled = avail <= 0;
+                          return (
+                            <button
+                              key={co.company_id}
+                              disabled={disabled}
+                              onClick={() => setCart(c => c.map(i => {
+                                if (i.product.product_id !== item.product.product_id) return i;
+                                const newMax = maxForProduct(i.product, i.unit, co.company_id);
+                                return { ...i, companyId: co.company_id, qty: Math.max(1, Math.min(i.qty, newMax || 1)) };
+                              }))}
+                              className={`flex-1 py-1.5 rounded flex flex-col items-center text-[10px] font-bold border transition-all ${
+                                isSel
+                                  ? 'border-teal/50 bg-teal/15 text-teal'
+                                  : disabled
+                                    ? 'border-white/5 bg-surface text-muted/40 cursor-not-allowed'
+                                    : 'border-white/10 bg-surface text-muted hover:text-slate-100'
+                              }`}
+                            >
+                              <span className="truncate max-w-full">{co.company_name.replace(/\s*Enterprise$/i, '')}</span>
+                              <span className="text-[8px] font-normal opacity-70 leading-tight">{avail} avail</span>
                             </button>
                           );
                         })}

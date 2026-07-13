@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { supabase } from '@/lib/supabase';
 import type { Product, UserRole, StockMap } from '@/lib/types';
-import { ROLE_KEY } from '@/lib/types';
+import { ROLE_KEY, DEFAULT_COMPANY_ID } from '@/lib/types';
 import { useProductComponents } from '@/lib/hooks/useProductComponents';
 import { useProducts } from '@/lib/hooks/useProducts';
 import { logMovement } from '@/lib/stockActions';
@@ -869,12 +869,19 @@ function FormField({ label, children }: { label: string; children: React.ReactNo
 // ── Dashboard ─────────────────────────────────────────────────────────────────
 
 function Dashboard({ role }: { role: UserRole }) {
-  const { products, locations, stockByLoc, boxByLoc, loading, error, refresh } = useProducts();
+  const { products, locations, companies, stockByLoc, boxByLoc, stockByCompany, boxByCompany, loading, error, refresh } = useProducts();
+  const [companyFilter, setCompanyFilter] = useState<'all' | number>('all');
   const [modal,        setModal]        = useState<ModalState | null>(null);
   const [productModal, setProductModal] = useState<{ editing: Product | null } | null>(null);
   const [toast,        setToast]        = useState<ToastState | null>(null);
   const toastId      = useRef(0);
   const componentMap = useProductComponents();
+
+  // With a company selected, the cards show — and the +/- modal adjusts —
+  // only that company's stock. "All" shows the combined totals.
+  const effStock = companyFilter === 'all' ? stockByLoc : (stockByCompany[companyFilter] ?? {});
+  const effBox   = companyFilter === 'all' ? boxByLoc   : (boxByCompany[companyFilter] ?? {});
+  const modalCompanyId = companyFilter === 'all' ? DEFAULT_COMPANY_ID : companyFilter;
 
   function showToast(msg: string, type: ToastState['type']) {
     setToast({ msg, type, id: ++toastId.current });
@@ -929,14 +936,29 @@ function Dashboard({ role }: { role: UserRole }) {
               </button>
             )}
           </div>
+          {companies.length > 1 && (
+            <div className="px-4 pb-2 flex gap-2 overflow-x-auto scrollbar-none">
+              {[{ id: 'all' as 'all' | number, name: 'All companies' },
+                ...companies.map(c => ({ id: c.company_id as 'all' | number, name: c.company_name.replace(/\s*Enterprise$/i, '') }))
+              ].map(opt => (
+                <button
+                  key={String(opt.id)}
+                  onClick={() => setCompanyFilter(opt.id)}
+                  className={`shrink-0 px-3 py-1.5 rounded-lg border text-[11px] font-semibold whitespace-nowrap transition-all ${
+                    companyFilter === opt.id ? 'bg-teal/10 border-teal/30 text-teal' : 'border-white/8 bg-surface2 text-muted hover:border-white/20'
+                  }`}
+                >{opt.name}</button>
+              ))}
+            </div>
+          )}
         </div>
 
         <Suspense fallback={null}>
           <InventoryListWithFilter
             products={products}
             locations={locations}
-            stockByLoc={stockByLoc}
-            boxByLoc={boxByLoc}
+            stockByLoc={effStock}
+            boxByLoc={effBox}
             onAdjust={handleAdjust}
             onEdit={isAdmin ? (product => setProductModal({ editing: product })) : undefined}
           />
@@ -951,8 +973,9 @@ function Dashboard({ role }: { role: UserRole }) {
             locationId={modal.locationId}
             direction={modal.direction}
             locations={locations}
-            stockByLoc={stockByLoc}
-            boxByLoc={boxByLoc}
+            stockByLoc={effStock}
+            boxByLoc={effBox}
+            companyId={modalCompanyId}
             componentMap={componentMap}
             allProducts={products}
             userRole={role}
