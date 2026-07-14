@@ -4,8 +4,8 @@ import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import { supabase } from '@/lib/supabase';
-import type { Purchase, PurchaseItem, Supplier, Product, LocationInfo } from '@/lib/types';
-import { SESSION_KEY, ROLE_KEY } from '@/lib/types';
+import type { Purchase, PurchaseItem, Supplier, Product, LocationInfo, Company } from '@/lib/types';
+import { SESSION_KEY, ROLE_KEY, DEFAULT_COMPANY_ID } from '@/lib/types';
 import { logMovement, stockTxn } from '@/lib/stockActions';
 import AdminNavbar from '../components/AdminNavbar';
 import Toast, { type ToastState } from '../components/Toast';
@@ -141,6 +141,8 @@ function PurchasesDashboard() {
   const [suppliers,    setSuppliers]    = useState<Supplier[]>([]);
   const [products,     setProducts]     = useState<Product[]>([]);
   const [locations,    setLocations]    = useState<LocationInfo[]>([]);
+  const [companies,    setCompanies]    = useState<Company[]>([]);
+  const [companyFilter, setCompanyFilter] = useState<'all' | number>('all');
   const [loading,      setLoading]      = useState(true);
   const [toast,        setToast]        = useState<ToastState | null>(null);
   const [newOpen,      setNewOpen]      = useState(false);
@@ -154,11 +156,12 @@ function PurchasesDashboard() {
 
   const load = useCallback(async () => {
     if (firstLoad.current) setLoading(true);
-    const [pr, sr, prd, lr] = await Promise.all([
+    const [pr, sr, prd, lr, cr] = await Promise.all([
       supabase.from('purchases').select('*').order('created_at', { ascending: false }),
       supabase.from('suppliers').select('*').eq('active_status', true).order('supplier_name'),
       supabase.from('products').select('*').eq('active_status', true).order('product_name'),
       supabase.from('locations').select('location_id, location_name, active_status').eq('active_status', true).order('location_id'),
+      supabase.from('companies').select('company_id, company_name, active_status').order('company_id'),
     ]);
     if (pr.error || sr.error || prd.error) {
       const msg = (pr.error ?? sr.error ?? prd.error)!.message;
@@ -173,6 +176,11 @@ function PurchasesDashboard() {
         { location_id: 1, location_name: 'Main Store',             active_status: true },
         { location_id: 2, location_name: 'Back Godown',            active_status: true },
         { location_id: 3, location_name: 'Main Store First Floor', active_status: true },
+      ]);
+      const comps = (cr.data ?? []) as Company[];
+      setCompanies(comps.length > 0 ? comps : [
+        { company_id: 1, company_name: 'Aadinath Enterprise',     active_status: true },
+        { company_id: 2, company_name: 'Jay Aadinath Enterprise', active_status: true },
       ]);
     }
     firstLoad.current = false;
@@ -214,6 +222,24 @@ function PurchasesDashboard() {
     return suppliers.find(s => s.supplier_id === id)?.supplier_name ?? 'Unknown';
   }
 
+  function companyName(id: number | null | undefined) {
+    return companies.find(c => c.company_id === (id ?? DEFAULT_COMPANY_ID))?.company_name ?? 'Aadinath Enterprise';
+  }
+  const shortCompany = (id: number | null | undefined) => companyName(id).replace(/\s*Enterprise$/i, '');
+
+  // Move a whole purchase (and its remaining stock) to another company.
+  async function convertPurchase(purchaseId: number, toCompanyId: number) {
+    const { error } = await supabase.rpc('convert_purchase_company', { p_purchase_id: purchaseId, p_company_id: toCompanyId });
+    if (error) { showToast('Convert failed: ' + error.message, 'error'); return; }
+    showToast(`Moved to ${shortCompany(toCompanyId)} ✓`, 'success');
+    setDetail(null);
+    load();
+  }
+
+  const visiblePurchases = companyFilter === 'all'
+    ? purchases
+    : purchases.filter(p => (p.company_id ?? DEFAULT_COMPANY_ID) === companyFilter);
+
   function productName(id: number | null, raw: string | null) {
     if (!id) return raw ?? '—';
     return products.find(p => p.product_id === id)?.product_name ?? raw ?? `#${id}`;
@@ -253,6 +279,7 @@ function PurchasesDashboard() {
       // is row-locked, logged, and never pushes below zero (stock may have
       // sold since the purchase).
       const drainOrder = locations.length > 0 ? locations.map(l => l.location_id) : [2, 1];
+      const delCid = data.purchase.company_id ?? DEFAULT_COMPANY_ID;
       for (const it of data.items) {
         if (!it.product_id || !it.quantity) continue;
         const targetLocs = it.location_id != null ? [it.location_id] : drainOrder;
@@ -264,12 +291,13 @@ function PurchasesDashboard() {
             .select('quantity')
             .eq('product_id', it.product_id)
             .eq('location_id', locId)
+            .eq('company_id', delCid)
             .maybeSingle();
           const current = row?.quantity ?? 0;
           const take = Math.min(remaining, current);
           if (take > 0) {
             await stockTxn([{
-              product_id: it.product_id, location_id: locId,
+              product_id: it.product_id, location_id: locId, company_id: delCid,
               dq: -take, db: 0,
               mov_type: 'ADJUSTMENT_OUT', mov_qty: take, mov_from: locId, mov_to: null,
               reason: `Reversed purchase #${data.purchase.purchase_id} (deleted)`,
@@ -362,7 +390,7 @@ function PurchasesDashboard() {
         <div className="flex items-center justify-between pt-5 pb-3">
           <div>
             <h2 className="text-base font-bold text-slate-100">Purchases</h2>
-            <p className="text-xs text-muted mt-0.5">{purchases.length} records</p>
+            <p className="text-xs text-muted mt-0.5">{visiblePurchases.length} record{visiblePurchases.length === 1 ? '' : 's'}</p>
           </div>
           <button
             onClick={() => setNewOpen(true)}
@@ -372,18 +400,34 @@ function PurchasesDashboard() {
           </button>
         </div>
 
+        {companies.length > 1 && (
+          <div className="flex gap-2 overflow-x-auto scrollbar-none pb-3">
+            {[{ id: 'all' as 'all' | number, name: 'All companies' },
+              ...companies.map(c => ({ id: c.company_id as 'all' | number, name: shortCompany(c.company_id) }))
+            ].map(opt => (
+              <button
+                key={String(opt.id)}
+                onClick={() => setCompanyFilter(opt.id)}
+                className={`shrink-0 px-3 py-1.5 rounded-lg border text-[11px] font-semibold whitespace-nowrap transition-all ${
+                  companyFilter === opt.id ? 'bg-teal/10 border-teal/30 text-teal' : 'border-white/8 bg-surface2 text-muted hover:border-white/20'
+                }`}
+              >{opt.name}</button>
+            ))}
+          </div>
+        )}
+
         {loading ? (
           <div className="flex justify-center py-20">
             <div className="w-8 h-8 rounded-full border-2 border-teal border-t-transparent animate-spin" />
           </div>
-        ) : purchases.length === 0 ? (
+        ) : visiblePurchases.length === 0 ? (
           <div className="text-center py-20 text-muted">
             <div className="text-4xl mb-3">🧾</div>
-            <p className="text-sm">No purchases yet.</p>
+            <p className="text-sm">{companyFilter === 'all' ? 'No purchases yet.' : `No purchases for ${shortCompany(companyFilter as number)}.`}</p>
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2">
-            {purchases.map((p, i) => (
+            {visiblePurchases.map((p, i) => (
               <motion.div
                 key={p.purchase_id}
                 initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.02 }}
@@ -399,11 +443,18 @@ function PurchasesDashboard() {
                     {p.purchase_date ? fmtDate(p.purchase_date) : '—'}
                     {p.notes ? ' · ' + p.notes : ''}
                   </div>
-                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
-                    p.status === 'CONFIRMED'
-                      ? 'bg-success/10 border-success/20 text-success'
-                      : 'bg-gold/10 border-gold/20 text-gold'
-                  }`}>{p.status}</span>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                      (p.company_id ?? DEFAULT_COMPANY_ID) === DEFAULT_COMPANY_ID
+                        ? 'bg-teal/10 border-teal/25 text-teal'
+                        : 'bg-gold/10 border-gold/30 text-gold'
+                    }`}>{shortCompany(p.company_id)}</span>
+                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                      p.status === 'CONFIRMED'
+                        ? 'bg-success/10 border-success/20 text-success'
+                        : 'bg-gold/10 border-gold/20 text-gold'
+                    }`}>{p.status}</span>
+                  </div>
                 </div>
               </motion.div>
             ))}
@@ -417,6 +468,7 @@ function PurchasesDashboard() {
             suppliers={suppliers}
             products={products}
             locations={locations}
+            companies={companies}
             onRefreshProducts={refreshProducts}
             onClose={() => setNewOpen(false)}
             onSaved={() => { setNewOpen(false); load(); showToast('Purchase saved ✓', 'success'); }}
@@ -431,6 +483,9 @@ function PurchasesDashboard() {
             data={detail}
             supplierName={supplierName}
             productName={productName}
+            companies={companies}
+            companyName={companyName}
+            onConvert={(cid) => convertPurchase(detail.purchase.purchase_id, cid)}
             onClose={() => setDetail(null)}
             onDelete={() => deletePurchase(detail)}
             deleting={deleting}
@@ -462,17 +517,21 @@ function PurchasesDashboard() {
 // ─── Detail drawer ────────────────────────────────────────────────────────────
 
 function DetailDrawer({
-  data, supplierName, productName, onClose, onDelete, deleting, onEdit,
+  data, supplierName, productName, companies, companyName, onConvert, onClose, onDelete, deleting, onEdit,
 }: {
   data: { purchase: Purchase; items: PurchaseItem[] };
   supplierName: (id: number | null) => string;
   productName:  (id: number | null, raw: string | null) => string;
+  companies:    Company[];
+  companyName:  (id: number | null | undefined) => string;
+  onConvert:    (toCompanyId: number) => void;
   onClose:  () => void;
   onDelete: () => void;
   deleting: boolean;
   onEdit:   () => void;
 }) {
   const urls = parseBillUrls(data.purchase.bill_image_url);
+  const curCid = data.purchase.company_id ?? DEFAULT_COMPANY_ID;
   return (
     <>
       <motion.div key="dbd" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
@@ -482,10 +541,32 @@ function DetailDrawer({
         className="fixed bottom-0 inset-x-0 z-50 max-w-lg mx-auto bg-surface border border-white/8 rounded-t-2xl p-5 pb-8 max-h-[90vh] overflow-y-auto"
       >
         <div className="w-8 h-1 rounded-full bg-white/10 mx-auto mb-4" />
-        <div className="bg-surface2 rounded-xl p-4 mb-4">
+        <div className="bg-surface2 rounded-xl p-4 mb-3">
           <div className="font-bold text-slate-100">{supplierName(data.purchase.supplier_id)}</div>
           <div className="text-xs text-muted mt-0.5">{data.purchase.purchase_date ? fmtDate(data.purchase.purchase_date) : '—'}</div>
           {data.purchase.notes && <div className="text-xs text-muted/70 mt-1">{data.purchase.notes}</div>}
+        </div>
+
+        {/* Company + convert */}
+        <div className="bg-surface2 rounded-xl p-4 mb-4 flex items-center justify-between gap-3 flex-wrap">
+          <div>
+            <div className="text-[10px] font-bold text-muted uppercase tracking-widest mb-1">Company</div>
+            <div className={`text-sm font-bold ${curCid === DEFAULT_COMPANY_ID ? 'text-teal' : 'text-gold'}`}>{companyName(curCid)}</div>
+          </div>
+          <div className="flex gap-1.5 flex-wrap">
+            {companies.filter(c => c.company_id !== curCid).map(c => (
+              <button
+                key={c.company_id}
+                disabled={deleting}
+                onClick={() => {
+                  if (window.confirm(`Move this purchase's remaining stock to ${companyName(c.company_id)}?\n\nAlready-sold items are skipped — only what is still in stock moves over. This can't be batch-undone (you'd convert it back).`)) {
+                    onConvert(c.company_id);
+                  }
+                }}
+                className="px-3 py-2 rounded-lg bg-teal/10 border border-teal/30 text-teal text-[11px] font-bold hover:bg-teal/20 transition-colors disabled:opacity-50"
+              >→ Move to {companyName(c.company_id).replace(/\s*Enterprise$/i, '')}</button>
+            ))}
+          </div>
         </div>
 
         <div className="text-[10px] font-bold text-muted uppercase tracking-widest mb-2">Items ({data.items.length})</div>
@@ -593,6 +674,7 @@ function EditPurchaseModal({
   onError:   (msg: string) => void;
 }) {
   const [supplierId, setSupplierId] = useState(String(data.purchase.supplier_id ?? ''));
+  const editCid = data.purchase.company_id ?? DEFAULT_COMPANY_ID;
   const [date,  setDate]  = useState(data.purchase.purchase_date ?? '');
   const [notes, setNotes] = useState(data.purchase.notes ?? '');
   const [rows,  setRows]  = useState<EditItemRow[]>(() =>
@@ -670,7 +752,7 @@ function EditPurchaseModal({
       if (remaining <= 0) break;
       const { data: stockRow } = await supabase
         .from('stock_by_location').select('id, quantity')
-        .eq('product_id', productId).eq('location_id', locId).maybeSingle();
+        .eq('product_id', productId).eq('location_id', locId).eq('company_id', editCid).maybeSingle();
       if (!stockRow) continue;
       const current = stockRow.quantity ?? 0;
       const take = Math.min(current, remaining);
@@ -755,11 +837,11 @@ function EditPurchaseModal({
             await logMovement(row.productId, null, locId, delta, 'PURCHASE_IN', `Purchase #${purchaseId} edited · qty increased`);
             const { data: stockRow } = await supabase
               .from('stock_by_location').select('id, quantity')
-              .eq('product_id', row.productId).eq('location_id', locId).maybeSingle();
+              .eq('product_id', row.productId).eq('location_id', locId).eq('company_id', editCid).maybeSingle();
             if (stockRow) {
               await supabase.from('stock_by_location').update({ quantity: (stockRow.quantity ?? 0) + delta }).eq('id', stockRow.id);
             } else {
-              await supabase.from('stock_by_location').insert({ product_id: row.productId, location_id: locId, quantity: delta });
+              await supabase.from('stock_by_location').insert({ product_id: row.productId, location_id: locId, company_id: editCid, quantity: delta });
             }
           } else {
             await logMovement(row.productId, drainOrder[0], null, -delta, 'ADJUSTMENT_OUT', `Purchase #${purchaseId} edited · qty reduced`);
@@ -815,11 +897,11 @@ function EditPurchaseModal({
           await logMovement(productId, null, row.locationId, row.qty, 'PURCHASE_IN', `Purchase #${purchaseId} edited · item added`);
           const { data: existing } = await supabase
             .from('stock_by_location').select('id, quantity')
-            .eq('product_id', productId).eq('location_id', row.locationId).maybeSingle();
+            .eq('product_id', productId).eq('location_id', row.locationId).eq('company_id', editCid).maybeSingle();
           if (existing) {
             await supabase.from('stock_by_location').update({ quantity: (existing.quantity ?? 0) + row.qty }).eq('id', existing.id);
           } else {
-            await supabase.from('stock_by_location').insert({ product_id: productId, location_id: row.locationId, quantity: row.qty });
+            await supabase.from('stock_by_location').insert({ product_id: productId, location_id: row.locationId, company_id: editCid, quantity: row.qty });
           }
           if (row.productId && row.unitPrice != null && row.unitPrice > 0) {
             await supabase.from('products').update({ buying_price: row.unitPrice }).eq('product_id', productId);
@@ -1091,11 +1173,12 @@ const OCR_SPACE_KEY = 'K89615870288957';
 const GEMINI_PROXY_URL = 'https://aadinath-proxy.info-aadinathenterprise.workers.dev/api/gemini';
 
 function NewPurchaseModal({
-  suppliers, products, locations, onRefreshProducts, onClose, onSaved, onError,
+  suppliers, products, locations, companies, onRefreshProducts, onClose, onSaved, onError,
 }: {
   suppliers: Supplier[];
   products:  Product[];
   locations: LocationInfo[];
+  companies: Company[];
   onRefreshProducts: () => Promise<number>;
   onClose:   () => void;
   onSaved:   () => void;
@@ -1113,6 +1196,7 @@ function NewPurchaseModal({
   }
 
   const [supplierId, setSupplierId] = useState('');
+  const [companyId,  setCompanyId]  = useState<number>(DEFAULT_COMPANY_ID);
   const [date,       setDate]       = useState(new Date().toISOString().split('T')[0]);
   const [notes,      setNotes]      = useState('');
   const [images,     setImages]     = useState<BillImage[]>([]);
@@ -1413,6 +1497,7 @@ ${rawText}`;
       const billField = images.length > 0 ? JSON.stringify(images.map(i => i.thumb)) : null;
       const { data: pArr, error: pErr } = await supabase.from('purchases').insert({
         supplier_id:    supplierId ? parseInt(supplierId) : null,
+        company_id:     companyId,
         purchase_date:  date || null,
         total_amount:   computedTotal > 0 ? computedTotal : null,
         notes:          notes.trim() || null,
@@ -1474,11 +1559,11 @@ ${rawText}`;
         if (productId) {
           const { data: existing } = await supabase
             .from('stock_by_location').select('id, quantity')
-            .eq('product_id', productId).eq('location_id', row.locationId).maybeSingle();
+            .eq('product_id', productId).eq('location_id', row.locationId).eq('company_id', companyId).maybeSingle();
           if (existing) {
             await supabase.from('stock_by_location').update({ quantity: (existing.quantity ?? 0) + row.qty }).eq('id', existing.id);
           } else {
-            await supabase.from('stock_by_location').insert({ product_id: productId, location_id: row.locationId, quantity: row.qty });
+            await supabase.from('stock_by_location').insert({ product_id: productId, location_id: row.locationId, company_id: companyId, quantity: row.qty });
           }
           await logMovement(productId, null, row.locationId, row.qty, 'PURCHASE_IN', `Purchase #${purchaseId}`);
           stockedRows++;
@@ -1539,6 +1624,27 @@ ${rawText}`;
               {suppliers.map(s => <option key={s.supplier_id} value={s.supplier_id}>{s.supplier_name}</option>)}
             </select>
           </div>
+
+          {/* Company this purchase stocks into */}
+          {companies.length > 1 && (
+            <div>
+              <label className="text-[10px] font-bold text-muted uppercase tracking-widest block mb-1">Company</label>
+              <div className="flex gap-2">
+                {companies.map(c => (
+                  <button
+                    key={c.company_id}
+                    type="button"
+                    onClick={() => setCompanyId(c.company_id)}
+                    className={`flex-1 py-2.5 rounded-xl border text-sm font-bold transition-all ${
+                      companyId === c.company_id
+                        ? (c.company_id === DEFAULT_COMPANY_ID ? 'border-teal bg-teal/10 text-teal' : 'border-gold bg-gold/10 text-gold')
+                        : 'border-white/8 bg-surface2 text-muted hover:border-white/20'
+                    }`}
+                  >{c.company_name.replace(/\s*Enterprise$/i, '')}</button>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Date */}
           <div>

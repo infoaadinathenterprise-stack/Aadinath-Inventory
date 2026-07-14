@@ -72,6 +72,7 @@ export interface Supplier {
 
 export interface Purchase {
   purchase_id:       number;
+  company_id?:       number;          // which company this purchase stocked into
   supplier_id:       number | null;
   supplier_name_raw: string | null;
   purchase_date:     string | null;
