@@ -142,6 +142,7 @@ export interface SaleItem {
   unit_price:   number | null;    // SELL price per unit (what we charged)
   cost_price:   number | null;    // BUY price per unit at time of sale (snapshot)
   line_total:   number | null;    // qty * unit_price
+  company_id?:  number;           // which company this line sold from
   created_at:   string;
 }
 

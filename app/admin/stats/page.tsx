@@ -27,7 +27,22 @@ export default function StatsPage() {
 }
 
 function StatsDashboard() {
-  const { products, locations, stockByLoc, boxByLoc, loading } = useProducts();
+  const { products, locations, companies, stockByLoc, boxByLoc, stockByCompany, boxByCompany, loading } = useProducts();
+
+  function companyTotalPieces(cid: number): number {
+    const sc = stockByCompany[cid] ?? {}; const bc = boxByCompany[cid] ?? {};
+    return products.reduce((s, p) => {
+      const ppb = p.pieces_per_box ?? 0;
+      return s + locations.reduce((ls, l) => ls + ((sc[l.location_id] ?? {})[p.product_id] ?? 0) + ((bc[l.location_id] ?? {})[p.product_id] ?? 0) * ppb, 0);
+    }, 0);
+  }
+  function companyProductCount(cid: number): number {
+    const sc = stockByCompany[cid] ?? {}; const bc = boxByCompany[cid] ?? {};
+    return products.filter(p => {
+      const ppb = p.pieces_per_box ?? 0;
+      return locations.some(l => ((sc[l.location_id] ?? {})[p.product_id] ?? 0) + ((bc[l.location_id] ?? {})[p.product_id] ?? 0) * ppb > 0);
+    }).length;
+  }
 
   function handleLogout() {
     localStorage.removeItem(SESSION_KEY);
@@ -62,6 +77,14 @@ function StatsDashboard() {
     { label: 'Out of Stock',   value: outStock,        sub: 'needs reorder',           icon: '⚠️',  href: '/admin?filter=out_of_stock', tone: 'danger'  },
     { label: 'Back Godown',    value: totalBack,       sub: `${backCount} product${backCount === 1 ? '' : 's'}`, icon: '🏭', href: '/admin?filter=back_only', tone: 'gold' },
     { label: 'Main Store',     value: totalMain,       sub: `${mainCount} product${mainCount === 1 ? '' : 's'}`, icon: '🏪', href: '/admin?filter=main_only', tone: 'teal' },
+    ...(companies.length > 1 ? companies.map((c, i) => ({
+      label: c.company_name.replace(/\s*Enterprise$/i, '') + ' stock',
+      value: companyTotalPieces(c.company_id),
+      sub:   `${companyProductCount(c.company_id)} product${companyProductCount(c.company_id) === 1 ? '' : 's'} in stock`,
+      icon:  '🏢',
+      href:  '/admin',
+      tone:  (i === 0 ? 'teal' : 'gold') as 'teal' | 'gold' | 'success' | 'danger',
+    })) : []),
   ];
 
   const toneClass: Record<typeof CARDS[number]['tone'], { border: string; value: string }> = {
