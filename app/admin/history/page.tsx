@@ -30,6 +30,25 @@ function formatDate(iso: string) {
   return new Date(iso).toLocaleString('en-KE', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
 
+function formatDateOnly(ymd: string) {
+  const d = new Date(ymd + 'T00:00:00');
+  return isNaN(d.getTime()) ? ymd : d.toLocaleDateString('en-KE', { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
+// Purchase movements carry "Purchase #12 · Supplier · received 2026-07-10"
+// in the reason. Pull the bill number and the received date out so the
+// detail panel can show them as proper fields (the received date is the
+// date entered on the purchase form — the day the goods arrived — not
+// the moment the row was saved).
+function parsePurchaseRef(reason: string): { billId: number | null; received: string | null } {
+  const billMatch = reason.match(/Purchase #(\d+)/i);
+  const recvMatch = reason.match(/received (\d{4}-\d{2}-\d{2})/i);
+  return {
+    billId:   billMatch ? parseInt(billMatch[1], 10) : null,
+    received: recvMatch ? recvMatch[1] : null,
+  };
+}
+
 // Reason strings written by logMovement are prefixed "[User] …" — pull
 // the user out for display, strip the "(was: X → now: Y)" snapshot suffix
 // added for before/after tracking, and return the clean reason separately.
@@ -261,6 +280,8 @@ function HistoryDashboard() {
               const parentName = isAutoDeduct
                 ? cleanReason.replace(/^Auto: component of\s*/i, '').trim()
                 : null;
+              // Purchase bill number + goods-received date from the reason
+              const { billId: purchaseBillId, received: receivedDate } = parsePurchaseRef(cleanReason);
 
               return (
                 <motion.div
@@ -323,6 +344,12 @@ function HistoryDashboard() {
                               <DetailRow label="Stock before" value={String(snapshot.before)} highlight="text-gold" />
                               <DetailRow label="Stock after"  value={String(snapshot.after)}  highlight={snapshot.after < snapshot.before ? 'text-danger' : 'text-success'} />
                             </>
+                          )}
+                          {purchaseBillId != null && (
+                            <DetailRow label="Purchase bill" value={`#${purchaseBillId}`} highlight="text-teal" mono />
+                          )}
+                          {receivedDate && (
+                            <DetailRow label="Goods received" value={formatDateOnly(receivedDate)} highlight="text-teal" />
                           )}
                           {fromLoc && <DetailRow label="From" value={fromLoc} />}
                           {toLoc   && <DetailRow label="To"   value={toLoc} />}

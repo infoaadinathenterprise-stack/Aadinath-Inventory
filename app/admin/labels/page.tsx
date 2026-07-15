@@ -5,9 +5,10 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useProducts } from '@/lib/hooks/useProducts';
-import { upsertStock, logMovement } from '@/lib/stockActions';
+import { stockTxn, type StockOp } from '@/lib/stockActions';
+import { supabase } from '@/lib/supabase';
 import type { Product } from '@/lib/types';
-import { SESSION_KEY, ROLE_KEY } from '@/lib/types';
+import { SESSION_KEY, ROLE_KEY, DEFAULT_COMPANY_ID } from '@/lib/types';
 
 const LABELS_PER_PAGE = 24;
 type SortBy = 'recent' | 'name';
@@ -151,16 +152,43 @@ function LabelsDashboard() {
 
     setStockSaving(true);
     try {
-      const newQty = mode === 'add' ? cur + qty : Math.max(0, cur - qty);
-      await upsertStock(product.product_id, locId, { quantity: newQty });
-      await logMovement(
-        product.product_id,
-        mode === 'add' ? null : locId,
-        mode === 'add' ? locId : null,
-        qty,
-        mode === 'add' ? 'ADJUSTMENT_IN' : 'ADJUSTMENT_OUT',
-        mode === 'add' ? `Stock Correction (Labels — ${locName})` : `Stock Removed (Labels — ${locName})`,
-      );
+      // Apply through the atomic stock engine (stock change + history in
+      // one transaction). Stock is keyed per company: additions go to the
+      // default company; removals drain each company's row in turn — the
+      // old upsertStock wrote the SAME total onto every company's row.
+      if (mode === 'add') {
+        await stockTxn([{
+          product_id: product.product_id, location_id: locId, company_id: DEFAULT_COMPANY_ID,
+          dq: qty, db: 0,
+          mov_type: 'ADJUSTMENT_IN', mov_qty: qty, mov_from: null, mov_to: locId,
+          reason: `Stock correction via Labels (${locName})`,
+        }]);
+      } else {
+        const { data: rows, error: rErr } = await supabase
+          .from('stock_by_location')
+          .select('company_id, quantity')
+          .eq('product_id', product.product_id)
+          .eq('location_id', locId);
+        if (rErr) throw new Error(rErr.message);
+        const order = [...(rows ?? [])].sort((a, b) =>
+          (a.company_id === DEFAULT_COMPANY_ID ? 0 : a.company_id) -
+          (b.company_id === DEFAULT_COMPANY_ID ? 0 : b.company_id));
+        const ops: StockOp[] = [];
+        let remaining = qty;
+        for (const r of order) {
+          if (remaining <= 0) break;
+          const take = Math.min(remaining, r.quantity ?? 0);
+          if (take <= 0) continue;
+          ops.push({
+            product_id: product.product_id, location_id: locId, company_id: r.company_id ?? DEFAULT_COMPANY_ID,
+            dq: -take, db: 0,
+            mov_type: 'ADJUSTMENT_OUT', mov_qty: take, mov_from: locId, mov_to: null,
+            reason: `Stock removed via Labels (${locName})`,
+          });
+          remaining -= take;
+        }
+        if (ops.length > 0) await stockTxn(ops);
+      }
       refresh();
       showToast(`${mode === 'add' ? 'Added' : 'Removed'} ${qty} units ✓`, 'success');
       setStockModal(null);

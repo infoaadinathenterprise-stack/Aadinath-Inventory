@@ -6,7 +6,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { supabase } from '@/lib/supabase';
 import type { Purchase, PurchaseItem, Supplier, Product, LocationInfo, Company } from '@/lib/types';
 import { SESSION_KEY, ROLE_KEY, DEFAULT_COMPANY_ID } from '@/lib/types';
-import { logMovement, stockTxn } from '@/lib/stockActions';
+import { stockTxn, type StockOp } from '@/lib/stockActions';
 import AdminNavbar from '../components/AdminNavbar';
 import Toast, { type ToastState } from '../components/Toast';
 
@@ -117,6 +117,51 @@ function parseBillUrls(s: string | null): string[] {
     } catch { return [s]; }
   }
   return [s];
+}
+
+// Read an image file, downscale to ≤900px JPEG and keep it under the
+// 1MB OCR.space cap. Returns the data-URL. Shared by the new-purchase
+// and edit-purchase modals so both can attach bill photos.
+function readAndCompressImage(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    if (!file.type.startsWith('image/')) { reject(new Error('Please pick an image file')); return; }
+    if (file.size > 10 * 1024 * 1024) { reject(new Error('Image too large. Max 10MB')); return; }
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new window.Image();
+      img.onload = () => {
+        // 900px / q=0.6 keeps a sharp thumbnail at ~250-400KB so the
+        // detail page stays snappy.
+        const MAX = 900;
+        let w = img.width, h = img.height;
+        if (w > MAX || h > MAX) { if (w > h) { h = Math.round(h * MAX / w); w = MAX; } else { w = Math.round(w * MAX / h); h = MAX; } }
+        const c = document.createElement('canvas');
+        c.width = w; c.height = h;
+        c.getContext('2d')?.drawImage(img, 0, 0, w, h);
+        let q = 0.7;
+        let du = c.toDataURL('image/jpeg', q);
+        // OCR.space free tier caps at 1MB. Stay under to be safe.
+        while (du.split(',')[1].length * 0.75 > 700_000 && q > 0.4) {
+          q -= 0.1; du = c.toDataURL('image/jpeg', q);
+        }
+        resolve(du);
+      };
+      img.onerror = () => reject(new Error('Could not read image'));
+      img.src = e.target?.result as string;
+    };
+    reader.onerror = () => reject(new Error('Could not read file'));
+    reader.readAsDataURL(file);
+  });
+}
+
+// One reason string shared by every history entry a purchase creates, so
+// the History page always shows WHICH bill and WHEN the goods were
+// received (the date entered on the purchase form — not when the row
+// happened to be saved in the database).
+function purchaseBillRef(purchaseId: number, supplierName: string | null, receivedDate: string | null): string {
+  return `Purchase #${purchaseId}`
+    + (supplierName ? ` · ${supplierName}` : '')
+    + (receivedDate ? ` · received ${receivedDate}` : '');
 }
 
 // ─── Auth gate ────────────────────────────────────────────────────────────────
@@ -300,7 +345,9 @@ function PurchasesDashboard() {
               product_id: it.product_id, location_id: locId, company_id: delCid,
               dq: -take, db: 0,
               mov_type: 'ADJUSTMENT_OUT', mov_qty: take, mov_from: locId, mov_to: null,
-              reason: `Reversed purchase #${data.purchase.purchase_id} (deleted)`,
+              reason: `Purchase #${data.purchase.purchase_id}`
+                + (data.purchase.purchase_date ? ` · received ${data.purchase.purchase_date}` : '')
+                + ' · deleted: stock reversed',
             }]);
             remaining -= take;
           }
@@ -710,6 +757,19 @@ function EditPurchaseModal({
   const [saving, setSaving] = useState(false);
   const [refreshingProducts, setRefreshingProducts] = useState(false);
   const [refreshHint, setRefreshHint] = useState<string | null>(null);
+  // Bill photos — existing URLs/data-URLs plus any added during this edit.
+  // Saved back to purchases.bill_image_url as a JSON array on save.
+  const [billUrls, setBillUrls] = useState<string[]>(() => parseBillUrls(data.purchase.bill_image_url));
+  const editFileRef = useRef<HTMLInputElement>(null);
+
+  async function addBillImage(file: File) {
+    try {
+      const du = await readAndCompressImage(file);
+      setBillUrls(prev => [...prev, du]);
+    } catch (e) {
+      onError(e instanceof Error ? e.message : 'Could not read image');
+    }
+  }
 
   async function handleRefreshProducts() {
     setRefreshingProducts(true);
@@ -744,23 +804,31 @@ function EditPurchaseModal({
     setNewRows(rs => rs.map(r => r.rowId === rowId ? { ...r, ...patch } : r));
   }
 
-  // Drain `qty` pieces of a product across locations (back-first). Used
-  // when an item is removed or its quantity reduced.
-  async function reverseStock(productId: number, qty: number) {
+  // Build the atomic ops that drain `qty` pieces of a product across
+  // locations (back-first). Used when an item is removed or its quantity
+  // reduced. The caller runs them through stockTxn so the stock change
+  // and its history entry land in one transaction.
+  async function reverseStockOps(productId: number, qty: number, reason: string): Promise<StockOp[]> {
+    const ops: StockOp[] = [];
     let remaining = qty;
     for (const locId of drainOrder) {
       if (remaining <= 0) break;
       const { data: stockRow } = await supabase
-        .from('stock_by_location').select('id, quantity')
+        .from('stock_by_location').select('quantity')
         .eq('product_id', productId).eq('location_id', locId).eq('company_id', editCid).maybeSingle();
       if (!stockRow) continue;
-      const current = stockRow.quantity ?? 0;
-      const take = Math.min(current, remaining);
+      const take = Math.min(stockRow.quantity ?? 0, remaining);
       if (take > 0) {
-        await supabase.from('stock_by_location').update({ quantity: current - take }).eq('id', stockRow.id);
+        ops.push({
+          product_id: productId, location_id: locId, company_id: editCid,
+          dq: -take, db: 0,
+          mov_type: 'ADJUSTMENT_OUT', mov_qty: take, mov_from: locId, mov_to: null,
+          reason,
+        });
         remaining -= take;
       }
     }
+    return ops;
   }
 
   async function save() {
@@ -769,12 +837,19 @@ function EditPurchaseModal({
       const purchaseId = data.purchase.purchase_id;
       let removedCount = 0, addedCount = 0, createdProducts = 0;
 
+      // Bill reference for every history entry this edit writes.
+      const supplierNameStr = supplierId
+        ? (suppliers.find(s => s.supplier_id === parseInt(supplierId))?.supplier_name ?? null)
+        : null;
+      const billRef = purchaseBillRef(purchaseId, supplierNameStr, date || null);
+
       // ── Update purchase header ─────────────────────────────────────────
       const { error: hErr } = await supabase.from('purchases').update({
-        supplier_id:   supplierId ? parseInt(supplierId) : null,
-        purchase_date: date || null,
-        notes:         notes.trim() || null,
-        total_amount:  computedTotal > 0 ? computedTotal : null,
+        supplier_id:    supplierId ? parseInt(supplierId) : null,
+        purchase_date:  date || null,
+        notes:          notes.trim() || null,
+        total_amount:   computedTotal > 0 ? computedTotal : null,
+        bill_image_url: billUrls.length > 0 ? JSON.stringify(billUrls) : null,
       }).eq('purchase_id', purchaseId);
       if (hErr) throw new Error(hErr.message);
 
@@ -812,8 +887,8 @@ function EditPurchaseModal({
             throw new Error('Item could not be removed (no row deleted — likely RLS). No stock was changed.');
           }
           if (row.productId && row.qty > 0) {
-            await logMovement(row.productId, drainOrder[0], null, row.qty, 'ADJUSTMENT_OUT', `Purchase #${purchaseId} edited · item removed`);
-            await reverseStock(row.productId, row.qty);
+            const ops = await reverseStockOps(row.productId, row.qty, `${billRef} · edited: item removed`);
+            if (ops.length > 0) await stockTxn(ops);
           }
           removedCount++;
           continue;
@@ -834,18 +909,15 @@ function EditPurchaseModal({
           const delta = row.qty - row.oldQty;
           if (delta > 0) {
             const locId = drainOrder[0];
-            await logMovement(row.productId, null, locId, delta, 'PURCHASE_IN', `Purchase #${purchaseId} edited · qty increased`);
-            const { data: stockRow } = await supabase
-              .from('stock_by_location').select('id, quantity')
-              .eq('product_id', row.productId).eq('location_id', locId).eq('company_id', editCid).maybeSingle();
-            if (stockRow) {
-              await supabase.from('stock_by_location').update({ quantity: (stockRow.quantity ?? 0) + delta }).eq('id', stockRow.id);
-            } else {
-              await supabase.from('stock_by_location').insert({ product_id: row.productId, location_id: locId, company_id: editCid, quantity: delta });
-            }
+            await stockTxn([{
+              product_id: row.productId, location_id: locId, company_id: editCid,
+              dq: delta, db: 0,
+              mov_type: 'PURCHASE_IN', mov_qty: delta, mov_from: null, mov_to: locId,
+              reason: `${billRef} · edited: quantity ${row.oldQty} → ${row.qty}`,
+            }]);
           } else {
-            await logMovement(row.productId, drainOrder[0], null, -delta, 'ADJUSTMENT_OUT', `Purchase #${purchaseId} edited · qty reduced`);
-            await reverseStock(row.productId, -delta);
+            const ops = await reverseStockOps(row.productId, -delta, `${billRef} · edited: quantity ${row.oldQty} → ${row.qty}`);
+            if (ops.length > 0) await stockTxn(ops);
           }
         }
 
@@ -894,15 +966,12 @@ function EditPurchaseModal({
         if (iErr) throw new Error(iErr);
 
         if (productId) {
-          await logMovement(productId, null, row.locationId, row.qty, 'PURCHASE_IN', `Purchase #${purchaseId} edited · item added`);
-          const { data: existing } = await supabase
-            .from('stock_by_location').select('id, quantity')
-            .eq('product_id', productId).eq('location_id', row.locationId).eq('company_id', editCid).maybeSingle();
-          if (existing) {
-            await supabase.from('stock_by_location').update({ quantity: (existing.quantity ?? 0) + row.qty }).eq('id', existing.id);
-          } else {
-            await supabase.from('stock_by_location').insert({ product_id: productId, location_id: row.locationId, company_id: editCid, quantity: row.qty });
-          }
+          await stockTxn([{
+            product_id: productId, location_id: row.locationId, company_id: editCid,
+            dq: row.qty, db: 0,
+            mov_type: 'PURCHASE_IN', mov_qty: row.qty, mov_from: null, mov_to: row.locationId,
+            reason: `${billRef} · edited: item added`,
+          }]);
           if (row.productId && row.unitPrice != null && row.unitPrice > 0) {
             await supabase.from('products').update({ buying_price: row.unitPrice }).eq('product_id', productId);
           }
@@ -951,6 +1020,39 @@ function EditPurchaseModal({
             <label className="text-[10px] font-bold text-muted uppercase tracking-widest block mb-1">Purchase Date</label>
             <input type="date" value={date} onChange={e => setDate(e.target.value)}
               className="w-full px-3 py-2.5 rounded-xl bg-surface2 border border-white/8 text-slate-100 text-sm outline-none focus:border-teal/40" />
+          </div>
+
+          {/* Bill photos — view existing, remove, or attach more */}
+          <div>
+            <label className="text-[10px] font-bold text-muted uppercase tracking-widest block mb-1">
+              Bill Photos {billUrls.length > 0 ? `· ${billUrls.length}` : '(none yet)'}
+            </label>
+            {billUrls.length > 0 && (
+              <div className="grid grid-cols-3 gap-2 mb-2">
+                {billUrls.map((url, i) => (
+                  <div key={i} className="relative aspect-square rounded-lg overflow-hidden border border-white/8 bg-surface2">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={url} alt={`bill ${i + 1}`} className="w-full h-full object-cover" />
+                    <button
+                      onClick={() => setBillUrls(prev => prev.filter((_, idx) => idx !== i))}
+                      className="absolute top-1 right-1 w-6 h-6 rounded-full bg-black/70 text-white text-xs font-bold flex items-center justify-center hover:bg-danger"
+                    >✕</button>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div
+              onClick={() => editFileRef.current?.click()}
+              className="border-2 border-dashed border-white/15 rounded-xl p-4 text-center cursor-pointer hover:border-teal/30 hover:bg-teal/5 transition-all"
+            >
+              <div className="text-2xl mb-1">{billUrls.length > 0 ? '➕' : '📷'}</div>
+              <p className="text-xs text-muted">
+                {billUrls.length > 0 ? 'Add another photo' : 'Tap to attach a bill photo'}
+                <br /><b>Saved with the purchase · Max 10MB · JPG, PNG</b>
+              </p>
+            </div>
+            <input ref={editFileRef} type="file" accept="image/*" className="hidden"
+              onChange={e => { if (e.target.files?.[0]) addBillImage(e.target.files[0]); e.target.value = ''; }} />
           </div>
 
           {/* Existing items */}
@@ -1235,33 +1337,13 @@ function NewPurchaseModal({
     return sum;
   }, [items]);
 
-  function processImageFile(file: File) {
-    if (!file.type.startsWith('image/')) { onError('Please pick an image file'); return; }
-    if (file.size > 10 * 1024 * 1024) { onError('Image too large. Max 10MB'); return; }
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const dataUrl = e.target?.result as string;
-      const img = new window.Image();
-      img.onload = () => {
-        // 900px / q=0.6 keeps a sharp thumbnail at ~250-400KB so the
-        // detail page stays snappy.
-        const MAX = 900;
-        let w = img.width, h = img.height;
-        if (w > MAX || h > MAX) { if (w > h) { h = Math.round(h * MAX / w); w = MAX; } else { w = Math.round(w * MAX / h); h = MAX; } }
-        const c = document.createElement('canvas');
-        c.width = w; c.height = h;
-        c.getContext('2d')?.drawImage(img, 0, 0, w, h);
-        let q = 0.7;
-        let du = c.toDataURL('image/jpeg', q);
-        // OCR.space free tier caps at 1MB. Stay under to be safe.
-        while (du.split(',')[1].length * 0.75 > 700_000 && q > 0.4) {
-          q -= 0.1; du = c.toDataURL('image/jpeg', q);
-        }
-        setImages(prev => [...prev, { thumb: du, b64: du.split(',')[1], mime: 'image/jpeg' }]);
-      };
-      img.src = dataUrl;
-    };
-    reader.readAsDataURL(file);
+  async function processImageFile(file: File) {
+    try {
+      const du = await readAndCompressImage(file);
+      setImages(prev => [...prev, { thumb: du, b64: du.split(',')[1], mime: 'image/jpeg' }]);
+    } catch (e) {
+      onError(e instanceof Error ? e.message : 'Could not read image');
+    }
   }
 
   function updateRow(rowId: number, patch: Partial<ItemRow>) {
@@ -1507,9 +1589,17 @@ ${rawText}`;
       if (pErr || !pArr?.[0]) throw new Error(pErr?.message ?? 'Failed to save purchase');
       const purchaseId = (pArr[0] as Purchase).purchase_id;
 
+      // Every history entry this purchase creates carries the bill id,
+      // supplier and the received date entered above.
+      const supplierNameStr = supplierId
+        ? (suppliers.find(s => s.supplier_id === parseInt(supplierId))?.supplier_name ?? null)
+        : null;
+      const billRef = purchaseBillRef(purchaseId, supplierNameStr, date || null);
+
       let createdProducts = 0;
       let stockedRows     = 0;
       let priceSyncError: string | null = null;
+      const stockOps: StockOp[] = [];
 
       for (const row of validRows) {
         // ── Auto-create a product for unmatched rows ──────────────
@@ -1557,15 +1647,15 @@ ${rawText}`;
         if (iErr) throw new Error(iErr);
 
         if (productId) {
-          const { data: existing } = await supabase
-            .from('stock_by_location').select('id, quantity')
-            .eq('product_id', productId).eq('location_id', row.locationId).eq('company_id', companyId).maybeSingle();
-          if (existing) {
-            await supabase.from('stock_by_location').update({ quantity: (existing.quantity ?? 0) + row.qty }).eq('id', existing.id);
-          } else {
-            await supabase.from('stock_by_location').insert({ product_id: productId, location_id: row.locationId, company_id: companyId, quantity: row.qty });
-          }
-          await logMovement(productId, null, row.locationId, row.qty, 'PURCHASE_IN', `Purchase #${purchaseId}`);
+          // Stock + history are applied together in ONE atomic stock_txn
+          // after the loop — no more separate read-modify-write that
+          // could log a movement without the stock actually changing.
+          stockOps.push({
+            product_id: productId, location_id: row.locationId, company_id: companyId,
+            dq: row.qty, db: 0,
+            mov_type: 'PURCHASE_IN', mov_qty: row.qty, mov_from: null, mov_to: row.locationId,
+            reason: billRef,
+          });
           stockedRows++;
 
           // Push the unit price from this purchase into
@@ -1581,6 +1671,8 @@ ${rawText}`;
           }
         }
       }
+
+      if (stockOps.length > 0) await stockTxn(stockOps);
 
       if (priceSyncError) {
         onError(

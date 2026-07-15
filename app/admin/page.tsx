@@ -7,7 +7,7 @@ import type { Product, UserRole, StockMap } from '@/lib/types';
 import { ROLE_KEY, DEFAULT_COMPANY_ID } from '@/lib/types';
 import { useProductComponents } from '@/lib/hooks/useProductComponents';
 import { useProducts } from '@/lib/hooks/useProducts';
-import { logMovement } from '@/lib/stockActions';
+import { stockTxn, type StockOp } from '@/lib/stockActions';
 import { login as apiLogin, logout as apiLogout, isAuthenticated } from '@/lib/auth';
 import { useSearchParams } from 'next/navigation';
 import { Suspense } from 'react';
@@ -411,60 +411,84 @@ function ProductModal({
 
       // Write stock for every location. The form value is the TOTAL
       // piece count when editing (boxes input when creating a box
-      // product). We compare totals against totals — the old code
-      // compared against loose `quantity` only, which double-counted
-      // box stock (e.g. 1 box + 27 pcs at ppb 40 showed as 27, and
-      // typing 67 would have created 67 loose + 1 box = 107).
+      // product). Since the company split, a product can have one
+      // stock row PER COMPANY at each location — the old code assumed
+      // a single row (`maybeSingle()`), which errored on two rows,
+      // silently treated old stock as 0, logged a bogus ADJUSTMENT_IN
+      // and then failed the unique-index insert without ever changing
+      // stock. We now read ALL company rows, diff against the true
+      // combined total, and apply the delta through the atomic
+      // stock_txn engine so stock and history can never disagree.
       const formPpb = isBox ? (parseInt(form.pieces_per_box) || 0) : 0;
       // The DB's existing box counts were stored under the product's
       // PREVIOUS ppb — use that for reading old totals.
       const oldPpb = editing?.pieces_per_box ?? formPpb;
 
+      const { data: stockRows, error: stockErr } = await supabase
+        .from('stock_by_location')
+        .select('location_id, company_id, quantity, box_quantity')
+        .eq('product_id', productId);
+      if (stockErr) throw stockErr;
+
+      const ops: StockOp[] = [];
       for (const loc of locations) {
         const locId = loc.location_id;
         const input = parseInt(locStock[locId] ?? '0') || 0;
         // New box product: input is boxes → convert. Otherwise: total pieces.
         const newTotal = (!editing && formPpb > 0) ? input * formPpb : input;
 
-        const { data: ex } = await supabase
-          .from('stock_by_location').select('id, quantity, box_quantity')
-          .eq('product_id', productId).eq('location_id', locId).maybeSingle();
-        const oldLoose = ex?.quantity     ?? 0;
-        const oldBoxes = ex?.box_quantity ?? 0;
-        const oldTotal = oldLoose + oldBoxes * (oldPpb > 0 ? oldPpb : 0);
+        const locRows  = (stockRows ?? []).filter(r => r.location_id === locId);
+        const oldTotal = locRows.reduce((s, r) =>
+          s + (r.quantity ?? 0) + (r.box_quantity ?? 0) * (oldPpb > 0 ? oldPpb : 0), 0);
+        const delta = newTotal - oldTotal;
+        if (delta === 0) continue;
 
-        if (!ex && newTotal === 0) continue;          // nothing to create
-        if (editing && ex && newTotal === oldTotal) continue;  // unchanged
-
-        // Decompose the total back into boxes + loose pieces. Keep as
-        // many existing whole boxes as still fit so the box/loose
-        // split survives an edit; new products pack into whole boxes.
-        let newBoxes = 0, newLoose = newTotal;
-        if (formPpb > 0) {
-          newBoxes = editing
-            ? Math.min(oldBoxes, Math.floor(newTotal / formPpb))
-            : Math.floor(newTotal / formPpb);
-          newLoose = newTotal - newBoxes * formPpb;
-        }
-
-        // logMovement FIRST — if it throws, stock is untouched (no partial writes).
-        if (editing) {
-          const delta = newTotal - oldTotal;
-          if (delta > 0) await logMovement(productId, null, locId,  delta, 'ADJUSTMENT_IN',  'Stock adjusted via product form', { before: oldTotal, after: newTotal });
-          if (delta < 0) await logMovement(productId, locId, null, -delta, 'ADJUSTMENT_OUT', 'Stock adjusted via product form', { before: oldTotal, after: newTotal });
-        } else if (newTotal > 0) {
-          await logMovement(productId, null, locId, newTotal, 'ADJUSTMENT_IN', 'Initial stock', { before: 0, after: newTotal });
-        }
-
-        if (ex) {
-          await supabase.from('stock_by_location')
-            .update({ quantity: newLoose, box_quantity: newBoxes })
-            .eq('id', ex.id);
+        if (delta > 0) {
+          // Add to the default company. New box products pack into
+          // whole boxes; edits keep the existing box/loose split and
+          // add the difference as loose pieces.
+          let dq = delta, db = 0;
+          if (!editing && formPpb > 0) {
+            db = Math.floor(delta / formPpb);
+            dq = delta - db * formPpb;
+          }
+          ops.push({
+            product_id: productId, location_id: locId, company_id: DEFAULT_COMPANY_ID,
+            dq, db,
+            mov_type: 'ADJUSTMENT_IN', mov_qty: delta, mov_from: null, mov_to: locId,
+            reason: editing ? 'Stock adjusted via product form' : 'Initial stock',
+          });
         } else {
-          await supabase.from('stock_by_location')
-            .insert({ product_id: productId, location_id: locId, quantity: newLoose, box_quantity: newBoxes });
+          // Remove |delta| pieces, draining company rows one by one
+          // (default company first). Within a row, keep as many whole
+          // boxes as still fit so the box/loose split survives.
+          let remaining = -delta;
+          const order = [...locRows].sort((a, b) =>
+            (a.company_id === DEFAULT_COMPANY_ID ? 0 : a.company_id) -
+            (b.company_id === DEFAULT_COMPANY_ID ? 0 : b.company_id));
+          for (const r of order) {
+            if (remaining <= 0) break;
+            const pcs = r.quantity ?? 0, bx = r.box_quantity ?? 0;
+            const total = pcs + bx * (oldPpb > 0 ? oldPpb : 0);
+            const take = Math.min(remaining, total);
+            if (take === 0) continue;
+            const newTot = total - take;
+            let nb = 0, nl = newTot;
+            if (oldPpb > 0) {
+              nb = Math.min(bx, Math.floor(newTot / oldPpb));
+              nl = newTot - nb * oldPpb;
+            }
+            ops.push({
+              product_id: productId, location_id: locId, company_id: r.company_id ?? DEFAULT_COMPANY_ID,
+              dq: nl - pcs, db: nb - bx,
+              mov_type: 'ADJUSTMENT_OUT', mov_qty: take, mov_from: locId, mov_to: null,
+              reason: 'Stock adjusted via product form',
+            });
+            remaining -= take;
+          }
         }
       }
+      if (ops.length > 0) await stockTxn(ops);
 
       onSaved(editing ? 'Product updated ✓' : 'Product added ✓');
     } catch (e) {
@@ -836,6 +860,27 @@ function ProductModal({
         .update({ active_status: false })
         .eq('product_id', p.product_id);
       if (upErr) throw new Error(upErr.message);
+
+      // Record the remaining stock being cleared in History BEFORE the
+      // rows disappear — otherwise stock vanishes with no audit trail.
+      // stock_txn zeroes each row and logs the movement atomically.
+      const { data: stockRows } = await supabase
+        .from('stock_by_location')
+        .select('location_id, company_id, quantity, box_quantity')
+        .eq('product_id', p.product_id);
+      const ppb = p.pieces_per_box ?? 0;
+      const clearOps: StockOp[] = (stockRows ?? [])
+        .filter(r => (r.quantity ?? 0) > 0 || (r.box_quantity ?? 0) > 0)
+        .map(r => ({
+          product_id: p.product_id, location_id: r.location_id, company_id: r.company_id ?? DEFAULT_COMPANY_ID,
+          dq: -(r.quantity ?? 0), db: -(r.box_quantity ?? 0),
+          mov_type: 'ADJUSTMENT_OUT',
+          mov_qty: (r.quantity ?? 0) + (r.box_quantity ?? 0) * (ppb > 0 ? ppb : 0),
+          mov_from: r.location_id, mov_to: null,
+          reason: 'Product deleted — remaining stock cleared',
+        }));
+      if (clearOps.length > 0) await stockTxn(clearOps);
+
       const { error: stErr } = await supabase
         .from('stock_by_location')
         .delete()
