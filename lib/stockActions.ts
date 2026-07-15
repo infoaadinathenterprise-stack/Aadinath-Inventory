@@ -64,16 +64,20 @@ export async function rejectRequest(requestId: number): Promise<void> {
 
 // Submit a stock-addition request that waits for admin approval.
 // Stock is NOT modified until an admin approves it in /admin/approvals.
+// The company is recorded so approval credits ONLY that company (see
+// approve_stock_request in supabase/07_fixes.sql). If the company_id column
+// hasn't been migrated yet, we retry without it so submission still works.
 export async function submitPendingRequest(
   productId:  number,
   locationId: number,
   qty:        number,
   reason:     string,
+  companyId   = 1,
 ): Promise<void> {
   const user  = currentUser();
   const now   = new Date().toISOString();
   const notes = `[${user}] ${reason}`;
-  const { error } = await supabase.from('stock_requests').insert({
+  const base = {
     product_id:       productId,
     request_type:     'ADJUSTMENT_IN',
     quantity:         qty,
@@ -82,7 +86,13 @@ export async function submitPendingRequest(
     notes,
     status:           'PENDING',
     requested_at:     now,
-  });
+  };
+
+  let { error } = await supabase.from('stock_requests').insert({ ...base, company_id: companyId });
+  // Older database without the company_id column → PostgREST schema error.
+  if (error && /company_id/.test(error.message)) {
+    ({ error } = await supabase.from('stock_requests').insert(base));
+  }
   if (error) throw new Error('Could not submit request: ' + error.message);
 }
 

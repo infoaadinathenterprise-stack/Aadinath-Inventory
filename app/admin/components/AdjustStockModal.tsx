@@ -187,7 +187,7 @@ export default function AdjustStockModal({
     try {
       // ── Employee stock-in → PENDING approval ──
       if (userRole === 'staff') {
-        await submitPendingRequest(product.product_id, locationId, movQty, `Stock-in request · ${locName}`);
+        await submitPendingRequest(product.product_id, locationId, movQty, `Stock-in request · ${locName}`, companyId);
         onSuccess('Submitted for admin approval ✓');
         onClose(); onDone(); return;
       }
