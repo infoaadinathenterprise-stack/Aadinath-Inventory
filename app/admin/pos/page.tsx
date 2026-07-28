@@ -230,7 +230,15 @@ function PosDashboard() {
   // bulk unit like roll/drum). Either may be null — in that case the
   // user fills it in on the cart row before hitting Sold.
   function defaultSellPrice(p: Product, unit: CartUnit): number | null {
-    if (unit === 'box') return p.box_selling_price ?? null;
+    if (unit === 'box') {
+      // Prefer an explicit box price. If none is set but the per-piece
+      // price is, derive the box price as piece price × pieces_per_box
+      // so selling a box doesn't force the user to re-type a price.
+      if (p.box_selling_price != null) return p.box_selling_price;
+      const ppb = p.pieces_per_box ?? 0;
+      if (p.selling_price != null && ppb > 0) return p.selling_price * ppb;
+      return null;
+    }
     return p.selling_price ?? null;
   }
 
@@ -354,31 +362,42 @@ function PosDashboard() {
     const isBoxMode = unit === 'box' && ppb > 0;
     const movPieces = isBoxMode ? qty * ppb : qty;
 
-    const locId     = locationId;
-    const otherLocs = locations.filter(l => l.location_id !== locId);
-    // For overflow we pick the "best" other location = most stock
-    const bestOther = otherLocs.reduce<LocationInfo | null>((best, l) => {
-      const tot = ((stockByLoc[l.location_id] ?? {})[pid] ?? 0) + ((boxByLoc[l.location_id] ?? {})[pid] ?? 0) * ppb;
-      const bestTot = best ? ((stockByLoc[best.location_id] ?? {})[pid] ?? 0) + ((boxByLoc[best.location_id] ?? {})[pid] ?? 0) * ppb : -1;
-      return tot > bestTot ? l : best;
-    }, null);
-    const otherId   = bestOther?.location_id ?? 0;
-    const saleLocName  = locName;
-    const otherName = bestOther?.location_name ?? 'Other';
+    const locId       = locationId;
+    const saleLocName = locName;
+    const locNameOf   = (id: number) => locations.find(l => l.location_id === id)?.location_name ?? 'Other';
 
-    const curPcs   = (stockByLoc[locId]   ?? {})[pid] ?? 0;
-    const curBx    = (boxByLoc[locId]     ?? {})[pid] ?? 0;
-    const otherPcs = bestOther ? ((stockByLoc[bestOther.location_id] ?? {})[pid] ?? 0) : 0;
-    const otherBx  = bestOther ? ((boxByLoc[bestOther.location_id]   ?? {})[pid] ?? 0) : 0;
+    // Total available for a product across ALL locations (this company).
+    const totalAcross = (prodId: number, prodPpb: number): number =>
+      locations.reduce((s, l) =>
+        s + ((stockByLoc[l.location_id] ?? {})[prodId] ?? 0)
+          + ((boxByLoc[l.location_id]   ?? {})[prodId] ?? 0) * prodPpb, 0);
 
-    const totalCur   = curPcs   + curBx   * ppb;
-    const totalOther = otherPcs + otherBx * ppb;
-    if (movPieces > totalCur + totalOther) {
-      throw new Error(`Only ${totalCur + totalOther} ${unitLabel(p, 'piece').toLowerCase()}s in stock total`);
+    // Locations to pull a product from, in order: the sale location first,
+    // then every OTHER location that has stock, most-stocked first. This is
+    // what lets a sale succeed when the front store is empty but the item
+    // (or a component) is sitting in the back godown / first floor —
+    // previously only ONE fallback location was used, so stock spread across
+    // two back locations, or a component held somewhere other than the main
+    // product's single fallback, wrongly failed with "not enough stock".
+    const drainOrder = (prodId: number, prodPpb: number): number[] => {
+      const others = locations
+        .filter(l => l.location_id !== locId)
+        .map(l => ({
+          id:  l.location_id,
+          tot: ((stockByLoc[l.location_id] ?? {})[prodId] ?? 0)
+             + ((boxByLoc[l.location_id]   ?? {})[prodId] ?? 0) * prodPpb,
+        }))
+        .filter(l => l.tot > 0)
+        .sort((a, b) => b.tot - a.tot)
+        .map(l => l.id);
+      return [locId, ...others];
+    };
+
+    // ── Validate the main product has enough across all locations ──
+    const grandTotal = totalAcross(pid, ppb);
+    if (movPieces > grandTotal) {
+      throw new Error(`Only ${grandTotal} ${unitLabel(p, 'piece').toLowerCase()}s of ${p.product_name} in stock total`);
     }
-
-    const fromCurPieces   = Math.min(movPieces, totalCur);
-    const fromOtherPieces = movPieces - fromCurPieces;
 
     // ── Build active component list (needed for validation + deduction) ──
     const productComps = componentMap[pid] ?? [];
@@ -392,24 +411,15 @@ function PosDashboard() {
       .filter((c): c is NonNullable<typeof c> => Boolean(c));
     const activeComps = [...alwaysComps, ...pickedFromGroups];
 
-    // ── Pre-validate component stock (friendly early error) ──────────────
+    // ── Pre-validate component stock across ALL locations (friendly error) ──
     for (const comp of activeComps) {
-      const cid       = comp.component_product_id;
-      const cPpb      = products.find(pr => pr.product_id === cid)?.pieces_per_box ?? 0;
-      const cCurPcs   = (stockByLoc[locId] ?? {})[cid] ?? 0;
-      const cCurBx    = (boxByLoc[locId]   ?? {})[cid] ?? 0;
-      const cCurTotal = cCurPcs + cCurBx * cPpb;
-      const cOthTotal = locations
-        .filter(l => l.location_id !== locId)
-        .reduce((s, l) => s + ((stockByLoc[l.location_id] ?? {})[cid] ?? 0) + ((boxByLoc[l.location_id] ?? {})[cid] ?? 0) * cPpb, 0);
+      const cid      = comp.component_product_id;
+      const cPpb     = products.find(pr => pr.product_id === cid)?.pieces_per_box ?? 0;
       const movComp  = movPieces * comp.quantity;
+      const cHave    = totalAcross(cid, cPpb);
       const compName = products.find(pr => pr.product_id === cid)?.product_name ?? `#${cid}`;
-      if (cCurTotal + cOthTotal < movComp) {
-        throw new Error(
-          `Not enough "${compName}": need ${movComp}, ` +
-          `only ${cCurTotal + cOthTotal} in stock ` +
-          `(${saleLocName}: ${cCurTotal}, other locations: ${cOthTotal})`
-        );
+      if (cHave < movComp) {
+        throw new Error(`Not enough "${compName}": need ${movComp}, only ${cHave} in stock across all locations`);
       }
     }
 
@@ -418,60 +428,55 @@ function PosDashboard() {
       ? ` · ${qty} ${unitLbl}${qty === 1 ? '' : 's'} @ Ksh ${sellPrice} = Ksh ${(qty * sellPrice).toLocaleString('en-KE')}`
       : '';
 
-    if (fromCurPieces > 0) {
-      const newState = (isBoxMode && fromCurPieces === movPieces)
-        ? deductFromLocation(curPcs, curBx, qty, 'box', ppb)
-        : deductFromLocation(curPcs, curBx, fromCurPieces, 'piece', ppb);
+    // ── Deduct the main product, draining across locations in order ──
+    let remaining = movPieces;
+    for (const lId of drainOrder(pid, ppb)) {
+      if (remaining <= 0) break;
+      const pcs = (stockByLoc[lId] ?? {})[pid] ?? 0;
+      const bx  = (boxByLoc[lId]   ?? {})[pid] ?? 0;
+      const locTotal = pcs + bx * ppb;
+      if (locTotal <= 0) continue;
+      const take = Math.min(remaining, locTotal);
+      // Keep a whole-box deduction only when the ENTIRE box sale comes from
+      // this one location's whole boxes; otherwise deduct by pieces (breaks
+      // boxes as needed), which is correct across split locations.
+      const asWholeBoxes = isBoxMode && take === movPieces && bx * ppb >= take;
+      const newState = asWholeBoxes
+        ? deductFromLocation(pcs, bx, qty, 'box', ppb)
+        : deductFromLocation(pcs, bx, take, 'piece', ppb);
       ops.push({
-        product_id: pid, location_id: locId, company_id: companyId,
-        dq: newState.quantity - curPcs, db: newState.box_quantity - curBx,
-        mov_type: 'SALE', mov_qty: fromCurPieces, mov_from: locId, mov_to: null,
-        reason: `Sold from ${saleLocName}${priceSuffix}`,
+        product_id: pid, location_id: lId, company_id: companyId,
+        dq: newState.quantity - pcs, db: newState.box_quantity - bx,
+        mov_type: 'SALE', mov_qty: take, mov_from: lId, mov_to: null,
+        reason: lId === locId
+          ? `Sold from ${saleLocName}${priceSuffix}`
+          : `Sold from ${locNameOf(lId)} (POS overflow)${priceSuffix}`,
       });
+      remaining -= take;
     }
 
-    if (fromOtherPieces > 0) {
-      const newState = deductFromLocation(otherPcs, otherBx, fromOtherPieces, 'piece', ppb);
-      ops.push({
-        product_id: pid, location_id: otherId, company_id: companyId,
-        dq: newState.quantity - otherPcs, db: newState.box_quantity - otherBx,
-        mov_type: 'SALE', mov_qty: fromOtherPieces, mov_from: otherId, mov_to: null,
-        reason: `Sold from ${otherName} (POS overflow)${priceSuffix}`,
-      });
-    }
-
-    // ── Components — drain current location first, overflow to the other ──
+    // ── Deduct each component, also draining across locations in order ──
     for (const comp of activeComps) {
-      const cid      = comp.component_product_id;
-      const cPpb     = products.find(pr => pr.product_id === cid)?.pieces_per_box ?? 0;
-      const srcPcs   = (stockByLoc[locId]   ?? {})[cid] ?? 0;
-      const srcBx    = (boxByLoc[locId]     ?? {})[cid] ?? 0;
-      const othPcs   = bestOther ? ((stockByLoc[bestOther.location_id] ?? {})[cid] ?? 0) : 0;
-      const othBx    = bestOther ? ((boxByLoc[bestOther.location_id]   ?? {})[cid] ?? 0) : 0;
-      const movComp  = movPieces * comp.quantity;
-      const srcTotal = srcPcs + srcBx * cPpb;
-
-      const fromSrc   = Math.min(movComp, srcTotal);
-      const fromOther = movComp - fromSrc;
-
-      if (fromSrc > 0) {
-        const raw = deductFromLocation(srcPcs, srcBx, fromSrc, 'piece', cPpb);
+      const cid  = comp.component_product_id;
+      const cPpb = products.find(pr => pr.product_id === cid)?.pieces_per_box ?? 0;
+      let need   = movPieces * comp.quantity;
+      for (const lId of drainOrder(cid, cPpb)) {
+        if (need <= 0) break;
+        const pcs = (stockByLoc[lId] ?? {})[cid] ?? 0;
+        const bx  = (boxByLoc[lId]   ?? {})[cid] ?? 0;
+        const locTotal = pcs + bx * cPpb;
+        if (locTotal <= 0) continue;
+        const take = Math.min(need, locTotal);
+        const raw = deductFromLocation(pcs, bx, take, 'piece', cPpb);
         ops.push({
-          product_id: cid, location_id: locId, company_id: companyId,
-          dq: raw.quantity - srcPcs, db: raw.box_quantity - srcBx,
-          mov_type: 'AUTO_DEDUCT', mov_qty: fromSrc, mov_from: locId, mov_to: null,
-          reason: `Auto: component of ${p.product_name}`,
+          product_id: cid, location_id: lId, company_id: companyId,
+          dq: raw.quantity - pcs, db: raw.box_quantity - bx,
+          mov_type: 'AUTO_DEDUCT', mov_qty: take, mov_from: lId, mov_to: null,
+          reason: lId === locId
+            ? `Auto: component of ${p.product_name}`
+            : `Auto: component of ${p.product_name} (pulled from ${locNameOf(lId)})`,
         });
-      }
-
-      if (fromOther > 0) {
-        const raw = deductFromLocation(othPcs, othBx, fromOther, 'piece', cPpb);
-        ops.push({
-          product_id: cid, location_id: otherId, company_id: companyId,
-          dq: raw.quantity - othPcs, db: raw.box_quantity - othBx,
-          mov_type: 'AUTO_DEDUCT', mov_qty: fromOther, mov_from: otherId, mov_to: null,
-          reason: `Auto: component of ${p.product_name} (pulled from ${otherName})`,
-        });
+        need -= take;
       }
     }
     return ops;

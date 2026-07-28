@@ -179,19 +179,28 @@ function LoginForm({ onSuccess }: { onSuccess: () => void }) {
 // ── Add/Edit Product Modal ────────────────────────────────────────────────────
 
 function ProductModal({
-  editing, products, locations, stockByLoc, boxByLoc,
+  editing, products, locations, companies, stockByCompany, boxByCompany, initialCompanyId,
   onClose, onSaved, onError,
 }: {
-  editing:      Product | null;
-  products:     Product[];
-  locations:    LocationInfo[];
-  stockByLoc:   StockByLoc;
-  boxByLoc:     StockByLoc;
+  editing:        Product | null;
+  products:       Product[];
+  locations:      LocationInfo[];
+  companies:      Company[];
+  stockByCompany: StockByCompany;
+  boxByCompany:   StockByCompany;
+  initialCompanyId: number;
   onClose:  () => void;
   onSaved:  (msg: string) => void;
   onError:  (msg: string) => void;
 }) {
   type CompEntry = { component_id: number; component_product_id: number; quantity: number; name: string; choice_group: string | null };
+
+  // Which firm's stock this modal is viewing / editing. New products are
+  // stocked into this firm; editing shows and adjusts this firm's stock.
+  const [companyId, setCompanyId] = useState<number>(initialCompanyId);
+  // Per-company stock maps for the selected firm.
+  const stockByLoc: StockByLoc = stockByCompany[companyId] ?? {};
+  const boxByLoc:   StockByLoc = boxByCompany[companyId]   ?? {};
 
   const [form,   setForm]   = useState<ProductForm>(() => {
     if (!editing) return EMPTY_FORM;
@@ -230,7 +239,7 @@ function ProductModal({
   });
   // Snapshot of how many whole boxes each location held when the modal
   // opened — used to preserve the box/loose split when saving totals.
-  const [initBoxes] = useState<Record<number, number>>(() => {
+  const [initBoxes, setInitBoxes] = useState<Record<number, number>>(() => {
     const m: Record<number, number> = {};
     for (const loc of locations) {
       m[loc.location_id] = editing ? (boxByLoc[loc.location_id]?.[editing.product_id] ?? 0) : 0;
@@ -240,6 +249,27 @@ function ProductModal({
   function setLocQty(locId: number, value: string) {
     setLocStock(prev => ({ ...prev, [locId]: value }));
   }
+
+  // When the firm is switched while EDITING, re-read the location inputs
+  // from that firm's stock so you see and adjust the right company's
+  // numbers. New products keep whatever was typed (all firms start at 0).
+  useEffect(() => {
+    if (!editing) return;
+    const sc = stockByCompany[companyId] ?? {};
+    const bc = boxByCompany[companyId]   ?? {};
+    const editPpb = editing.pieces_per_box ?? 0;
+    const nextStock: Record<number, string> = {};
+    const nextBoxes: Record<number, number> = {};
+    for (const loc of locations) {
+      const q = sc[loc.location_id]?.[editing.product_id] ?? 0;
+      const b = bc[loc.location_id]?.[editing.product_id] ?? 0;
+      nextStock[loc.location_id] = String(q + b * (editPpb > 0 ? editPpb : 0));
+      nextBoxes[loc.location_id] = b;
+    }
+    setLocStock(nextStock);
+    setInitBoxes(nextBoxes);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [companyId]);
 
   const [saving,       setSaving]       = useState(false);
   const [compList,     setCompList]     = useState<CompEntry[]>([]);
@@ -409,16 +439,12 @@ function ProductModal({
         }
       }
 
-      // Write stock for every location. The form value is the TOTAL
-      // piece count when editing (boxes input when creating a box
-      // product). Since the company split, a product can have one
-      // stock row PER COMPANY at each location — the old code assumed
-      // a single row (`maybeSingle()`), which errored on two rows,
-      // silently treated old stock as 0, logged a bogus ADJUSTMENT_IN
-      // and then failed the unique-index insert without ever changing
-      // stock. We now read ALL company rows, diff against the true
-      // combined total, and apply the delta through the atomic
-      // stock_txn engine so stock and history can never disagree.
+      // Write stock for every location, scoped to the SELECTED firm. The
+      // form value is the TOTAL piece count when editing (boxes input when
+      // creating a box product). Stock is keyed per (product, location,
+      // company), so we diff against THIS firm's current numbers and apply
+      // the delta through the atomic stock_txn engine — stock and history
+      // can never disagree, and the other firm's stock is never touched.
       const formPpb = isBox ? (parseInt(form.pieces_per_box) || 0) : 0;
       // The DB's existing box counts were stored under the product's
       // PREVIOUS ppb — use that for reading old totals.
@@ -437,55 +463,45 @@ function ProductModal({
         // New box product: input is boxes → convert. Otherwise: total pieces.
         const newTotal = (!editing && formPpb > 0) ? input * formPpb : input;
 
-        const locRows  = (stockRows ?? []).filter(r => r.location_id === locId);
-        const oldTotal = locRows.reduce((s, r) =>
-          s + (r.quantity ?? 0) + (r.box_quantity ?? 0) * (oldPpb > 0 ? oldPpb : 0), 0);
-        const delta = newTotal - oldTotal;
+        // Only THIS firm's row(s) at this location.
+        const locRows = (stockRows ?? []).filter(
+          r => r.location_id === locId && (r.company_id ?? DEFAULT_COMPANY_ID) === companyId,
+        );
+        const oldPcs   = locRows.reduce((s, r) => s + (r.quantity ?? 0), 0);
+        const oldBox   = locRows.reduce((s, r) => s + (r.box_quantity ?? 0), 0);
+        const oldTotal = oldPcs + oldBox * (oldPpb > 0 ? oldPpb : 0);
+        const delta    = newTotal - oldTotal;
         if (delta === 0) continue;
 
         if (delta > 0) {
-          // Add to the default company. New box products pack into
-          // whole boxes; edits keep the existing box/loose split and
-          // add the difference as loose pieces.
+          // New box products pack into whole boxes; edits add the
+          // difference as loose pieces (keeping existing whole boxes).
           let dq = delta, db = 0;
           if (!editing && formPpb > 0) {
             db = Math.floor(delta / formPpb);
             dq = delta - db * formPpb;
           }
           ops.push({
-            product_id: productId, location_id: locId, company_id: DEFAULT_COMPANY_ID,
+            product_id: productId, location_id: locId, company_id: companyId,
             dq, db,
             mov_type: 'ADJUSTMENT_IN', mov_qty: delta, mov_from: null, mov_to: locId,
             reason: editing ? 'Stock adjusted via product form' : 'Initial stock',
           });
         } else {
-          // Remove |delta| pieces, draining company rows one by one
-          // (default company first). Within a row, keep as many whole
-          // boxes as still fit so the box/loose split survives.
-          let remaining = -delta;
-          const order = [...locRows].sort((a, b) =>
-            (a.company_id === DEFAULT_COMPANY_ID ? 0 : a.company_id) -
-            (b.company_id === DEFAULT_COMPANY_ID ? 0 : b.company_id));
-          for (const r of order) {
-            if (remaining <= 0) break;
-            const pcs = r.quantity ?? 0, bx = r.box_quantity ?? 0;
-            const total = pcs + bx * (oldPpb > 0 ? oldPpb : 0);
-            const take = Math.min(remaining, total);
-            if (take === 0) continue;
-            const newTot = total - take;
-            let nb = 0, nl = newTot;
-            if (oldPpb > 0) {
-              nb = Math.min(bx, Math.floor(newTot / oldPpb));
-              nl = newTot - nb * oldPpb;
-            }
-            ops.push({
-              product_id: productId, location_id: locId, company_id: r.company_id ?? DEFAULT_COMPANY_ID,
-              dq: nl - pcs, db: nb - bx,
-              mov_type: 'ADJUSTMENT_OUT', mov_qty: take, mov_from: locId, mov_to: null,
-              reason: 'Stock adjusted via product form',
-            });
-            remaining -= take;
+          // Reduce to the new total within this firm's row, keeping as many
+          // whole boxes as still fit so the box/loose split survives.
+          const newTot = oldTotal + delta; // delta < 0
+          let nb = 0, nl = newTot;
+          if (oldPpb > 0) {
+            nb = Math.min(oldBox, Math.floor(newTot / oldPpb));
+            nl = newTot - nb * oldPpb;
           }
+          ops.push({
+            product_id: productId, location_id: locId, company_id: companyId,
+            dq: nl - oldPcs, db: nb - oldBox,
+            mov_type: 'ADJUSTMENT_OUT', mov_qty: -delta, mov_from: locId, mov_to: null,
+            reason: 'Stock adjusted via product form',
+          });
         }
       }
       if (ops.length > 0) await stockTxn(ops);
@@ -532,6 +548,35 @@ function ProductModal({
         <h3 className="text-base font-bold text-slate-100 mb-4">{editing ? 'Edit Product' : 'Add Product'}</h3>
 
         <div className="flex flex-col gap-3">
+          {/* Firm (company) this stock belongs to. New products stock into
+              the chosen firm; editing shows and adjusts that firm's stock. */}
+          {companies.length > 1 && (
+            <div>
+              <label className="text-[10px] font-bold text-muted uppercase tracking-widest block mb-1">
+                Firm {editing ? '(showing this firm’s stock)' : '(stock goes to)'}
+              </label>
+              <div className="flex gap-2">
+                {companies.map(c => (
+                  <button
+                    key={c.company_id}
+                    type="button"
+                    onClick={() => setCompanyId(c.company_id)}
+                    className={`flex-1 py-2.5 rounded-xl border text-sm font-bold transition-all ${
+                      companyId === c.company_id
+                        ? (c.company_id === DEFAULT_COMPANY_ID ? 'border-teal bg-teal/10 text-teal' : 'border-gold bg-gold/10 text-gold')
+                        : 'border-white/8 bg-surface2 text-muted hover:border-white/20'
+                    }`}
+                  >{c.company_name.replace(/\s*Enterprise$/i, '')}</button>
+                ))}
+              </div>
+              {editing && (
+                <p className="text-[10px] text-muted/70 mt-1 leading-relaxed">
+                  Switch the firm to view or adjust its stock separately. Product details (name, price, image) are shared across firms.
+                </p>
+              )}
+            </div>
+          )}
+
           {/* Image uploader */}
           <div>
             <label className="text-[10px] font-bold text-muted uppercase tracking-widest block mb-1">Product Image (optional)</label>
@@ -682,6 +727,11 @@ function ProductModal({
           <div>
             <label className="text-[10px] font-bold text-muted uppercase tracking-widest block mb-2">
               Stock by Location{isBox && ppb > 0 ? (editing ? ' (total pieces)' : ' (boxes)') : ''}
+              {companies.length > 1 && (
+                <span className="ml-1 text-teal/80 normal-case tracking-normal font-semibold">
+                  · {(companies.find(c => c.company_id === companyId)?.company_name ?? '').replace(/\s*Enterprise$/i, '')}
+                </span>
+              )}
             </label>
             <div className="flex flex-col gap-2.5">
               {locations.map(loc => {
@@ -1039,8 +1089,10 @@ function Dashboard({ role }: { role: UserRole }) {
             editing={productModal.editing}
             products={products}
             locations={locations}
-            stockByLoc={stockByLoc}
-            boxByLoc={boxByLoc}
+            companies={companies}
+            stockByCompany={stockByCompany}
+            boxByCompany={boxByCompany}
+            initialCompanyId={modalCompanyId}
             onClose={() => setProductModal(null)}
             onSaved={msg => { setProductModal(null); showToast(msg, 'success'); refresh(); }}
             onError={msg => showToast(msg, 'error')}
@@ -1080,7 +1132,7 @@ export default function AdminPage() {
 // Lives in its own component so it can call useSearchParams (which Next
 // requires be inside a Suspense boundary in static export mode).
 
-import type { StockByLoc, LocationInfo } from '@/lib/types';
+import type { StockByLoc, LocationInfo, Company, StockByCompany } from '@/lib/types';
 import type { StockFilter } from './components/ProductList';
 
 function InventoryListWithFilter(props: {
