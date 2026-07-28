@@ -100,9 +100,13 @@ export interface ProductComponent {
   component_product_id: number;
   quantity:             number;
   choice_group:         string | null;
+  // Sell price to charge when this alternative (choice-group option) is the
+  // one picked at sale time. null = no per-choice price (use the product's
+  // normal selling price). Only meaningful for choice-group members.
+  price:                number | null;
 }
 
-export type ComponentMap = Record<number, { component_product_id: number; quantity: number; choice_group: string | null }[]>;
+export type ComponentMap = Record<number, { component_product_id: number; quantity: number; choice_group: string | null; price: number | null }[]>;
 
 export interface StockMovement {
   id:               number;

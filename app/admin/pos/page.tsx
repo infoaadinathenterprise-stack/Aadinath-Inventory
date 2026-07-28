@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useProducts } from '@/lib/hooks/useProducts';
 import { useProductComponents } from '@/lib/hooks/useProductComponents';
+import { supabase } from '@/lib/supabase';
 import { formatStock } from '@/lib/formatStock';
 import { stockTxn, type StockOp, type SalePayload } from '@/lib/stockActions';
 import AdjustStockModal from '@/app/admin/components/AdjustStockModal';
@@ -114,7 +115,7 @@ interface ModalState {
 
 function PosDashboard() {
   const { products, locations, companies, stockByLoc, boxByLoc, stockByCompany, boxByCompany, loading, error, refresh } = useProducts();
-  const componentMap = useProductComponents();
+  const { map: componentMap, refresh: refreshComponents } = useProductComponents();
 
   // locationId: default to first location once loaded
   const [locationId,  setLocationId]  = useState<number>(0);
@@ -240,6 +241,45 @@ function PosDashboard() {
       return null;
     }
     return p.selling_price ?? null;
+  }
+
+  // Choice-group options can each carry their own sell price (e.g. the same
+  // product "with motor A" vs "with motor B" costs differently). When such an
+  // option is picked, its saved price becomes the line's sell price. Returns
+  // null when no picked option has a price, so the caller keeps the base
+  // price. Applies to the piece unit (box uses box_selling_price).
+  function choiceSellPrice(p: Product, groupChoices: Record<string, number>, unit: CartUnit): number | null {
+    if (unit === 'box') return null;
+    const comps = componentMap[p.product_id] ?? [];
+    const pricedPicked = comps.filter(c =>
+      c.choice_group != null && groupChoices[c.choice_group] === c.component_product_id && c.price != null,
+    );
+    if (pricedPicked.length === 0) return null;
+    return pricedPicked.reduce((s, c) => s + (c.price ?? 0), 0);
+  }
+
+  // After a sale, persist the price actually charged back onto the picked
+  // choice option, so next time it pre-fills. Only the unambiguous single
+  // picked-option case is written (avoids guessing across multiple groups).
+  async function rememberChoicePrices(items: CartItem[]) {
+    let wrote = false;
+    for (const it of items) {
+      if (it.sellPrice == null || it.unit === 'box') continue;
+      const comps = componentMap[it.product.product_id] ?? [];
+      const picked = comps.filter(c => c.choice_group != null && it.groupChoices[c.choice_group!] === c.component_product_id);
+      if (picked.length !== 1) continue;               // ambiguous → skip
+      const chosen = picked[0];
+      if (chosen.price === it.sellPrice) continue;      // unchanged
+      const { error } = await supabase
+        .from('product_components')
+        .update({ price: it.sellPrice })
+        .eq('product_id', it.product.product_id)
+        .eq('component_product_id', chosen.component_product_id)
+        .eq('choice_group', chosen.choice_group!);
+      if (!error) wrote = true;
+      // A missing `price` column just means the migration hasn't run; ignore.
+    }
+    if (wrote) refreshComponents();
   }
 
   function addToCart(product: Product) {
@@ -615,6 +655,7 @@ function PosDashboard() {
           : buildTransferOps(item.product, item.qty, item.unit, item.transferDestId!, item.groupChoices, item.companyId)));
       }
       await stockTxn(ops, action === 'sold' ? buildSalePayload(cart) : null);
+      if (action === 'sold') await rememberChoicePrices(cart);
       showToast(`${action === 'sold' ? 'Sold' : 'Moved'} ${cart.length} item(s) ✓`, 'success');
       // Restock alert: after a sale, show items available elsewhere
       if (action === 'sold') {
@@ -656,6 +697,7 @@ function PosDashboard() {
         ? buildSellOps(item.product, item.qty, item.unit, item.sellPrice, item.groupChoices, item.companyId)
         : buildTransferOps(item.product, item.qty, item.unit, item.transferDestId!, item.groupChoices, item.companyId);
       await stockTxn(ops, action === 'sold' ? buildSalePayload([item]) : null);
+      if (action === 'sold') await rememberChoicePrices([item]);
       setCart(c => c.filter(i => i.product.product_id !== item.product.product_id));
       showToast(`${action === 'sold' ? 'Sold' : 'Moved'}: ${item.product.product_name} ✓`, 'success');
       if (action === 'sold') {
@@ -1042,12 +1084,13 @@ function PosDashboard() {
                                     return (
                                       <button
                                         key={c.component_product_id}
-                                        onClick={() => setCart(prev => prev.map(i =>
-                                          i.product.product_id !== item.product.product_id ? i : {
-                                            ...i,
-                                            groupChoices: { ...i.groupChoices, [groupName]: c.component_product_id },
-                                          }
-                                        ))}
+                                        onClick={() => setCart(prev => prev.map(i => {
+                                          if (i.product.product_id !== item.product.product_id) return i;
+                                          const newChoices = { ...i.groupChoices, [groupName]: c.component_product_id };
+                                          // Pull the sell price for the newly picked option (if it has one).
+                                          const cp = choiceSellPrice(i.product, newChoices, i.unit);
+                                          return { ...i, groupChoices: newChoices, sellPrice: cp != null ? cp : i.sellPrice };
+                                        }))}
                                         className={`text-left px-2 py-1.5 rounded border text-[10px] font-semibold transition-all ${
                                           isPicked
                                             ? 'border-gold bg-gold/15 text-gold'
@@ -1055,6 +1098,7 @@ function PosDashboard() {
                                         }`}
                                       >
                                         {isPicked && '✓ '}{name} <span className="text-muted font-normal">×{c.quantity}/unit</span>
+                                        {c.price != null && <span className="float-right font-bold text-gold">Ksh {c.price.toLocaleString('en-KE')}</span>}
                                       </button>
                                     );
                                   })}

@@ -193,7 +193,7 @@ function ProductModal({
   onSaved:  (msg: string) => void;
   onError:  (msg: string) => void;
 }) {
-  type CompEntry = { component_id: number; component_product_id: number; quantity: number; name: string; choice_group: string | null };
+  type CompEntry = { component_id: number; component_product_id: number; quantity: number; name: string; choice_group: string | null; price: number | null };
 
   // Which firm's stock this modal is viewing / editing. New products are
   // stocked into this firm; editing shows and adjusts this firm's stock.
@@ -278,6 +278,7 @@ function ProductModal({
   const [selectedComp, setSelectedComp] = useState<Product | null>(null);
   const [compQty,      setCompQty]      = useState(1);
   const [compGroup,    setCompGroup]    = useState('');
+  const [compPrice,    setCompPrice]    = useState('');
   const [imageUrl,     setImageUrl]     = useState<string | null>(editing?.image_url ?? null);
   const imageInputRef = useRef<HTMLInputElement>(null);
 
@@ -341,52 +342,72 @@ function ProductModal({
     });
   }
 
+  const refreshComps = useCallback(async (productId: number) => {
+    // Try with the per-choice `price` column; fall back without it if the
+    // DB hasn't been migrated yet (see supabase/08_component_prices.sql).
+    let res: { data: Record<string, unknown>[] | null; error: { message: string } | null } = await supabase
+      .from('product_components')
+      .select('component_id, component_product_id, quantity, choice_group, price')
+      .eq('product_id', productId);
+    if (res.error && /price/.test(res.error.message)) {
+      res = await supabase
+        .from('product_components')
+        .select('component_id, component_product_id, quantity, choice_group')
+        .eq('product_id', productId);
+    }
+    if (res.error) { console.error('components fetch error:', res.error.message); return; }
+    setCompList((res.data ?? []).map((c: Record<string, unknown>) => ({
+      component_id: c.component_id as number,
+      component_product_id: c.component_product_id as number,
+      quantity: c.quantity as number,
+      name: products.find(p => p.product_id === (c.component_product_id as number))?.product_name ?? `#${c.component_product_id}`,
+      choice_group: (c.choice_group as string | null) ?? null,
+      price: (c.price as number | null) ?? null,
+    })));
+  }, [products]);
+
   useEffect(() => {
     if (!editing) return;
-    supabase
-      .from('product_components')
-      .select('component_id, component_product_id, quantity, choice_group')
-      .eq('product_id', editing.product_id)
-      .then(({ data, error }) => {
-        if (error) { console.error('components fetch error:', error.message); return; }
-        setCompList((data ?? []).map(c => ({
-          component_id: c.component_id,
-          component_product_id: c.component_product_id,
-          quantity: c.quantity,
-          name: products.find(p => p.product_id === c.component_product_id)?.product_name ?? `#${c.component_product_id}`,
-          choice_group: (c as { choice_group?: string | null }).choice_group ?? null,
-        })));
-      });
-  }, [editing, products]);
-
-  async function refreshComps(productId: number) {
-    const { data } = await supabase
-      .from('product_components')
-      .select('component_id, component_product_id, quantity, choice_group')
-      .eq('product_id', productId);
-    setCompList((data ?? []).map(c => ({
-      component_id: c.component_id,
-      component_product_id: c.component_product_id,
-      quantity: c.quantity,
-      name: products.find(p => p.product_id === c.component_product_id)?.product_name ?? `#${c.component_product_id}`,
-      choice_group: (c as { choice_group?: string | null }).choice_group ?? null,
-    })));
-  }
+    refreshComps(editing.product_id);
+  }, [editing, refreshComps]);
 
   async function addComponent() {
     if (!selectedComp || !editing) return;
-    const { error } = await supabase.from('product_components').insert({
+    const group = compGroup.trim() || null;
+    // A per-choice price only makes sense for a choice-group alternative.
+    const priceNum = group && compPrice.trim() !== '' ? (parseFloat(compPrice) || null) : null;
+    const row: Record<string, unknown> = {
       product_id: editing.product_id,
       component_product_id: selectedComp.product_id,
       quantity: compQty,
-      choice_group: compGroup.trim() || null,
-    });
+      choice_group: group,
+      price: priceNum,
+    };
+    let { error } = await supabase.from('product_components').insert(row);
+    // Fall back if the price column hasn't been migrated yet.
+    if (error && /price/.test(error.message)) {
+      delete row.price;
+      ({ error } = await supabase.from('product_components').insert(row));
+    }
     if (error) { onError('Failed to add component: ' + error.message); return; }
     await refreshComps(editing.product_id);
     setSelectedComp(null);
     setCompSearch('');
     setCompQty(1);
+    setCompPrice('');
     // keep compGroup so adding several alternatives in a row is fast
+  }
+
+  // Edit the saved price of an existing choice-group option in place.
+  async function updateComponentPrice(componentId: number, priceStr: string) {
+    const priceNum = priceStr.trim() === '' ? null : (parseFloat(priceStr) || null);
+    // Optimistic UI so the input stays responsive.
+    setCompList(prev => prev.map(c => c.component_id === componentId ? { ...c, price: priceNum } : c));
+    const { error } = await supabase
+      .from('product_components')
+      .update({ price: priceNum })
+      .eq('component_id', componentId);
+    if (error) onError('Could not save price: ' + error.message);
   }
 
   async function deleteComponent(componentId: number) {
@@ -797,15 +818,28 @@ function ProductModal({
                     )}
                     {[...groups.entries()].map(([groupName, members]) => (
                       <div key={groupName} className="rounded-xl bg-gold/5 border border-gold/20 px-3 py-2">
-                        <div className="text-[10px] font-bold text-gold uppercase tracking-widest mb-1">
+                        <div className="text-[10px] font-bold text-gold uppercase tracking-widest mb-1.5">
                           Choose 1 of {members.length} · {groupName}
                         </div>
                         {members.map(c => (
-                          <div key={c.component_id} className="flex items-center justify-between py-1">
-                            <span className="text-xs text-slate-300">{c.name} <span className="text-muted">× {c.quantity}/unit</span></span>
-                            <button onClick={() => deleteComponent(c.component_id)} className="text-danger text-xs hover:opacity-70 ml-2 shrink-0">✕</button>
+                          <div key={c.component_id} className="flex items-center gap-2 py-1">
+                            <span className="text-xs text-slate-300 flex-1 min-w-0 truncate">{c.name} <span className="text-muted">× {c.quantity}/unit</span></span>
+                            <div className="flex items-center gap-1 shrink-0">
+                              <span className="text-[9px] text-muted">Ksh</span>
+                              <input
+                                type="number" min="0" step="0.01"
+                                defaultValue={c.price ?? ''}
+                                onBlur={e => { if ((e.target.value === '' ? null : parseFloat(e.target.value)) !== c.price) updateComponentPrice(c.component_id, e.target.value); }}
+                                onWheel={e => e.currentTarget.blur()}
+                                placeholder="price"
+                                title="Sell price when this option is chosen"
+                                className="w-20 text-right px-2 py-1 rounded-lg bg-surface2 border border-white/8 text-slate-100 text-xs outline-none focus:border-gold/40 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                              />
+                            </div>
+                            <button onClick={() => deleteComponent(c.component_id)} className="text-danger text-xs hover:opacity-70 shrink-0">✕</button>
                           </div>
                         ))}
+                        <p className="text-[9px] text-muted/60 mt-1 leading-relaxed">Set the sale price for each option — POS uses it automatically when that option is picked.</p>
                       </div>
                     ))}
                   </div>
@@ -857,6 +891,19 @@ function ProductModal({
                       className="flex-1 px-2 py-1.5 rounded-lg bg-surface2 border border-white/8 text-slate-100 text-xs outline-none focus:border-gold/40"
                     />
                   </div>
+                  {/* Per-choice sell price — only for alternatives (a group). */}
+                  {compGroup.trim() && (
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] font-bold text-gold uppercase tracking-widest shrink-0">Sale price @ Ksh</span>
+                      <input
+                        type="number" min="0" step="0.01" value={compPrice}
+                        onChange={e => setCompPrice(e.target.value)}
+                        onWheel={e => e.currentTarget.blur()}
+                        placeholder="price when this option is chosen"
+                        className="flex-1 px-2 py-1.5 rounded-lg bg-surface2 border border-white/8 text-slate-100 text-xs outline-none focus:border-gold/40 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                      />
+                    </div>
+                  )}
                   <button
                     onClick={addComponent}
                     className="w-full py-2 rounded-xl bg-teal/15 border border-teal/30 text-teal text-xs font-bold hover:bg-teal/25 transition-colors"
@@ -970,7 +1017,7 @@ function Dashboard({ role }: { role: UserRole }) {
   const [productModal, setProductModal] = useState<{ editing: Product | null } | null>(null);
   const [toast,        setToast]        = useState<ToastState | null>(null);
   const toastId      = useRef(0);
-  const componentMap = useProductComponents();
+  const { map: componentMap } = useProductComponents();
 
   // With a company selected, the cards show — and the +/- modal adjusts —
   // only that company's stock. "All" shows the combined totals.
