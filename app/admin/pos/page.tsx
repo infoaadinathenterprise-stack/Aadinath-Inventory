@@ -282,6 +282,36 @@ function PosDashboard() {
     if (wrote) refreshComponents();
   }
 
+  // After a sale, if a product had NO catalog price and the cashier typed
+  // one, save it onto the product (selling_price for pieces, box_selling_price
+  // for the bulk unit) so it pre-fills next time. We only fill a BLANK price —
+  // never overwrite an existing catalog price, so a one-off discount can't
+  // corrupt it. Products priced via a choice option are handled above.
+  async function rememberProductPrices(items: CartItem[]) {
+    let wrote = false;
+    const done = new Set<number>();
+    for (const it of items) {
+      const p   = it.product;
+      const pid = p.product_id;
+      if (it.sellPrice == null || it.sellPrice <= 0 || done.has(pid)) continue;
+      // If a priced choice option drove the price, that's saved on the option.
+      if (choiceSellPrice(p, it.groupChoices, it.unit) != null) continue;
+
+      const patch: Record<string, number> = {};
+      if (it.unit === 'box') {
+        if (p.box_selling_price == null) patch.box_selling_price = it.sellPrice;
+      } else if (p.selling_price == null) {
+        patch.selling_price = it.sellPrice;
+      }
+      if (Object.keys(patch).length === 0) continue;   // already had a price
+
+      const { error } = await supabase.from('products').update(patch).eq('product_id', pid);
+      if (!error) { wrote = true; done.add(pid); }
+      // Staff lack UPDATE rights on products (RLS) — best-effort, ignore.
+    }
+    if (wrote) refresh();
+  }
+
   function addToCart(product: Product) {
     let blocked = false;
     let blockedMax = 0;
@@ -655,7 +685,7 @@ function PosDashboard() {
           : buildTransferOps(item.product, item.qty, item.unit, item.transferDestId!, item.groupChoices, item.companyId)));
       }
       await stockTxn(ops, action === 'sold' ? buildSalePayload(cart) : null);
-      if (action === 'sold') await rememberChoicePrices(cart);
+      if (action === 'sold') { await rememberChoicePrices(cart); await rememberProductPrices(cart); }
       showToast(`${action === 'sold' ? 'Sold' : 'Moved'} ${cart.length} item(s) ✓`, 'success');
       // Restock alert: after a sale, show items available elsewhere
       if (action === 'sold') {
@@ -697,7 +727,7 @@ function PosDashboard() {
         ? buildSellOps(item.product, item.qty, item.unit, item.sellPrice, item.groupChoices, item.companyId)
         : buildTransferOps(item.product, item.qty, item.unit, item.transferDestId!, item.groupChoices, item.companyId);
       await stockTxn(ops, action === 'sold' ? buildSalePayload([item]) : null);
-      if (action === 'sold') await rememberChoicePrices([item]);
+      if (action === 'sold') { await rememberChoicePrices([item]); await rememberProductPrices([item]); }
       setCart(c => c.filter(i => i.product.product_id !== item.product.product_id));
       showToast(`${action === 'sold' ? 'Sold' : 'Moved'}: ${item.product.product_name} ✓`, 'success');
       if (action === 'sold') {
