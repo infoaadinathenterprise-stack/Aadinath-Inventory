@@ -99,7 +99,10 @@ async function signToken(secret, payload) {
     app_role:  payload.app_role,
     full_name: payload.full_name,
     iat:       now,
-    exp:       now + (payload.ttlSeconds || 12 * 60 * 60),
+    // 24h default so a shop that logs in once a day isn't kicked out mid-day.
+    // If the token does expire in an open tab, the app now redirects to the
+    // login screen instead of showing a blank page.
+    exp:       now + (payload.ttlSeconds || 24 * 60 * 60),
   };
   const data = `${strToB64url(JSON.stringify({ alg: 'HS256', typ: 'JWT' }))}.${strToB64url(JSON.stringify(claims))}`;
   const key = await hmacKey(secret, ['sign']);

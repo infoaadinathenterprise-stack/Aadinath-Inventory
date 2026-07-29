@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ROLE_KEY, type UserRole } from '@/lib/types';
+import { isAuthenticated, logout as authLogout } from '@/lib/auth';
 
 interface Props {
   onLogout: () => void;
@@ -33,6 +34,22 @@ export default function AdminNavbar({ onLogout }: Props) {
 
   useEffect(() => {
     setRole((localStorage.getItem(ROLE_KEY) as UserRole) || 'admin');
+  }, []);
+
+  // The login token lasts a fixed time. If it expires while this tab stays
+  // open, every request starts failing and pages would otherwise go blank.
+  // Check periodically (and when the tab regains focus) and bounce to the
+  // login screen the moment the session is no longer valid.
+  useEffect(() => {
+    function check() {
+      if (!isAuthenticated()) {
+        authLogout();
+        window.location.href = '/admin';
+      }
+    }
+    const id = setInterval(check, 60_000);
+    window.addEventListener('focus', check);
+    return () => { clearInterval(id); window.removeEventListener('focus', check); };
   }, []);
 
   const links = ALL_LINKS.filter(l => l.roles.includes(role));

@@ -90,6 +90,35 @@ export function currentRole(): UserRole {
   return role === 'admin' ? 'admin' : 'staff';
 }
 
+// Is this Supabase/PostgREST error caused by a rejected or missing login
+// token (rather than a real data problem)? Used to tell an expired session
+// apart from an actual failure, so we can send the user to re-login instead
+// of showing a blank page.
+export function isAuthError(err: { message?: string; code?: string } | null | undefined): boolean {
+  if (!err) return false;
+  const code = (err.code ?? '').toString();
+  const msg  = (err.message ?? '').toLowerCase();
+  if (code === 'PGRST301' || code === '401') return true;   // JWT expired / not acceptable
+  return /\bjwt\b|token|expired|not authenticated|unauthorized|invalid claim|invalid signature|permission denied/.test(msg);
+}
+
+// Call from a data-load error handler. If the session is gone or the server
+// rejected the token, clear it and bounce to the admin login screen (returns
+// true so the caller can stop). Otherwise returns false (real error).
+export function redirectIfSessionInvalid(err?: { message?: string; code?: string } | null): boolean {
+  if (typeof window === 'undefined') return false;
+  if (!isAuthenticated() || isAuthError(err)) {
+    logout();
+    if (!window.location.pathname.match(/^\/admin\/?$/)) {
+      window.location.href = '/admin';
+    } else {
+      window.location.reload();
+    }
+    return true;
+  }
+  return false;
+}
+
 // POST helper for the admin-only /api/staff endpoint (adds the bearer token).
 export async function staffApi<T = unknown>(
   action: string,

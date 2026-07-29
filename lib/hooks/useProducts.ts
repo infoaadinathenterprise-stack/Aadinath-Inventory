@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
+import { redirectIfSessionInvalid } from '@/lib/auth';
 import type { Product, StockByLoc, LocationInfo, Company, StockByCompany } from '@/lib/types';
 
 interface ProductsData {
@@ -49,6 +50,10 @@ export function useProducts(): ProductsData {
 
       if (cancelled) return;
       if (pErr || sErr) {
+        // A rejected/expired login token makes these reads fail even though
+        // the data is fine (the public key can still read it). Send the user
+        // back to login instead of showing a blank inventory.
+        if (redirectIfSessionInvalid(pErr ?? sErr)) return;
         setError((pErr ?? sErr)!.message);
         setLoading(false);
         return;
