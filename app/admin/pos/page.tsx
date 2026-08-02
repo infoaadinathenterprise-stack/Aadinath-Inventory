@@ -481,12 +481,28 @@ function PosDashboard() {
       .filter((c): c is NonNullable<typeof c> => Boolean(c));
     const activeComps = [...alwaysComps, ...pickedFromGroups];
 
-    // ── Pre-validate component stock across ALL locations (friendly error) ──
+    // Components are auto-deducted consumables — they may live under EITHER
+    // company. Unlike the main product (which sells from the chosen company),
+    // a component is pulled from wherever it exists: the selected company
+    // first, then the other company. Companies to search, selected first.
+    const companyOrder = [companyId, ...companies.map(c => c.company_id).filter(cid => cid !== companyId)];
+    const companyShort = (cid: number) => (companies.find(c => c.company_id === cid)?.company_name ?? '').replace(/\s*Enterprise$/i, '');
+
+    // Total of a product across ALL companies and ALL locations.
+    const totalAllCompanies = (prodId: number, prodPpb: number): number =>
+      companyOrder.reduce((sum, cid) => {
+        const sc = stockByCompany[cid] ?? {}; const bc = boxByCompany[cid] ?? {};
+        return sum + locations.reduce((s, l) =>
+          s + ((sc[l.location_id] ?? {})[prodId] ?? 0)
+            + ((bc[l.location_id] ?? {})[prodId] ?? 0) * prodPpb, 0);
+      }, 0);
+
+    // ── Pre-validate component stock across ALL companies + locations ──
     for (const comp of activeComps) {
       const cid      = comp.component_product_id;
       const cPpb     = products.find(pr => pr.product_id === cid)?.pieces_per_box ?? 0;
       const movComp  = movPieces * comp.quantity;
-      const cHave    = totalAcross(cid, cPpb);
+      const cHave    = totalAllCompanies(cid, cPpb);
       const compName = products.find(pr => pr.product_id === cid)?.product_name ?? `#${cid}`;
       if (cHave < movComp) {
         throw new Error(`Not enough "${compName}": need ${movComp}, only ${cHave} in stock across all locations`);
@@ -525,28 +541,43 @@ function PosDashboard() {
       remaining -= take;
     }
 
-    // ── Deduct each component, also draining across locations in order ──
+    // ── Deduct each component, draining across companies AND locations ──
     for (const comp of activeComps) {
       const cid  = comp.component_product_id;
       const cPpb = products.find(pr => pr.product_id === cid)?.pieces_per_box ?? 0;
       let need   = movPieces * comp.quantity;
-      for (const lId of drainOrder(cid, cPpb)) {
+      // Selected company first, then the other company; within each, the sale
+      // location first, then the rest by most stock.
+      for (const coId of companyOrder) {
         if (need <= 0) break;
-        const pcs = (stockByLoc[lId] ?? {})[cid] ?? 0;
-        const bx  = (boxByLoc[lId]   ?? {})[cid] ?? 0;
-        const locTotal = pcs + bx * cPpb;
-        if (locTotal <= 0) continue;
-        const take = Math.min(need, locTotal);
-        const raw = deductFromLocation(pcs, bx, take, 'piece', cPpb);
-        ops.push({
-          product_id: cid, location_id: lId, company_id: companyId,
-          dq: raw.quantity - pcs, db: raw.box_quantity - bx,
-          mov_type: 'AUTO_DEDUCT', mov_qty: take, mov_from: lId, mov_to: null,
-          reason: lId === locId
-            ? `Auto: component of ${p.product_name}`
-            : `Auto: component of ${p.product_name} (pulled from ${locNameOf(lId)})`,
-        });
-        need -= take;
+        const sc = stockByCompany[coId] ?? {};
+        const bc = boxByCompany[coId]   ?? {};
+        const others = locations
+          .filter(l => l.location_id !== locId)
+          .map(l => ({ id: l.location_id, tot: ((sc[l.location_id] ?? {})[cid] ?? 0) + ((bc[l.location_id] ?? {})[cid] ?? 0) * cPpb }))
+          .filter(l => l.tot > 0)
+          .sort((a, b) => b.tot - a.tot)
+          .map(l => l.id);
+        for (const lId of [locId, ...others]) {
+          if (need <= 0) break;
+          const pcs = (sc[lId] ?? {})[cid] ?? 0;
+          const bx  = (bc[lId] ?? {})[cid] ?? 0;
+          const locTotal = pcs + bx * cPpb;
+          if (locTotal <= 0) continue;
+          const take = Math.min(need, locTotal);
+          const raw = deductFromLocation(pcs, bx, take, 'piece', cPpb);
+          const sameSpot = lId === locId && coId === companyId;
+          const from = `${locNameOf(lId)}${coId !== companyId ? ' · ' + companyShort(coId) : ''}`;
+          ops.push({
+            product_id: cid, location_id: lId, company_id: coId,
+            dq: raw.quantity - pcs, db: raw.box_quantity - bx,
+            mov_type: 'AUTO_DEDUCT', mov_qty: take, mov_from: lId, mov_to: null,
+            reason: sameSpot
+              ? `Auto: component of ${p.product_name}`
+              : `Auto: component of ${p.product_name} (pulled from ${from})`,
+          });
+          need -= take;
+        }
       }
     }
     return ops;
