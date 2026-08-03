@@ -1118,6 +1118,9 @@ function Dashboard({ role }: { role: UserRole }) {
             stockByLoc={effStock}
             boxByLoc={effBox}
             companyId={modalCompanyId}
+            stockByCompany={stockByCompany}
+            boxByCompany={boxByCompany}
+            companies={companies}
             componentMap={componentMap}
             allProducts={products}
             userRole={role}

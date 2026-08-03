@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { formatStock } from '@/lib/formatStock';
 import { stockTxn, submitPendingRequest, type StockOp } from '@/lib/stockActions';
-import type { Product, StockByLoc, AdjAction, LocationInfo, ComponentMap, UserRole } from '@/lib/types';
+import type { Product, StockByLoc, StockByCompany, Company, AdjAction, LocationInfo, ComponentMap, UserRole } from '@/lib/types';
 
 interface Props {
   product:      Product | null;
@@ -17,6 +17,12 @@ interface Props {
   allProducts?:  Product[];
   userRole?:    UserRole;
   companyId?:   number;   // which company's stock to adjust (default Aadinath)
+  // Per-company stock maps + company list. When present, auto-deducted
+  // components are pulled from ANY company that has them (stock is shared
+  // across companies). Absent → components fall back to companyId only.
+  stockByCompany?: StockByCompany;
+  boxByCompany?:   StockByCompany;
+  companies?:      Company[];
   onClose:      () => void;
   onSuccess:    (msg: string) => void;
   onError:      (msg: string) => void;
@@ -46,6 +52,7 @@ export default function AdjustStockModal({
   componentMap = {}, allProducts = [],
   userRole = 'admin',
   companyId = 1,
+  stockByCompany, boxByCompany, companies = [],
   onClose, onSuccess, onError, onDone,
 }: Props) {
   const [selectedAction, setSelectedAction] = useState<AdjAction | null>(null);
@@ -121,6 +128,24 @@ export default function AdjustStockModal({
   }
   const choiceGroupNames = Object.keys(choiceGroupMap);
 
+  // Where to pull auto-deducted components from. Components are shared
+  // consumables, so if per-company maps were provided we search EVERY
+  // company (the adjusted company first) and every location. Otherwise we
+  // fall back to the single company's maps this modal was given.
+  const compMaps: { cid: number; sc: StockByLoc; bc: StockByLoc }[] =
+    stockByCompany && companies.length > 0
+      ? [companyId, ...companies.map(c => c.company_id).filter(cid => cid !== companyId)]
+          .map(cid => ({ cid, sc: stockByCompany[cid] ?? {}, bc: (boxByCompany ?? {})[cid] ?? {} }))
+      : [{ cid: companyId, sc: stockByLoc, bc: boxByLoc }];
+
+  // Total of a product across all component-source companies + locations.
+  function compTotalEverywhere(prodId: number, prodPpb: number): number {
+    return compMaps.reduce((sum, m) =>
+      sum + locations.reduce((s, l) =>
+        s + ((m.sc[l.location_id] ?? {})[prodId] ?? 0)
+          + ((m.bc[l.location_id] ?? {})[prodId] ?? 0) * prodPpb, 0), 0);
+  }
+
   function deductFrom(pcs: number, bx: number): { quantity: number; box_quantity: number } {
     if (isBoxUnit) {
       const boxesToDeduct = Math.min(qty, bx);
@@ -169,15 +194,11 @@ export default function AdjustStockModal({
       for (const comp of [...alwaysComps, ...pickedCheck]) {
         const cid      = comp.component_product_id;
         const cPpb     = allProducts.find(p => p.product_id === cid)?.pieces_per_box ?? 0;
-        const srcPcs   = (stockByLoc[locationId] ?? {})[cid] ?? 0;
-        const srcBx    = (boxByLoc[locationId]   ?? {})[cid] ?? 0;
-        const srcTotal = srcPcs + srcBx * cPpb;
         const movComp  = movQty * comp.quantity;
-        if (srcTotal < movComp) {
+        const have     = compTotalEverywhere(cid, cPpb);   // across all companies + locations
+        if (have < movComp) {
           const compName = allProducts.find(p => p.product_id === cid)?.product_name ?? `#${cid}`;
-          const othTotal = otherLocs.reduce((s, l) => s + ((stockByLoc[l.location_id] ?? {})[cid] ?? 0) + ((boxByLoc[l.location_id] ?? {})[cid] ?? 0) * cPpb, 0);
-          const hint = othTotal > 0 ? ` · ${othTotal} available elsewhere` : '';
-          onError(`Not enough "${compName}" at ${locName}: need ${movComp}, have ${srcTotal}${hint}`);
+          onError(`Not enough "${compName}": need ${movComp}, only ${have} in stock across all locations`);
           return;
         }
       }
@@ -265,34 +286,53 @@ export default function AdjustStockModal({
         for (const comp of [...alwaysComps, ...pickedFromGroups]) {
           const cid     = comp.component_product_id;
           const cPpb    = allProducts.find(p => p.product_id === cid)?.pieces_per_box ?? 0;
-          const movComp = movQty * comp.quantity;
-          const srcPcs  = (stockByLoc[locationId] ?? {})[cid] ?? 0;
-          const srcBx   = (boxByLoc[locationId]   ?? {})[cid] ?? 0;
-          const newSrc  = deductCompPieces(srcPcs, srcBx, movComp, cPpb);
-
-          if (isTransfer) {
-            ops.push({
-              product_id: cid, location_id: locationId,
-              dq: newSrc.quantity - srcPcs, db: newSrc.box_quantity - srcBx,
-              mov_type: 'TRANSFER', mov_qty: movComp, mov_from: locationId, mov_to: transferLocId!,
-              reason: `Auto: component of ${product.product_name}`,
-            });
-            ops.push({
-              product_id: cid, location_id: transferLocId!,
-              dq: movComp, db: 0,
-            });
-          } else {
-            ops.push({
-              product_id: cid, location_id: locationId,
-              dq: newSrc.quantity - srcPcs, db: newSrc.box_quantity - srcBx,
-              mov_type: 'AUTO_DEDUCT', mov_qty: movComp, mov_from: locationId, mov_to: null,
-              reason: `Auto: component of ${product.product_name}`,
-            });
+          // Drain the needed component pieces across every company + location
+          // (adjusted company + current location first). Each spot emits its
+          // own op tagged with the company the stock was actually taken from.
+          let need = movQty * comp.quantity;
+          for (const m of compMaps) {
+            if (need <= 0) break;
+            const others = otherLocs
+              .map(l => ({ id: l.location_id, tot: ((m.sc[l.location_id] ?? {})[cid] ?? 0) + ((m.bc[l.location_id] ?? {})[cid] ?? 0) * cPpb }))
+              .filter(l => l.tot > 0)
+              .sort((a, b) => b.tot - a.tot)
+              .map(l => l.id);
+            for (const lId of [locationId, ...others]) {
+              if (need <= 0) break;
+              const pcs = (m.sc[lId] ?? {})[cid] ?? 0;
+              const bx  = (m.bc[lId] ?? {})[cid] ?? 0;
+              const tot = pcs + bx * cPpb;
+              if (tot <= 0) continue;
+              const take   = Math.min(need, tot);
+              const newSrc = deductCompPieces(pcs, bx, take, cPpb);
+              if (isTransfer) {
+                ops.push({
+                  product_id: cid, location_id: lId, company_id: m.cid,
+                  dq: newSrc.quantity - pcs, db: newSrc.box_quantity - bx,
+                  mov_type: 'TRANSFER', mov_qty: take, mov_from: lId, mov_to: transferLocId!,
+                  reason: `Auto: component of ${product.product_name}`,
+                });
+                ops.push({
+                  product_id: cid, location_id: transferLocId!, company_id: m.cid,
+                  dq: take, db: 0,
+                });
+              } else {
+                ops.push({
+                  product_id: cid, location_id: lId, company_id: m.cid,
+                  dq: newSrc.quantity - pcs, db: newSrc.box_quantity - bx,
+                  mov_type: 'AUTO_DEDUCT', mov_qty: take, mov_from: lId, mov_to: null,
+                  reason: `Auto: component of ${product.product_name}`,
+                });
+              }
+              need -= take;
+            }
           }
         }
       }
 
-      await stockTxn(ops.map(o => ({ ...o, company_id: companyId })));
+      // Main-product ops carry no company_id → default to the adjusted company;
+      // component ops already set their own (where the stock actually is).
+      await stockTxn(ops.map(o => ({ company_id: companyId, ...o })));
 
       const unitLabel = isBoxUnit ? `box${qty !== 1 ? 'es' : ''}` : `unit${qty !== 1 ? 's' : ''}`;
       const actionLabel: Record<AdjAction, string> = {

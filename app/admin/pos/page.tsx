@@ -194,6 +194,16 @@ function PosDashboard() {
     return pool;
   }
 
+  // Per-company availability (for display only) — how much of the product is
+  // physically tagged to ONE company, so the cart can show "2 Aadinath /
+  // 5 Jay Aadinath" even though a sale can draw from the combined pool.
+  function companyMax(p: Product, unit: CartUnit, companyId: number): number {
+    const ppb = p.pieces_per_box ?? 0;
+    const pool = companyTotalPieces(p, companyId);
+    if (unit === 'box' && ppb > 0) return Math.floor(pool / ppb);
+    return pool;
+  }
+
   const inStock = products.filter(p => {
     const ppb = p.pieces_per_box || 0;
     return (sm[p.product_id] || 0) > 0 || (bm[p.product_id] || 0) * (ppb || 1) > 0;
@@ -1041,33 +1051,29 @@ function PosDashboard() {
                       </div>
                     )}
 
-                    {/* Company toggle — which company's stock this line sells
-                        from. Disabled for a company with none of this product. */}
+                    {/* Company toggle — sets which company this sale is BILLED
+                        to. Stock is shared, so a sale can draw from either; the
+                        count under each name shows how much is physically tagged
+                        to that company (e.g. 2 Aadinath / 5 Jay Aadinath). */}
                     {companies.length > 1 && (
                       <div className="flex gap-1 mb-2">
                         {companies.map(co => {
-                          const avail = maxForProduct(item.product, item.unit, co.company_id);
+                          const avail = companyMax(item.product, item.unit, co.company_id);
                           const isSel = item.companyId === co.company_id;
-                          const disabled = avail <= 0;
                           return (
                             <button
                               key={co.company_id}
-                              disabled={disabled}
-                              onClick={() => setCart(c => c.map(i => {
-                                if (i.product.product_id !== item.product.product_id) return i;
-                                const newMax = maxForProduct(i.product, i.unit, co.company_id);
-                                return { ...i, companyId: co.company_id, qty: Math.max(1, Math.min(i.qty, newMax || 1)) };
-                              }))}
+                              onClick={() => setCart(c => c.map(i =>
+                                i.product.product_id !== item.product.product_id ? i : { ...i, companyId: co.company_id },
+                              ))}
                               className={`flex-1 py-1.5 rounded flex flex-col items-center text-[10px] font-bold border transition-all ${
                                 isSel
                                   ? 'border-teal/50 bg-teal/15 text-teal'
-                                  : disabled
-                                    ? 'border-white/5 bg-surface text-muted/40 cursor-not-allowed'
-                                    : 'border-white/10 bg-surface text-muted hover:text-slate-100'
+                                  : 'border-white/10 bg-surface text-muted hover:text-slate-100'
                               }`}
                             >
                               <span className="truncate max-w-full">{co.company_name.replace(/\s*Enterprise$/i, '')}</span>
-                              <span className="text-[8px] font-normal opacity-70 leading-tight">{avail} avail</span>
+                              <span className="text-[8px] font-normal opacity-70 leading-tight">{avail} in stock</span>
                             </button>
                           );
                         })}
