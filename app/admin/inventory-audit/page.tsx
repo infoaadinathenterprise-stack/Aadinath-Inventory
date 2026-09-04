@@ -146,9 +146,15 @@ function InventoryAuditDashboard() {
   const toastId = useRef(0);
 
   const [role,       setRole]       = useState<UserRole>('admin');
-  const [editingId,  setEditingId]  = useState<number | null>(null);
-  const [editValue,  setEditValue]  = useState('');
   const [savingId,   setSavingId]   = useState<number | null>(null);
+  // Uncontrolled "total pieces" inputs — one per pending row, admin-only.
+  // Keyed by product_id so each row's typed value can be read on ✓ Done
+  // without re-rendering every card on every keystroke.
+  const inputRefs = useRef<Map<number, HTMLInputElement>>(new Map());
+  function registerInput(pid: number, el: HTMLInputElement | null) {
+    if (el) inputRefs.current.set(pid, el);
+    else inputRefs.current.delete(pid);
+  }
 
   useEffect(() => {
     setRole((localStorage.getItem(ROLE_KEY) as UserRole) || 'admin');
@@ -182,7 +188,6 @@ function InventoryAuditDashboard() {
     if (allProducts.length === 0) return;
     setLoading(true);
     setSelected(null);
-    setEditingId(null);
 
     const locId = locationId;
     if (!locId) return;
@@ -293,17 +298,6 @@ function InventoryAuditDashboard() {
     }
   }
 
-  function startEdit(row: AuditRow) {
-    const ppb = row.product.pieces_per_box ?? 0;
-    setEditingId(row.product.product_id);
-    setEditValue(String(row.quantity + row.box_quantity * ppb));
-  }
-
-  function cancelEdit() {
-    setEditingId(null);
-    setEditValue('');
-  }
-
   // Build the stock_txn ops for a corrected total. The combined total is
   // one number, but stock is stored per-company — so an increase lands on
   // whichever firm already holds more of this product here (defaults to
@@ -345,25 +339,25 @@ function InventoryAuditDashboard() {
     return ops;
   }
 
-  async function saveEdit(row: AuditRow) {
+  // The one action per row: read whatever total is currently in the box
+  // (admins only get a box at all — see the isEditing-free render below),
+  // apply the correction if it changed, and mark the row checked either way.
+  async function handleDone(row: AuditRow) {
+    if (role !== 'admin') { await markChecked(row, false); return; }
+
     const pid = row.product.product_id;
     const ppb = row.product.pieces_per_box ?? 0;
     const oldTotal = row.quantity + row.box_quantity * ppb;
-    const newTotal = Math.max(0, parseInt(editValue, 10) || 0);
+    const raw = inputRefs.current.get(pid)?.value;
+    const newTotal = Math.max(0, parseInt(raw ?? '', 10) || 0);
     const delta = newTotal - oldTotal;
 
-    if (delta === 0) { setEditingId(null); await markChecked(row, false); return; }
-
-    if (role === 'staff' && delta < 0) {
-      showToast('Only admins can reduce inventory. Ask your admin to correct this count.', 'error');
-      return;
-    }
+    if (delta === 0) { await markChecked(row, false); return; }
 
     setSavingId(pid);
     try {
       const ops = buildEditOps(row, delta, ppb);
       await stockTxn(ops);
-      setEditingId(null);
       await markChecked(row, true);
       await loadAuditRows();
     } catch (e) {
@@ -642,8 +636,7 @@ function InventoryAuditDashboard() {
                         tot === 0           ? 'border-danger/15 hover:border-danger/30' :
                         tot <= reorder      ? 'border-gold/15 hover:border-gold/30'     :
                                               'border-white/8 hover:border-teal/20';
-                      const isEditing = editingId === pid;
-                      const isSaving  = savingId === pid;
+                      const isSaving = savingId === pid;
 
                       return (
                         <motion.div
@@ -665,16 +658,34 @@ function InventoryAuditDashboard() {
                                     || '—'}
                                 </p>
                               </div>
-                              <div className="text-right shrink-0">
-                                <p className={`text-sm font-bold tabular-nums ${stockCls}`}>
-                                  {stockLabel(row)}
-                                </p>
-                                {ppb > 0 && row.box_quantity > 0 && (
-                                  <p className="text-[9px] text-muted/60 tabular-nums">
-                                    = {tot} pc{tot !== 1 ? 's' : ''}
+                              {role === 'admin' ? (
+                                <div className="text-right shrink-0" onClick={e => e.stopPropagation()}>
+                                  <label className="text-[9px] font-bold text-muted uppercase tracking-widest block mb-1">
+                                    Total pieces
+                                  </label>
+                                  <input
+                                    key={`${pid}:${tot}`}
+                                    ref={el => registerInput(pid, el)}
+                                    type="number"
+                                    inputMode="numeric"
+                                    defaultValue={tot}
+                                    onFocus={e => e.currentTarget.select()}
+                                    onWheel={e => e.currentTarget.blur()}
+                                    className={`w-24 px-2 py-1.5 rounded-lg bg-surface2 border border-white/10 text-right text-sm font-bold tabular-nums outline-none focus:border-teal/40 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none ${stockCls}`}
+                                  />
+                                </div>
+                              ) : (
+                                <div className="text-right shrink-0">
+                                  <p className={`text-sm font-bold tabular-nums ${stockCls}`}>
+                                    {stockLabel(row)}
                                   </p>
-                                )}
-                              </div>
+                                  {ppb > 0 && row.box_quantity > 0 && (
+                                    <p className="text-[9px] text-muted/60 tabular-nums">
+                                      = {tot} pc{tot !== 1 ? 's' : ''}
+                                    </p>
+                                  )}
+                                </div>
+                              )}
                             </div>
 
                             <div className="flex items-center justify-between mt-2">
@@ -687,59 +698,15 @@ function InventoryAuditDashboard() {
                             </div>
                           </div>
 
-                          {/* ── Done / Edit actions ─────────────────────── */}
-                          {isEditing ? (
-                            <div className="mt-3 pt-3 border-t border-white/8" onClick={e => e.stopPropagation()}>
-                              <p className="text-[10px] font-bold text-muted uppercase tracking-widest mb-1.5">
-                                Correct total (pieces) at {locName}
-                              </p>
-                              <div className="flex items-center gap-2">
-                                <input
-                                  type="number"
-                                  inputMode="numeric"
-                                  autoFocus
-                                  value={editValue}
-                                  onFocus={e => e.currentTarget.select()}
-                                  onChange={e => setEditValue(e.target.value)}
-                                  onWheel={e => e.currentTarget.blur()}
-                                  className="flex-1 min-w-0 px-3 py-2 rounded-lg bg-surface2 border border-white/10 text-slate-100 text-sm font-bold outline-none focus:border-teal/40 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                                />
-                                <button
-                                  onClick={() => saveEdit(row)}
-                                  disabled={isSaving}
-                                  className="px-3 py-2 rounded-lg bg-teal/15 border border-teal/30 text-teal text-xs font-bold hover:bg-teal/25 transition-colors disabled:opacity-40"
-                                >
-                                  {isSaving ? '…' : 'Save'}
-                                </button>
-                                <button
-                                  onClick={cancelEdit}
-                                  disabled={isSaving}
-                                  className="px-3 py-2 rounded-lg bg-surface2 border border-white/10 text-muted text-xs font-bold hover:text-slate-100 transition-colors disabled:opacity-40"
-                                >
-                                  Cancel
-                                </button>
-                              </div>
-                            </div>
-                          ) : (
-                            <div className="flex gap-2 mt-3 pt-3 border-t border-white/8">
-                              <button
-                                onClick={(e) => { e.stopPropagation(); markChecked(row, false); }}
-                                disabled={isSaving}
-                                className="flex-1 py-2 rounded-lg bg-success/10 border border-success/30 text-success text-xs font-bold hover:bg-success/20 transition-colors disabled:opacity-40"
-                              >
-                                {isSaving ? '…' : '✓ Done'}
-                              </button>
-                              {role === 'admin' && (
-                                <button
-                                  onClick={(e) => { e.stopPropagation(); startEdit(row); }}
-                                  disabled={isSaving}
-                                  className="flex-1 py-2 rounded-lg bg-gold/10 border border-gold/30 text-gold text-xs font-bold hover:bg-gold/20 transition-colors disabled:opacity-40"
-                                >
-                                  ✎ Edit
-                                </button>
-                              )}
-                            </div>
-                          )}
+                          <div className="mt-3 pt-3 border-t border-white/8">
+                            <button
+                              onClick={(e) => { e.stopPropagation(); handleDone(row); }}
+                              disabled={isSaving}
+                              className="w-full py-2 rounded-lg bg-success/10 border border-success/30 text-success text-xs font-bold hover:bg-success/20 transition-colors disabled:opacity-40"
+                            >
+                              {isSaving ? '…' : '✓ Done'}
+                            </button>
+                          </div>
                         </motion.div>
                       );
                     })}
