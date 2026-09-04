@@ -4,8 +4,9 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import { supabase } from '@/lib/supabase';
-import { SESSION_KEY } from '@/lib/types';
+import { SESSION_KEY, ROLE_KEY, USER_KEY, type UserRole } from '@/lib/types';
 import type { Product } from '@/lib/types';
+import { stockTxn, type StockOp } from '@/lib/stockActions';
 import AdminNavbar from '../components/AdminNavbar';
 import Toast, { type ToastState } from '../components/Toast';
 
@@ -16,10 +17,24 @@ interface LocationInfo {
   location_name: string;
 }
 
+// Aadinath (1) and Jay Aadinath (2) — see lib/types.ts DEFAULT_COMPANY_ID and
+// supabase/06_companies.sql. Hardcoded here the same way useProducts()'s
+// fallback company list does, since the audit page only needs the ids.
+const COMPANY_IDS = [1, 2];
+
+interface CompanyStock { quantity: number; box_quantity: number }
+
 interface AuditRow {
   product:      Product;
-  quantity:     number;   // loose pieces
-  box_quantity: number;   // whole boxes
+  quantity:     number;   // loose pieces, SUMMED across Aadinath + Jay Aadinath
+  box_quantity: number;   // whole boxes,  SUMMED across Aadinath + Jay Aadinath
+  perCompany:   Record<number, CompanyStock>; // company_id → this location's stock, for edit-time deltas
+}
+
+interface AuditCheck {
+  checked_at: string;
+  checked_by: string | null;
+  edited:     boolean;
 }
 
 interface Movement {
@@ -45,8 +60,13 @@ function fmtDateLong(d: Date) {
   return d.toLocaleDateString('en-KE', { day: 'numeric', month: 'long', year: 'numeric' });
 }
 
+function currentUser(): string {
+  if (typeof window === 'undefined') return 'System';
+  return localStorage.getItem(USER_KEY) || 'Admin';
+}
+
 // Human-readable stock string for an audit row
-function stockLabel(row: AuditRow): string {
+function stockLabel(row: { product: Product; quantity: number; box_quantity: number }): string {
   const ppb = row.product.pieces_per_box ?? 0;
   const bx  = row.box_quantity;
   const pc  = row.quantity;
@@ -70,6 +90,17 @@ function stockPrint(row: AuditRow): string {
     return `${bx}bx`;
   }
   return String(pc + bx * (ppb || 1));
+}
+
+// Split/merge a company's (loose, box) pair by a flat piece amount — taking
+// loose pieces first and breaking boxes only when it runs out (mirrors the
+// same convention used in AdjustStockModal / the product edit form).
+function applyPieceDelta(pcs: number, bx: number, ppb: number, amount: number, isAdd: boolean) {
+  if (isAdd) return { quantity: pcs + amount, box_quantity: bx };
+  const fromLoose     = Math.min(amount, pcs);
+  const fromBoxPieces = amount - fromLoose;
+  const boxesToBreak  = ppb > 0 ? Math.ceil(fromBoxPieces / ppb) : 0;
+  return { quantity: pcs - fromLoose + boxesToBreak * ppb - fromBoxPieces, box_quantity: bx - boxesToBreak };
 }
 
 const MOVEMENT_META: Record<string, { label: string; emoji: string; color: string }> = {
@@ -105,6 +136,7 @@ function InventoryAuditDashboard() {
   const [locationId,  setLocationId]  = useState<number>(0);
   const [allProducts, setAllProducts] = useState<Product[]>([]);
   const [auditRows,   setAuditRows]   = useState<AuditRow[]>([]);
+  const [checks,      setChecks]      = useState<Record<number, AuditCheck>>({});
   const [loading,     setLoading]     = useState(false);
   const [search,      setSearch]      = useState('');
   const [selected,    setSelected]    = useState<AuditRow | null>(null);
@@ -112,6 +144,15 @@ function InventoryAuditDashboard() {
   const [histLoading, setHistLoading] = useState(false);
   const [toast,       setToast]       = useState<ToastState | null>(null);
   const toastId = useRef(0);
+
+  const [role,       setRole]       = useState<UserRole>('admin');
+  const [editingId,  setEditingId]  = useState<number | null>(null);
+  const [editValue,  setEditValue]  = useState('');
+  const [savingId,   setSavingId]   = useState<number | null>(null);
+
+  useEffect(() => {
+    setRole((localStorage.getItem(ROLE_KEY) as UserRole) || 'admin');
+  }, []);
 
   function showToast(msg: string, type: ToastState['type']) {
     setToast({ msg, type, id: ++toastId.current });
@@ -136,49 +177,57 @@ function InventoryAuditDashboard() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ── Load audit rows whenever location or product list changes ─────────────
+  // ── Load audit rows + checklist state whenever location or product list changes ──
   const loadAuditRows = useCallback(async () => {
     if (allProducts.length === 0) return;
     setLoading(true);
     setSelected(null);
+    setEditingId(null);
 
     const locId = locationId;
     if (!locId) return;
 
     try {
-      // 1. All stock rows for this location (any qty, including 0)
-      const { data: stockData, error: stockErr } = await supabase
-        .from('stock_by_location')
-        .select('product_id, quantity, box_quantity')
-        .eq('location_id', locId);
+      // 1. All stock rows for this location (any qty, including 0), one row
+      //    per company. 2. Products ever transferred involving this location.
+      //    3. The saved checklist state for this location.
+      const [
+        { data: stockData,    error: stockErr },
+        { data: transferData, error: txErr },
+        { data: checkData,    error: checkErr },
+      ] = await Promise.all([
+        supabase.from('stock_by_location').select('product_id, quantity, box_quantity, company_id').eq('location_id', locId),
+        supabase.from('stock_requests').select('product_id').eq('request_type', 'TRANSFER')
+          .or(`from_location_id.eq.${locId},to_location_id.eq.${locId}`),
+        supabase.from('inventory_audit_checks').select('product_id, checked_at, checked_by, edited').eq('location_id', locId),
+      ]);
       if (stockErr) throw new Error(stockErr.message);
+      if (txErr)    throw new Error(txErr.message);
+      if (checkErr) throw new Error(checkErr.message);
 
-      // 2. Products that have ever been transferred involving this location
-      //    NB: actual DB column is request_type, not movement_type
-      const { data: transferData, error: txErr } = await supabase
-        .from('stock_requests')
-        .select('product_id')
-        .eq('request_type', 'TRANSFER')
-        .or(`from_location_id.eq.${locId},to_location_id.eq.${locId}`);
-      if (txErr) throw new Error(txErr.message);
-
-      // Build a stock map: product_id → { quantity, box_quantity }
-      const stockMap: Record<number, { quantity: number; box_quantity: number }> = {};
+      // Stock is keyed by (product, location, company) — Aadinath and Jay
+      // Aadinath each get their own row. SUM them (never overwrite) so the
+      // audit total reflects stock across both firms combined.
+      const stockMap:   Record<number, CompanyStock> = {};
+      const perCompany: Record<number, Record<number, CompanyStock>> = {};
       for (const row of stockData ?? []) {
-        stockMap[row.product_id] = {
-          quantity:     row.quantity     ?? 0,
-          box_quantity: row.box_quantity ?? 0,
-        };
+        const pid = row.product_id as number;
+        const cid = (row.company_id as number) ?? 1;
+        const q = row.quantity     ?? 0;
+        const b = row.box_quantity ?? 0;
+        if (!stockMap[pid]) stockMap[pid] = { quantity: 0, box_quantity: 0 };
+        stockMap[pid].quantity     += q;
+        stockMap[pid].box_quantity += b;
+        if (!perCompany[pid]) perCompany[pid] = {};
+        perCompany[pid][cid] = { quantity: q, box_quantity: b };
       }
 
       // Union of product IDs that qualify for this location:
-      //   a) currently has stock > 0 at this location
+      //   a) currently has stock > 0 at this location (either firm)
       //   b) has been part of a transfer involving this location
       const qualifiedIds = new Set<number>();
-
-      for (const row of stockData ?? []) {
-        const sm = stockMap[row.product_id];
-        if (sm.quantity > 0 || sm.box_quantity > 0) qualifiedIds.add(row.product_id);
+      for (const [pid, sm] of Object.entries(stockMap)) {
+        if (sm.quantity > 0 || sm.box_quantity > 0) qualifiedIds.add(Number(pid));
       }
       for (const row of transferData ?? []) {
         if (row.product_id) qualifiedIds.add(row.product_id);
@@ -190,7 +239,7 @@ function InventoryAuditDashboard() {
         const product = allProducts.find(p => p.product_id === pid);
         if (!product) continue;
         const stock = stockMap[pid] ?? { quantity: 0, box_quantity: 0 };
-        rows.push({ product, quantity: stock.quantity, box_quantity: stock.box_quantity });
+        rows.push({ product, quantity: stock.quantity, box_quantity: stock.box_quantity, perCompany: perCompany[pid] ?? {} });
       }
 
       // Sort by category then name
@@ -199,15 +248,144 @@ function InventoryAuditDashboard() {
         return tc !== 0 ? tc : a.product.product_name.localeCompare(b.product.product_name);
       });
 
+      const nextChecks: Record<number, AuditCheck> = {};
+      for (const c of checkData ?? []) {
+        nextChecks[c.product_id as number] = {
+          checked_at: c.checked_at as string,
+          checked_by: (c.checked_by as string | null) ?? null,
+          edited:     !!c.edited,
+        };
+      }
+
       setAuditRows(rows);
+      setChecks(nextChecks);
     } catch (e) {
       showToast('Failed to load audit data: ' + (e instanceof Error ? e.message : 'Unknown'), 'error');
     } finally {
       setLoading(false);
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [locationId, allProducts]);
 
   useEffect(() => { loadAuditRows(); }, [loadAuditRows]);
+
+  // ── Checklist actions ─────────────────────────────────────────────────────
+
+  // Mark a row checked (optimistic — no full reload needed since stock
+  // itself didn't change for a plain "Done").
+  async function markChecked(row: AuditRow, edited: boolean) {
+    const pid = row.product.product_id;
+    setSavingId(pid);
+    const nowIso = new Date().toISOString();
+    const by = currentUser();
+    try {
+      const { error } = await supabase.from('inventory_audit_checks').upsert(
+        { location_id: locationId, product_id: pid, checked_at: nowIso, checked_by: by, edited },
+        { onConflict: 'location_id,product_id' },
+      );
+      if (error) throw new Error(error.message);
+      setChecks(prev => ({ ...prev, [pid]: { checked_at: nowIso, checked_by: by, edited } }));
+      showToast(edited ? 'Stock corrected & checked ✓' : 'Marked as checked ✓', 'success');
+    } catch (e) {
+      showToast('Could not save: ' + (e instanceof Error ? e.message : 'Unknown'), 'error');
+    } finally {
+      setSavingId(null);
+    }
+  }
+
+  function startEdit(row: AuditRow) {
+    const ppb = row.product.pieces_per_box ?? 0;
+    setEditingId(row.product.product_id);
+    setEditValue(String(row.quantity + row.box_quantity * ppb));
+  }
+
+  function cancelEdit() {
+    setEditingId(null);
+    setEditValue('');
+  }
+
+  // Build the stock_txn ops for a corrected total. The combined total is
+  // one number, but stock is stored per-company — so an increase lands on
+  // whichever firm already holds more of this product here (defaults to
+  // Aadinath when tied or absent), and a decrease drains that firm first,
+  // spilling into the other firm only if it alone doesn't have enough.
+  function buildEditOps(row: AuditRow, delta: number, ppb: number): StockOp[] {
+    const co = (cid: number): CompanyStock => row.perCompany[cid] ?? { quantity: 0, box_quantity: 0 };
+    const totals = COMPANY_IDS.map(cid => ({ cid, ...co(cid), total: co(cid).quantity + co(cid).box_quantity * ppb }));
+    const primary = [...totals].sort((a, b) => b.total - a.total)[0];
+    const order = [primary, ...totals.filter(t => t.cid !== primary.cid)];
+
+    if (delta > 0) {
+      const cur = co(primary.cid);
+      const next = applyPieceDelta(cur.quantity, cur.box_quantity, ppb, delta, true);
+      return [{
+        product_id: row.product.product_id, location_id: locationId, company_id: primary.cid,
+        dq: next.quantity - cur.quantity, db: next.box_quantity - cur.box_quantity,
+        mov_type: 'ADJUSTMENT_IN', mov_qty: delta, mov_from: null, mov_to: locationId,
+        reason: 'Modified from Audit page',
+      }];
+    }
+
+    let remaining = -delta;
+    const ops: StockOp[] = [];
+    for (const t of order) {
+      if (remaining <= 0) break;
+      const take = Math.min(remaining, t.total);
+      if (take <= 0) continue;
+      const cur = co(t.cid);
+      const next = applyPieceDelta(cur.quantity, cur.box_quantity, ppb, take, false);
+      ops.push({
+        product_id: row.product.product_id, location_id: locationId, company_id: t.cid,
+        dq: next.quantity - cur.quantity, db: next.box_quantity - cur.box_quantity,
+        mov_type: 'ADJUSTMENT_OUT', mov_qty: take, mov_from: locationId, mov_to: null,
+        reason: 'Modified from Audit page',
+      });
+      remaining -= take;
+    }
+    return ops;
+  }
+
+  async function saveEdit(row: AuditRow) {
+    const pid = row.product.product_id;
+    const ppb = row.product.pieces_per_box ?? 0;
+    const oldTotal = row.quantity + row.box_quantity * ppb;
+    const newTotal = Math.max(0, parseInt(editValue, 10) || 0);
+    const delta = newTotal - oldTotal;
+
+    if (delta === 0) { setEditingId(null); await markChecked(row, false); return; }
+
+    if (role === 'staff' && delta < 0) {
+      showToast('Only admins can reduce inventory. Ask your admin to correct this count.', 'error');
+      return;
+    }
+
+    setSavingId(pid);
+    try {
+      const ops = buildEditOps(row, delta, ppb);
+      await stockTxn(ops);
+      setEditingId(null);
+      await markChecked(row, true);
+      await loadAuditRows();
+    } catch (e) {
+      showToast('Could not update stock: ' + (e instanceof Error ? e.message : 'Unknown'), 'error');
+    } finally {
+      setSavingId(null);
+    }
+  }
+
+  async function resetAudit() {
+    if (!window.confirm(
+      `Start a new audit for ${locName}?\n\nThis clears the checklist — every item goes back to "to check". Stock levels are not affected.`,
+    )) return;
+    try {
+      const { error } = await supabase.from('inventory_audit_checks').delete().eq('location_id', locationId);
+      if (error) throw new Error(error.message);
+      setChecks({});
+      showToast('Audit checklist reset ✓', 'success');
+    } catch (e) {
+      showToast('Could not reset: ' + (e instanceof Error ? e.message : 'Unknown'), 'error');
+    }
+  }
 
   // ── Open product history drawer ───────────────────────────────────────────
   async function openProduct(row: AuditRow) {
@@ -249,16 +427,31 @@ function InventoryAuditDashboard() {
     );
   }, [auditRows, search]);
 
-  // ── Group by category for the grid ───────────────────────────────────────
+  // ── Split into "to check" vs "checked", per the saved checklist ──────────
+  const pending = useMemo(
+    () => filtered.filter(r => !checks[r.product.product_id]),
+    [filtered, checks],
+  );
+  const checkedList = useMemo(() => {
+    return filtered
+      .filter(r => checks[r.product.product_id])
+      .sort((a, b) => {
+        const ca = checks[a.product.product_id]?.checked_at ?? '';
+        const cb = checks[b.product.product_id]?.checked_at ?? '';
+        return cb.localeCompare(ca);
+      });
+  }, [filtered, checks]);
+
+  // ── Group "to check" rows by category for the grid ───────────────────────
   const groups = useMemo(() => {
     const map = new Map<string, AuditRow[]>();
-    for (const row of filtered) {
+    for (const row of pending) {
       const cat = row.product.type ?? 'Uncategorised';
       if (!map.has(cat)) map.set(cat, []);
       map.get(cat)!.push(row);
     }
     return [...map.entries()].sort(([a], [b]) => a.localeCompare(b));
-  }, [filtered]);
+  }, [pending]);
 
   const locName = locations.find(l => l.location_id === locationId)?.location_name ?? 'Location';
   const today   = fmtDateLong(new Date());
@@ -341,19 +534,34 @@ function InventoryAuditDashboard() {
         <main className="pt-14 max-w-7xl mx-auto w-full px-4 pb-12">
 
           {/* ── Page header ─────────────────────────────────────────────── */}
-          <div className="flex items-center justify-between pt-5 pb-3">
+          <div className="flex items-center justify-between gap-3 flex-wrap pt-5 pb-3">
             <div>
               <h2 className="text-base font-bold text-slate-100">🗂️ Inventory Audit</h2>
               <p className="text-xs text-muted mt-0.5">
-                {loading ? 'Loading…' : `${auditRows.length} product${auditRows.length !== 1 ? 's' : ''} · ${locName}`}
+                {loading ? 'Loading…' : `${pending.length} to check · ${checkedList.length} checked · ${locName}`}
               </p>
             </div>
-            <button
-              onClick={() => window.print()}
-              className="px-4 py-2 rounded-xl bg-gold/10 border border-gold/30 text-gold text-xs font-bold hover:bg-gold/20 transition-all flex items-center gap-2"
-            >
-              🖨️ Generate PDF
-            </button>
+            <div className="flex gap-2 flex-wrap">
+              <button
+                onClick={loadAuditRows}
+                disabled={loading}
+                className="px-3 py-2 rounded-xl bg-surface2 border border-white/10 text-muted text-xs font-bold hover:border-teal/30 hover:text-teal transition-all flex items-center gap-1.5 disabled:opacity-50"
+              >
+                🔄 Refresh
+              </button>
+              <button
+                onClick={resetAudit}
+                className="px-3 py-2 rounded-xl bg-danger/10 border border-danger/30 text-danger text-xs font-bold hover:bg-danger/20 transition-all flex items-center gap-1.5"
+              >
+                ↺ Start New Audit
+              </button>
+              <button
+                onClick={() => window.print()}
+                className="px-4 py-2 rounded-xl bg-gold/10 border border-gold/30 text-gold text-xs font-bold hover:bg-gold/20 transition-all flex items-center gap-2"
+              >
+                🖨️ Generate PDF
+              </button>
+            </div>
           </div>
 
           {/* ── Location toggle (dynamic) ────────────────────────────── */}
@@ -404,6 +612,13 @@ function InventoryAuditDashboard() {
             </div>
           ) : (
             <div className="flex flex-col gap-6">
+              {groups.length === 0 && checkedList.length > 0 && (
+                <div className="text-center py-10 text-muted">
+                  <div className="text-3xl mb-2">🎉</div>
+                  <p className="text-sm">Everything here has been checked</p>
+                </div>
+              )}
+
               {groups.map(([cat, rows]) => (
                 <div key={cat}>
                   {/* Category divider */}
@@ -415,6 +630,7 @@ function InventoryAuditDashboard() {
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-2">
                     {rows.map((row, i) => {
+                      const pid   = row.product.product_id;
                       const ppb   = row.product.pieces_per_box ?? 0;
                       const tot   = row.quantity + row.box_quantity * ppb;
                       const reorder = row.product.reorder_level ?? 2;
@@ -426,53 +642,144 @@ function InventoryAuditDashboard() {
                         tot === 0           ? 'border-danger/15 hover:border-danger/30' :
                         tot <= reorder      ? 'border-gold/15 hover:border-gold/30'     :
                                               'border-white/8 hover:border-teal/20';
+                      const isEditing = editingId === pid;
+                      const isSaving  = savingId === pid;
 
                       return (
                         <motion.div
-                          key={row.product.product_id}
+                          key={pid}
                           initial={{ opacity: 0, y: 6 }}
                           animate={{ opacity: 1, y: 0 }}
                           transition={{ delay: Math.min(i * 0.02, 0.4) }}
-                          onClick={() => openProduct(row)}
-                          className={`bg-surface border rounded-xl p-4 cursor-pointer transition-all ${borderCls}`}
+                          className={`bg-surface border rounded-xl p-4 transition-all ${borderCls}`}
                         >
-                          <div className="flex items-start justify-between gap-3">
-                            <div className="min-w-0 flex-1">
-                              <p className="font-semibold text-sm text-slate-100 leading-snug break-words line-clamp-2">
-                                {row.product.product_name}
-                              </p>
-                              <p className="text-[11px] text-muted mt-0.5 truncate">
-                                {[row.product.brand, row.product.model].filter(Boolean).join(' · ')
-                                  || row.product.stock_keeping_unit
-                                  || '—'}
-                              </p>
-                            </div>
-                            <div className="text-right shrink-0">
-                              <p className={`text-sm font-bold tabular-nums ${stockCls}`}>
-                                {stockLabel(row)}
-                              </p>
-                              {ppb > 0 && row.box_quantity > 0 && (
-                                <p className="text-[9px] text-muted/60 tabular-nums">
-                                  = {tot} pc{tot !== 1 ? 's' : ''}
+                          <div className="cursor-pointer" onClick={() => openProduct(row)}>
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="min-w-0 flex-1">
+                                <p className="font-semibold text-sm text-slate-100 leading-snug break-words line-clamp-2">
+                                  {row.product.product_name}
                                 </p>
-                              )}
+                                <p className="text-[11px] text-muted mt-0.5 truncate">
+                                  {[row.product.brand, row.product.model].filter(Boolean).join(' · ')
+                                    || row.product.stock_keeping_unit
+                                    || '—'}
+                                </p>
+                              </div>
+                              <div className="text-right shrink-0">
+                                <p className={`text-sm font-bold tabular-nums ${stockCls}`}>
+                                  {stockLabel(row)}
+                                </p>
+                                {ppb > 0 && row.box_quantity > 0 && (
+                                  <p className="text-[9px] text-muted/60 tabular-nums">
+                                    = {tot} pc{tot !== 1 ? 's' : ''}
+                                  </p>
+                                )}
+                              </div>
+                            </div>
+
+                            <div className="flex items-center justify-between mt-2">
+                              <span className="text-[9px] text-muted/50 font-mono">
+                                {row.product.stock_keeping_unit || ''}
+                              </span>
+                              <span className="text-[9px] text-muted/50 flex items-center gap-1">
+                                View history →
+                              </span>
                             </div>
                           </div>
 
-                          <div className="flex items-center justify-between mt-2">
-                            <span className="text-[9px] text-muted/50 font-mono">
-                              {row.product.stock_keeping_unit || ''}
-                            </span>
-                            <span className="text-[9px] text-muted/50 flex items-center gap-1">
-                              View history →
-                            </span>
-                          </div>
+                          {/* ── Done / Edit actions ─────────────────────── */}
+                          {isEditing ? (
+                            <div className="mt-3 pt-3 border-t border-white/8" onClick={e => e.stopPropagation()}>
+                              <p className="text-[10px] font-bold text-muted uppercase tracking-widest mb-1.5">
+                                Correct total (pieces) at {locName}
+                              </p>
+                              <div className="flex items-center gap-2">
+                                <input
+                                  type="number"
+                                  inputMode="numeric"
+                                  autoFocus
+                                  value={editValue}
+                                  onFocus={e => e.currentTarget.select()}
+                                  onChange={e => setEditValue(e.target.value)}
+                                  onWheel={e => e.currentTarget.blur()}
+                                  className="flex-1 min-w-0 px-3 py-2 rounded-lg bg-surface2 border border-white/10 text-slate-100 text-sm font-bold outline-none focus:border-teal/40 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                                />
+                                <button
+                                  onClick={() => saveEdit(row)}
+                                  disabled={isSaving}
+                                  className="px-3 py-2 rounded-lg bg-teal/15 border border-teal/30 text-teal text-xs font-bold hover:bg-teal/25 transition-colors disabled:opacity-40"
+                                >
+                                  {isSaving ? '…' : 'Save'}
+                                </button>
+                                <button
+                                  onClick={cancelEdit}
+                                  disabled={isSaving}
+                                  className="px-3 py-2 rounded-lg bg-surface2 border border-white/10 text-muted text-xs font-bold hover:text-slate-100 transition-colors disabled:opacity-40"
+                                >
+                                  Cancel
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="flex gap-2 mt-3 pt-3 border-t border-white/8">
+                              <button
+                                onClick={(e) => { e.stopPropagation(); markChecked(row, false); }}
+                                disabled={isSaving}
+                                className="flex-1 py-2 rounded-lg bg-success/10 border border-success/30 text-success text-xs font-bold hover:bg-success/20 transition-colors disabled:opacity-40"
+                              >
+                                {isSaving ? '…' : '✓ Done'}
+                              </button>
+                              {role === 'admin' && (
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); startEdit(row); }}
+                                  disabled={isSaving}
+                                  className="flex-1 py-2 rounded-lg bg-gold/10 border border-gold/30 text-gold text-xs font-bold hover:bg-gold/20 transition-colors disabled:opacity-40"
+                                >
+                                  ✎ Edit
+                                </button>
+                              )}
+                            </div>
+                          )}
                         </motion.div>
                       );
                     })}
                   </div>
                 </div>
               ))}
+
+              {/* ── Checked list ────────────────────────────────────────── */}
+              {checkedList.length > 0 && (
+                <div>
+                  <div className="flex items-center gap-3 mb-2">
+                    <span className="text-[10px] font-bold text-success uppercase tracking-widest whitespace-nowrap">✅ Checked</span>
+                    <div className="flex-1 h-px bg-white/6" />
+                    <span className="text-[10px] text-muted/60">{checkedList.length}</span>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-2">
+                    {checkedList.map(row => {
+                      const pid = row.product.product_id;
+                      const c = checks[pid];
+                      return (
+                        <div
+                          key={pid}
+                          onClick={() => openProduct(row)}
+                          className="bg-surface2/60 border border-success/15 rounded-xl p-3 cursor-pointer opacity-80 hover:opacity-100 transition-opacity"
+                        >
+                          <p className="text-xs font-semibold text-slate-300 truncate">{row.product.product_name}</p>
+                          <div className="flex items-center justify-between mt-1 gap-2">
+                            <span className="text-[10px] text-muted truncate">
+                              {stockLabel(row)}{c?.edited ? ' · corrected' : ''}
+                            </span>
+                            <span className="text-[9px] text-muted/60 shrink-0">
+                              {c ? fmtDateTime(c.checked_at) : ''}{c?.checked_by ? ` · ${c.checked_by}` : ''}
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </main>
