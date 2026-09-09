@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -12,6 +12,217 @@ import { SESSION_KEY, ROLE_KEY, DEFAULT_COMPANY_ID } from '@/lib/types';
 
 const LABELS_PER_PAGE = 24;
 type SortBy = 'recent' | 'name';
+
+// ── WiFi sticker printer (XB330B) ───────────────────────────────────────────────
+// Bridges to a small relay helper (sticker-relay/server.js) running on a PC on
+// the same WiFi network, which forwards raw TSPL commands to the printer's IP.
+// Browsers can't open raw TCP sockets, and Safari/iOS has no Web Bluetooth, so
+// the page reaches the relay via a plain HTTP form POST (a top-level page
+// navigation isn't subject to mixed-content blocking the way a fetch() would be).
+
+const STICKER_DPI = 203; // standard resolution for this printer family
+
+const LABEL_PRESETS = [
+  { key: '40x30',   label: '40 × 30 mm',   widthMm: 40,  heightMm: 30 },
+  { key: '50x30',   label: '50 × 30 mm',   widthMm: 50,  heightMm: 30 },
+  { key: '50x25',   label: '50 × 25 mm',   widthMm: 50,  heightMm: 25 },
+  { key: '40x20',   label: '40 × 20 mm',   widthMm: 40,  heightMm: 20 },
+  { key: '100x150', label: '100 × 150 mm', widthMm: 100, heightMm: 150 },
+  { key: 'custom',  label: 'Custom',       widthMm: 0,   heightMm: 0 },
+] as const;
+type LabelPresetKey = typeof LABEL_PRESETS[number]['key'];
+
+type LabelBitmap = { widthPx: number; heightPx: number; bytesPerRow: number; rasterBase64: string };
+
+function readLS(key: string, fallback: string): string {
+  if (typeof window === 'undefined') return fallback;
+  return localStorage.getItem(key) ?? fallback;
+}
+
+function fitText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number): string {
+  if (ctx.measureText(text).width <= maxWidth) return text;
+  let t = text;
+  while (t.length > 1 && ctx.measureText(`${t}…`).width > maxWidth) t = t.slice(0, -1);
+  return `${t}…`;
+}
+
+// Product names range from a couple of words to a full descriptive sentence,
+// so a single fixed font size either wastes space on short names or
+// truncates long ones. Instead we shrink-to-fit per label: try one line at
+// shrinking font sizes, and only fall back to wrapping onto two lines (at
+// the minimum font) if it still won't fit — so every label reads clearly
+// regardless of how long that particular product's name is.
+function fitNameLines(
+  ctx: CanvasRenderingContext2D,
+  name: string,
+  maxWidth: number,
+  maxFontPx: number,
+  minFontPx: number,
+): { lines: string[]; fontPx: number } {
+  for (let font = maxFontPx; font >= minFontPx; font -= 1) {
+    ctx.font = `600 ${font}px sans-serif`;
+    if (ctx.measureText(name).width <= maxWidth) return { lines: [name], fontPx: font };
+  }
+
+  ctx.font = `600 ${minFontPx}px sans-serif`;
+  const words = name.split(' ');
+  if (words.length < 2) return { lines: [fitText(ctx, name, maxWidth)], fontPx: minFontPx };
+
+  let best = { line1: words[0], line2: words.slice(1).join(' ') };
+  let bestWidth = Infinity;
+  for (let i = 1; i < words.length; i++) {
+    const line1 = words.slice(0, i).join(' ');
+    const line2 = words.slice(i).join(' ');
+    const w = Math.max(ctx.measureText(line1).width, ctx.measureText(line2).width);
+    if (w < bestWidth) { bestWidth = w; best = { line1, line2 }; }
+  }
+  return { lines: [fitText(ctx, best.line1, maxWidth), fitText(ctx, best.line2, maxWidth)], fontPx: minFontPx };
+}
+
+// Reused by both the actual renderer and the label-size suggestion below, so
+// the suggestion reflects exactly what will land on the label.
+let measureCanvas: HTMLCanvasElement | null = null;
+function measureTextWidthPx(text: string, fontPx: number): number {
+  if (!measureCanvas) measureCanvas = document.createElement('canvas');
+  const ctx = measureCanvas.getContext('2d')!;
+  ctx.font = `600 ${fontPx}px sans-serif`;
+  return ctx.measureText(text).width;
+}
+
+// Suggests the smallest roll size (by area) that fits the longest selected
+// product name on one line at a comfortably readable font — since a
+// thermal roll is one fixed physical size, you pick the size before
+// printing rather than per-label.
+function suggestLabelSize(items: Product[]): { key: LabelPresetKey; label: string; note: string } | null {
+  if (items.length === 0) return null;
+  const REF_FONT = 40;
+  let longestName = items[0].product_name;
+  let longestWidth = measureTextWidthPx(longestName, REF_FONT);
+  for (const p of items) {
+    const w = measureTextWidthPx(p.product_name, REF_FONT);
+    if (w > longestWidth) { longestWidth = w; longestName = p.product_name; }
+  }
+
+  const candidates = LABEL_PRESETS
+    .filter((p): p is typeof LABEL_PRESETS[number] & { key: Exclude<LabelPresetKey, 'custom'> } => p.key !== 'custom')
+    .map(p => ({
+      ...p,
+      widthPx:  Math.round((p.widthMm / 25.4) * STICKER_DPI),
+      heightPx: Math.round((p.heightMm / 25.4) * STICKER_DPI),
+    }))
+    .sort((a, b) => a.widthMm * a.heightMm - b.widthMm * b.heightMm);
+
+  for (const c of candidates) {
+    const usableWidth  = c.widthPx * 0.94;
+    const targetFont   = c.heightPx * 0.13; // matches maxFontPx used when rendering
+    const fittingFontAtRefWidth = REF_FONT * (usableWidth / longestWidth);
+    if (fittingFontAtRefWidth >= targetFont * 0.8) {
+      return { key: c.key, label: c.label, note: `Fits "${longestName}" on one line without shrinking much.` };
+    }
+  }
+
+  const largest = candidates[candidates.length - 1];
+  return {
+    key: largest.key,
+    label: largest.label,
+    note: `"${longestName}" is long — even ${largest.label} will wrap it onto two lines.`,
+  };
+}
+
+function bytesToBase64(bytes: Uint8Array): string {
+  let binary = '';
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+  }
+  return btoa(binary);
+}
+
+// Renders a label to a monochrome, byte-aligned raster the relay can wrap in
+// a TSPL BITMAP command — this keeps the printed output a pixel-for-pixel
+// match of what jsbarcode + canvas draw here, instead of re-deriving the
+// layout in printer-native font/barcode commands.
+async function renderLabelBitmap(product: Product, widthMm: number, heightMm: number): Promise<LabelBitmap> {
+  const bytesPerRow = Math.ceil(Math.round((widthMm / 25.4) * STICKER_DPI) / 8);
+  const widthPx  = bytesPerRow * 8;
+  const heightPx = Math.round((heightMm / 25.4) * STICKER_DPI);
+
+  const canvas = document.createElement('canvas');
+  canvas.width = widthPx;
+  canvas.height = heightPx;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) throw new Error('Canvas rendering is not supported in this browser');
+
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(0, 0, widthPx, heightPx);
+  ctx.fillStyle = '#000';
+  ctx.textAlign = 'center';
+
+  if (product.stock_keeping_unit) {
+    const barcodeCanvas = document.createElement('canvas');
+    try {
+      const JsBarcode = (await import('jsbarcode')).default;
+      JsBarcode(barcodeCanvas, product.stock_keeping_unit, {
+        format:       'CODE128',
+        width:        2,
+        height:       Math.round(heightPx * 0.4),
+        displayValue: true,
+        fontSize:     Math.max(10, Math.round(heightPx * 0.09)),
+        margin:       0,
+        background:   '#ffffff',
+        lineColor:    '#000000',
+      });
+      const scale = Math.min((widthPx * 0.92) / barcodeCanvas.width, 1);
+      const bw = barcodeCanvas.width * scale;
+      const bh = barcodeCanvas.height * scale;
+      ctx.drawImage(barcodeCanvas, (widthPx - bw) / 2, heightPx * 0.04, bw, bh);
+    } catch {
+      ctx.font = `${Math.round(heightPx * 0.16)}px monospace`;
+      ctx.fillText('BAD SKU', widthPx / 2, heightPx * 0.4);
+    }
+  } else {
+    ctx.font = `${Math.round(heightPx * 0.16)}px monospace`;
+    ctx.fillText(product.product_name.slice(0, 16), widthPx / 2, heightPx * 0.4);
+  }
+
+  const nameMaxWidth = widthPx * 0.94;
+  const { lines: nameLines, fontPx: nameFontPx } = fitNameLines(
+    ctx, product.product_name, nameMaxWidth,
+    Math.round(heightPx * 0.13), Math.max(8, Math.round(heightPx * 0.07)),
+  );
+  ctx.font = `600 ${nameFontPx}px sans-serif`;
+  if (nameLines.length === 1) {
+    ctx.fillText(nameLines[0], widthPx / 2, heightPx * 0.80);
+  } else {
+    ctx.fillText(nameLines[0], widthPx / 2, heightPx * 0.75);
+    ctx.fillText(nameLines[1], widthPx / 2, heightPx * 0.75 + nameFontPx * 1.15);
+  }
+
+  if (product.selling_price != null) {
+    const priceText = `Ksh ${product.selling_price}`;
+    let priceFontPx = Math.round(heightPx * 0.14);
+    ctx.font = `700 ${priceFontPx}px sans-serif`;
+    while (priceFontPx > 8 && ctx.measureText(priceText).width > nameMaxWidth) {
+      priceFontPx -= 1;
+      ctx.font = `700 ${priceFontPx}px sans-serif`;
+    }
+    ctx.fillText(priceText, widthPx / 2, heightPx * 0.97);
+  }
+
+  const imageData = ctx.getImageData(0, 0, widthPx, heightPx);
+  const bytes = new Uint8Array(bytesPerRow * heightPx);
+  for (let y = 0; y < heightPx; y++) {
+    for (let x = 0; x < widthPx; x++) {
+      const i = (y * widthPx + x) * 4;
+      const luminance = 0.299 * imageData.data[i] + 0.587 * imageData.data[i + 1] + 0.114 * imageData.data[i + 2];
+      if (luminance < 140) {
+        bytes[y * bytesPerRow + (x >> 3)] |= 1 << (7 - (x & 7));
+      }
+    }
+  }
+
+  return { widthPx, heightPx, bytesPerRow, rasterBase64: bytesToBase64(bytes) };
+}
 
 // ── Auth guard ─────────────────────────────────────────────────────────────────
 
@@ -50,6 +261,23 @@ function LabelsDashboard() {
   const [stockQty,   setStockQty]   = useState(1);
   const [stockSaving, setStockSaving] = useState(false);
   const toastRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+
+  // WiFi sticker printer (XB330B via relay helper)
+  const [stickerOpen,    setStickerOpen]    = useState(false);
+  const [stickerSending, setStickerSending] = useState(false);
+  const [labelSize,      setLabelSize]      = useState<LabelPresetKey>(() => readLS('sticker.labelSize', '50x30') as LabelPresetKey);
+  const [customWidthMm,  setCustomWidthMm]  = useState<number>(() => Number(readLS('sticker.customWidthMm', '50')));
+  const [customHeightMm, setCustomHeightMm] = useState<number>(() => Number(readLS('sticker.customHeightMm', '30')));
+  const [relayHost,      setRelayHost]      = useState<string>(() => readLS('sticker.relayHost', ''));
+  const [printerIp,      setPrinterIp]      = useState<string>(() => readLS('sticker.printerIp', ''));
+  const [printerPort,    setPrinterPort]    = useState<string>(() => readLS('sticker.printerPort', '9100'));
+
+  useEffect(() => { localStorage.setItem('sticker.labelSize', labelSize); }, [labelSize]);
+  useEffect(() => { localStorage.setItem('sticker.customWidthMm', String(customWidthMm)); }, [customWidthMm]);
+  useEffect(() => { localStorage.setItem('sticker.customHeightMm', String(customHeightMm)); }, [customHeightMm]);
+  useEffect(() => { localStorage.setItem('sticker.relayHost', relayHost); }, [relayHost]);
+  useEffect(() => { localStorage.setItem('sticker.printerIp', printerIp); }, [printerIp]);
+  useEffect(() => { localStorage.setItem('sticker.printerPort', printerPort); }, [printerPort]);
 
   // Set default location once loaded
   useEffect(() => {
@@ -124,6 +352,15 @@ function LabelsDashboard() {
     pages.push(labelList.slice(i, i + LABELS_PER_PAGE));
   }
 
+  const selectedProducts = useMemo(
+    () => products.filter(p => (selected[p.product_id] ?? 0) > 0),
+    [products, selected],
+  );
+  const sizeSuggestion = useMemo(
+    () => (typeof window !== 'undefined' ? suggestLabelSize(selectedProducts) : null),
+    [selectedProducts],
+  );
+
   function handlePrint() {
     // We allow printing more than the on-hand count (the user can do this
     // intentionally — pre-print spares). Just confirm via toast if any
@@ -136,6 +373,51 @@ function LabelsDashboard() {
       showToast(`Printing ${overLimit.length} product(s) above ${locName} stock — extras will print anyway.`, 'success');
     }
     window.print();
+  }
+
+  async function handlePrintWifi() {
+    const relay = relayHost.trim();
+    const ip    = printerIp.trim();
+    if (!relay) { showToast('Enter the relay address (e.g. 192.168.1.50:8787)', 'error'); return; }
+    if (!ip)    { showToast("Enter the printer's IP address", 'error'); return; }
+
+    const preset  = LABEL_PRESETS.find(p => p.key === labelSize);
+    const widthMm  = labelSize === 'custom' ? customWidthMm  : preset?.widthMm  ?? 50;
+    const heightMm = labelSize === 'custom' ? customHeightMm : preset?.heightMm ?? 30;
+    if (widthMm <= 0 || heightMm <= 0) { showToast('Enter a valid label size', 'error'); return; }
+
+    const entries = Object.entries(selected).filter(([, copies]) => copies > 0);
+    if (entries.length === 0) { showToast('Select products to print first', 'error'); return; }
+
+    setStickerSending(true);
+    try {
+      const jobs = [];
+      for (const [pid, copies] of entries) {
+        const product = products.find(p => p.product_id === Number(pid));
+        if (!product) continue;
+        const bitmap = await renderLabelBitmap(product, widthMm, heightMm);
+        jobs.push({ ...bitmap, widthMm, heightMm, copies });
+      }
+      if (jobs.length === 0) { showToast('Nothing to print', 'error'); setStickerSending(false); return; }
+
+      // Hand off via a real page navigation (form POST), not fetch — a
+      // top-level navigation to an http:// relay from this https:// page is
+      // allowed by browsers, whereas a fetch() would be blocked as mixed
+      // content the moment the relay lives on a different device.
+      const form = document.createElement('form');
+      form.method = 'POST';
+      form.action = `http://${relay}/print`;
+      const input = document.createElement('input');
+      input.type  = 'hidden';
+      input.name  = 'payload';
+      input.value = JSON.stringify({ printerIp: ip, printerPort: Number(printerPort) || 9100, jobs });
+      form.appendChild(input);
+      document.body.appendChild(form);
+      form.submit();
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : 'Failed to prepare the sticker print job', 'error');
+      setStickerSending(false);
+    }
   }
 
   async function handleStockSave() {
@@ -230,6 +512,14 @@ function LabelsDashboard() {
         <span className="text-xs text-muted font-mono whitespace-nowrap hidden sm:block">
           {totalLabels} label{totalLabels !== 1 ? 's' : ''}
         </span>
+        <button
+          onClick={() => setStickerOpen(true)}
+          disabled={totalLabels === 0}
+          className="flex items-center gap-2 px-3 py-2 rounded-xl bg-surface2 border border-white/8 text-slate-100 text-xs font-bold hover:border-teal/40 transition-colors disabled:opacity-30 disabled:cursor-not-allowed print-hide"
+          title="Print to WiFi sticker printer"
+        >
+          📶 Sticker
+        </button>
         <button
           onClick={handlePrint}
           disabled={totalLabels === 0}
@@ -482,6 +772,116 @@ function LabelsDashboard() {
                   }`}
                 >
                   {stockSaving ? 'Saving…' : `${stockModal.mode === 'add' ? 'Add' : 'Remove'} Stock ✓`}
+                </button>
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {stickerOpen && (
+          <>
+            <motion.div
+              className="fixed inset-0 z-100 bg-black/70 backdrop-blur-sm print-hide"
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              onClick={() => !stickerSending && setStickerOpen(false)}
+            />
+            <motion.div
+              className="fixed bottom-0 left-0 right-0 z-110 bg-surface border-t border-white/10 rounded-t-3xl px-5 py-6 max-w-lg mx-auto print-hide max-h-[85vh] overflow-y-auto"
+              initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }}
+              transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+            >
+              <div className="w-9 h-1 bg-white/15 rounded-full mx-auto mb-4" />
+              <h3 className="text-base font-bold text-slate-100 text-center mb-1">📶 WiFi Sticker Printer</h3>
+              <p className="text-xs text-muted text-center mb-4">
+                Sends {totalLabels} label{totalLabels !== 1 ? 's' : ''} to the XB330B over WiFi, via the relay helper running on a PC on your network.
+              </p>
+
+              <label className="text-[11px] font-semibold text-muted mb-1 block">Label size</label>
+              <div className="flex flex-wrap gap-1.5 mb-2">
+                {LABEL_PRESETS.map(p => (
+                  <button
+                    key={p.key}
+                    onClick={() => setLabelSize(p.key)}
+                    className={`px-2.5 py-1.5 rounded-lg border text-[11px] font-semibold transition-all ${
+                      labelSize === p.key ? 'border-teal bg-teal/10 text-teal' : 'border-white/8 bg-surface2 text-muted hover:border-white/20'
+                    }`}
+                  >
+                    {p.label}
+                  </button>
+                ))}
+              </div>
+
+              {sizeSuggestion && sizeSuggestion.key !== labelSize && (
+                <button
+                  onClick={() => setLabelSize(sizeSuggestion.key)}
+                  className="w-full text-left mb-3 px-3 py-2 rounded-lg border border-gold/30 bg-gold/10 text-[11px] text-gold hover:bg-gold/15 transition-colors"
+                >
+                  💡 Suggested: <b>{sizeSuggestion.label}</b> — {sizeSuggestion.note} <span className="underline">Use this</span>
+                </button>
+              )}
+
+              {labelSize === 'custom' && (
+                <div className="flex gap-2 mb-3">
+                  <div className="flex-1">
+                    <label className="text-[10px] text-muted block mb-1">Width (mm)</label>
+                    <input
+                      type="number" min={5} value={customWidthMm}
+                      onChange={e => setCustomWidthMm(Math.max(5, parseInt(e.target.value) || 0))}
+                      onWheel={e => e.currentTarget.blur()}
+                      className="w-full px-2.5 py-1.5 rounded-lg bg-surface2 border border-white/8 text-sm text-slate-100 outline-none focus:border-teal/40"
+                    />
+                  </div>
+                  <div className="flex-1">
+                    <label className="text-[10px] text-muted block mb-1">Height (mm)</label>
+                    <input
+                      type="number" min={5} value={customHeightMm}
+                      onChange={e => setCustomHeightMm(Math.max(5, parseInt(e.target.value) || 0))}
+                      onWheel={e => e.currentTarget.blur()}
+                      className="w-full px-2.5 py-1.5 rounded-lg bg-surface2 border border-white/8 text-sm text-slate-100 outline-none focus:border-teal/40"
+                    />
+                  </div>
+                </div>
+              )}
+
+              <label className="text-[11px] font-semibold text-muted mb-1 block">Relay address (PC running the helper)</label>
+              <input
+                type="text" value={relayHost} onChange={e => setRelayHost(e.target.value)}
+                placeholder="e.g. 192.168.1.50:8787"
+                className="w-full mb-3 px-3 py-2 rounded-lg bg-surface2 border border-white/8 text-sm text-slate-100 placeholder:text-muted/50 outline-none focus:border-teal/40 font-mono"
+              />
+
+              <div className="flex gap-2 mb-4">
+                <div className="flex-2">
+                  <label className="text-[11px] font-semibold text-muted mb-1 block">Printer IP</label>
+                  <input
+                    type="text" value={printerIp} onChange={e => setPrinterIp(e.target.value)}
+                    placeholder="e.g. 192.168.1.87"
+                    className="w-full px-3 py-2 rounded-lg bg-surface2 border border-white/8 text-sm text-slate-100 placeholder:text-muted/50 outline-none focus:border-teal/40 font-mono"
+                  />
+                </div>
+                <div className="flex-1">
+                  <label className="text-[11px] font-semibold text-muted mb-1 block">Port</label>
+                  <input
+                    type="text" value={printerPort} onChange={e => setPrinterPort(e.target.value)}
+                    className="w-full px-3 py-2 rounded-lg bg-surface2 border border-white/8 text-sm text-slate-100 outline-none focus:border-teal/40 font-mono"
+                  />
+                </div>
+              </div>
+
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setStickerOpen(false)}
+                  disabled={stickerSending}
+                  className="flex-1 py-3 rounded-xl border border-white/8 bg-surface2 text-muted text-sm font-semibold disabled:opacity-50"
+                >Cancel</button>
+                <button
+                  onClick={handlePrintWifi}
+                  disabled={stickerSending}
+                  className="flex-2 py-3 rounded-xl text-navy text-sm font-bold bg-linear-to-r from-teal to-teal/70 shadow-[0_4px_14px_rgba(0,212,255,0.3)] disabled:opacity-50"
+                >
+                  {stickerSending ? 'Sending…' : 'Send to Printer 📶'}
                 </button>
               </div>
             </motion.div>

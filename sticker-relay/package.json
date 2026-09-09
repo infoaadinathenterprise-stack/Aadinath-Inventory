@@ -1,0 +1,10 @@
+{
+  "name": "sticker-relay",
+  "private": true,
+  "version": "1.0.0",
+  "description": "WiFi relay bridging the Label Printer page to the XB330B sticker printer",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  }
+}
