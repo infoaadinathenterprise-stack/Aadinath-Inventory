@@ -23,13 +23,15 @@ export default function ProductsPage() {
 
       if (error || !data) { setLoading(false); return; }
 
-      const mapped: Product[] = data.map((row: Product & { stock_by_location?: StockRow[] }) => {
-        const total_stock = (row.stock_by_location || []).reduce((sum, s) =>
-          sum + (s.quantity || 0), 0
-        );
-        const { stock_by_location: _omit, ...rest } = row as Product & { stock_by_location?: StockRow[] };
-        return { ...rest, total_stock };
-      });
+      const mapped: Product[] = data
+        .map((row: Product & { stock_by_location?: StockRow[] }) => {
+          const total_stock = (row.stock_by_location || []).reduce((sum, s) =>
+            sum + (s.quantity || 0), 0
+          );
+          const { stock_by_location: _omit, ...rest } = row as Product & { stock_by_location?: StockRow[] };
+          return { ...rest, total_stock };
+        })
+        .filter(p => (p.total_stock ?? 0) > 0);
 
       const cats = [...new Set(mapped.map(p => p.type).filter(Boolean) as string[])].sort();
       setProducts(mapped);

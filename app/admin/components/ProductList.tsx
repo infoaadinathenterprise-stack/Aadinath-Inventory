@@ -100,6 +100,14 @@ export default function ProductList({
         const total = totalAllLocs(p.product_id);
         if (stockFilter === 'in_stock'     && total === 0) return false;
         if (stockFilter === 'out_of_stock' && total > 0)  return false;
+      } else {
+        // Default browsing view: only show what's actually here at this
+        // location. Out-of-stock-here items stay reachable via the
+        // out_of_stock filter (StatsBar link) for restocking.
+        const ppb = p.pieces_per_box || 0;
+        const here = ((stockByLoc[locationId] ?? {})[p.product_id] ?? 0)
+          + ((boxByLoc[locationId] ?? {})[p.product_id] ?? 0) * (ppb || 1);
+        if (here === 0) return false;
       }
       if (category !== 'All' && p.type !== category) return false;
       if (q) {
@@ -110,7 +118,7 @@ export default function ProductList({
       return true;
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [products, category, search, stockFilter, stockByLoc, boxByLoc, locations]);
+  }, [products, category, search, stockFilter, stockByLoc, boxByLoc, locations, locationId]);
 
   const outCount = useMemo(() => visible.filter(p => {
     const ppb = p.pieces_per_box || 0;
