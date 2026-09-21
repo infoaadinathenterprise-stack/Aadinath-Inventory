@@ -1,0 +1,39 @@
+name: Supabase Keep-Alive
+
+# Free-tier Supabase projects auto-pause after 7 days with no API activity.
+# This pings each project's PostgREST root (no table/data access) every 3
+# days so they never go quiet long enough to trigger that.
+on:
+  schedule:
+    - cron: "0 6 */3 * *"
+  workflow_dispatch: {}
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping aadinath-showcase project
+        env:
+          URL: ${{ secrets.SUPABASE_SHOWCASE_URL }}
+          KEY: ${{ secrets.SUPABASE_SHOWCASE_ANON_KEY }}
+        run: |
+          if [ -z "$URL" ] || [ -z "$KEY" ]; then
+            echo "SUPABASE_SHOWCASE_URL / SUPABASE_SHOWCASE_ANON_KEY not set, skipping."
+            exit 0
+          fi
+          code=$(curl -s -o /dev/null -w "%{http_code}" "$URL/rest/v1/" -H "apikey: $KEY")
+          echo "aadinath-showcase project responded: $code"
+          if [ "$code" -ge 500 ]; then exit 1; fi
+
+      - name: Ping second Supabase project
+        env:
+          URL: ${{ secrets.SUPABASE_SECOND_URL }}
+          KEY: ${{ secrets.SUPABASE_SECOND_ANON_KEY }}
+        run: |
+          if [ -z "$URL" ] || [ -z "$KEY" ]; then
+            echo "SUPABASE_SECOND_URL / SUPABASE_SECOND_ANON_KEY not set, skipping."
+            exit 0
+          fi
+          code=$(curl -s -o /dev/null -w "%{http_code}" "$URL/rest/v1/" -H "apikey: $KEY")
+          echo "second project responded: $code"
+          if [ "$code" -ge 500 ]; then exit 1; fi
