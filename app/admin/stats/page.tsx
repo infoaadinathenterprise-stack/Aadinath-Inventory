@@ -4,9 +4,24 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { motion } from 'framer-motion';
+import { supabase } from '@/lib/supabase';
 import { useProducts } from '@/lib/hooks/useProducts';
-import { SESSION_KEY, USER_KEY, ROLE_KEY } from '@/lib/types';
+import { SESSION_KEY, USER_KEY, ROLE_KEY, type Supplier } from '@/lib/types';
 import AdminNavbar from '../components/AdminNavbar';
+
+interface SupplierRow {
+  product_id:    number;
+  product_name:  string;
+  reorder_level: number;
+  stock:         number;
+  lastPrice:     number | null;
+  lastDate:      string | null;
+  timesBought:   number;
+}
+
+function fmtKsh(n: number) {
+  return 'Ksh ' + n.toLocaleString('en-KE');
+}
 
 // Stock-totals dashboard moved off the Inventory page so it doesn't eat
 // vertical space from the scrollable product list. Each card here is a
@@ -61,6 +76,69 @@ function StatsDashboard() {
   function locTotal(locId: number, pid: number, ppb: number) {
     return ((stockByLoc[locId] ?? {})[pid] ?? 0) + ((boxByLoc[locId] ?? {})[pid] ?? 0) * ppb;
   }
+
+  // ── Supplier lookup: pick a supplier, see every product we've bought
+  // from them, current stock, and the price we paid last time. ──────────
+  const [suppliers,       setSuppliers]       = useState<Supplier[]>([]);
+  const [supplierId,      setSupplierId]      = useState<number | ''>('');
+  const [supplierRows,    setSupplierRows]    = useState<SupplierRow[]>([]);
+  const [supplierLoading, setSupplierLoading] = useState(false);
+  const [lowOnly,         setLowOnly]         = useState(false);
+
+  useEffect(() => {
+    supabase.from('suppliers').select('supplier_id, supplier_name, phone, address, notes, active_status')
+      .eq('active_status', true).order('supplier_name')
+      .then(({ data }) => setSuppliers((data ?? []) as Supplier[]));
+  }, []);
+
+  useEffect(() => {
+    if (supplierId === '') return;
+    let cancelled = false;
+    setSupplierLoading(true);
+    supabase
+      .from('purchase_items')
+      .select('product_id, unit_price, purchases!inner(supplier_id, purchase_date)')
+      .eq('purchases.supplier_id', supplierId)
+      .not('product_id', 'is', null)
+      .order('purchase_date', { foreignTable: 'purchases', ascending: false })
+      .then(({ data, error }) => {
+        if (cancelled) return;
+        if (error || !data) { setSupplierRows([]); setSupplierLoading(false); return; }
+        // Rows arrive newest-purchase-first, so the first time we see a
+        // product_id its unit_price/date IS the last price paid.
+        const byProduct = new Map<number, { lastPrice: number | null; lastDate: string | null; timesBought: number }>();
+        for (const row of data as unknown as { product_id: number; unit_price: number | null; purchases: { purchase_date: string | null } | null }[]) {
+          const pid = row.product_id;
+          const existing = byProduct.get(pid);
+          if (!existing) {
+            byProduct.set(pid, { lastPrice: row.unit_price, lastDate: row.purchases?.purchase_date ?? null, timesBought: 1 });
+          } else {
+            existing.timesBought++;
+          }
+        }
+        const rows: SupplierRow[] = [];
+        for (const [pid, agg] of byProduct) {
+          const p = products.find(pp => pp.product_id === pid);
+          if (!p) continue;
+          rows.push({
+            product_id:    pid,
+            product_name:  p.product_name,
+            reorder_level: p.reorder_level ?? 0,
+            stock:         totalForProduct(pid, p.pieces_per_box ?? 0),
+            lastPrice:     agg.lastPrice,
+            lastDate:      agg.lastDate,
+            timesBought:   agg.timesBought,
+          });
+        }
+        rows.sort((a, b) => a.product_name.localeCompare(b.product_name));
+        setSupplierRows(rows);
+        setSupplierLoading(false);
+      });
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [supplierId, products]);
+
+  const visibleSupplierRows = supplierRows.filter(r => !lowOnly || r.stock <= r.reorder_level);
 
   const totalBack = products.reduce((s, p) => s + locTotal(backId, p.product_id, p.pieces_per_box ?? 0), 0);
   const totalMain = products.reduce((s, p) => s + locTotal(mainId, p.product_id, p.pieces_per_box ?? 0), 0);
@@ -135,6 +213,76 @@ function StatsDashboard() {
               </motion.div>
             ))}
           </div>
+        )}
+
+        {/* ── Supplier lookup ──────────────────────────────────────── */}
+        <div className="pt-8 pb-3">
+          <h2 className="text-base font-bold text-slate-100">Supplier Lookup</h2>
+          <p className="text-xs text-muted mt-0.5">Pick a supplier to see everything we buy from them — current stock and the price we paid last time.</p>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-3 mb-4">
+          <select
+            value={supplierId}
+            onChange={e => setSupplierId(e.target.value ? Number(e.target.value) : '')}
+            className="px-3 py-2.5 rounded-xl bg-surface2 border border-white/10 text-sm text-slate-100 outline-none focus:border-teal/40 min-w-48"
+          >
+            <option value="">Select a supplier…</option>
+            {suppliers.map(s => (
+              <option key={s.supplier_id} value={s.supplier_id}>{s.supplier_name}</option>
+            ))}
+          </select>
+          {supplierId !== '' && (
+            <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer select-none">
+              <input type="checkbox" checked={lowOnly} onChange={e => setLowOnly(e.target.checked)} className="accent-danger w-4 h-4" />
+              Low stock only
+            </label>
+          )}
+        </div>
+
+        {supplierId !== '' && (
+          supplierLoading ? (
+            <div className="flex justify-center py-10">
+              <div className="w-6 h-6 rounded-full border-2 border-teal border-t-transparent animate-spin" />
+            </div>
+          ) : supplierRows.length === 0 ? (
+            <p className="text-sm text-muted py-8 text-center">No purchases recorded from this supplier yet.</p>
+          ) : visibleSupplierRows.length === 0 ? (
+            <p className="text-sm text-muted py-8 text-center">Nothing from this supplier is low on stock.</p>
+          ) : (
+            <div className="overflow-x-auto rounded-2xl border border-white/8">
+              <table className="w-full text-xs">
+                <thead className="bg-surface2 text-muted">
+                  <tr>
+                    <th className="text-left  px-3 py-2.5 font-semibold">Product</th>
+                    <th className="text-right px-3 py-2.5 font-semibold">Stock</th>
+                    <th className="text-right px-3 py-2.5 font-semibold">Reorder at</th>
+                    <th className="text-right px-3 py-2.5 font-semibold">Last price</th>
+                    <th className="text-right px-3 py-2.5 font-semibold">Last bought</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-white/5">
+                  {visibleSupplierRows.map(r => {
+                    const low = r.stock <= r.reorder_level;
+                    return (
+                      <tr key={r.product_id} className="hover:bg-white/[0.02]">
+                        <td className="px-3 py-2.5 text-slate-200 font-medium">{r.product_name}</td>
+                        <td className={`px-3 py-2.5 text-right tabular-nums font-semibold ${low ? 'text-danger' : 'text-slate-200'}`}>
+                          {r.stock}
+                          {low && <span className="ml-1.5 text-[9px] font-bold uppercase tracking-wide bg-danger/15 text-danger px-1.5 py-0.5 rounded-full align-middle">Low</span>}
+                        </td>
+                        <td className="px-3 py-2.5 text-right tabular-nums text-muted">{r.reorder_level}</td>
+                        <td className="px-3 py-2.5 text-right tabular-nums text-gold font-semibold">
+                          {r.lastPrice != null ? fmtKsh(r.lastPrice) : '—'}
+                        </td>
+                        <td className="px-3 py-2.5 text-right text-muted">{r.lastDate ?? '—'}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )
         )}
       </main>
     </div>
