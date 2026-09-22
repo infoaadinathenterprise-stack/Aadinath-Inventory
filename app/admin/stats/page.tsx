@@ -2,11 +2,9 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import Link from 'next/link';
-import { motion } from 'framer-motion';
 import { supabase } from '@/lib/supabase';
 import { useProducts } from '@/lib/hooks/useProducts';
-import { SESSION_KEY, USER_KEY, ROLE_KEY, type Supplier } from '@/lib/types';
+import { SESSION_KEY, USER_KEY, ROLE_KEY, type Supplier, type Product } from '@/lib/types';
 import AdminNavbar from '../components/AdminNavbar';
 
 interface SupplierRow {
@@ -21,6 +19,18 @@ interface SupplierRow {
 
 function fmtKsh(n: number) {
   return 'Ksh ' + n.toLocaleString('en-KE');
+}
+
+function groupByType(list: Product[]) {
+  const map = new Map<string, Product[]>();
+  for (const p of list) {
+    const key = p.type || 'Uncategorized';
+    if (!map.has(key)) map.set(key, []);
+    map.get(key)!.push(p);
+  }
+  return Array.from(map.entries())
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([type, items]) => ({ type, items: items.slice().sort((a, b) => a.product_name.localeCompare(b.product_name)) }));
 }
 
 // Stock-totals dashboard moved off the Inventory page so it doesn't eat
@@ -42,22 +52,7 @@ export default function StatsPage() {
 }
 
 function StatsDashboard() {
-  const { products, locations, companies, stockByLoc, boxByLoc, stockByCompany, boxByCompany, loading } = useProducts();
-
-  function companyTotalPieces(cid: number): number {
-    const sc = stockByCompany[cid] ?? {}; const bc = boxByCompany[cid] ?? {};
-    return products.reduce((s, p) => {
-      const ppb = p.pieces_per_box ?? 0;
-      return s + locations.reduce((ls, l) => ls + ((sc[l.location_id] ?? {})[p.product_id] ?? 0) + ((bc[l.location_id] ?? {})[p.product_id] ?? 0) * ppb, 0);
-    }, 0);
-  }
-  function companyProductCount(cid: number): number {
-    const sc = stockByCompany[cid] ?? {}; const bc = boxByCompany[cid] ?? {};
-    return products.filter(p => {
-      const ppb = p.pieces_per_box ?? 0;
-      return locations.some(l => ((sc[l.location_id] ?? {})[p.product_id] ?? 0) + ((bc[l.location_id] ?? {})[p.product_id] ?? 0) * ppb > 0);
-    }).length;
-  }
+  const { products, locations, stockByLoc, boxByLoc, loading } = useProducts();
 
   function handleLogout() {
     localStorage.removeItem(SESSION_KEY);
@@ -68,13 +63,6 @@ function StatsDashboard() {
   function totalForProduct(pid: number, ppb: number): number {
     return locations.reduce((s, l) =>
       s + ((stockByLoc[l.location_id] ?? {})[pid] ?? 0) + ((boxByLoc[l.location_id] ?? {})[pid] ?? 0) * ppb, 0);
-  }
-
-  // Back Godown and Main Store shims (for the location-specific stat cards)
-  const backId = locations.find(l => l.location_name === 'Back Godown')?.location_id ?? 2;
-  const mainId = locations.find(l => l.location_name === 'Main Store')?.location_id  ?? 1;
-  function locTotal(locId: number, pid: number, ppb: number) {
-    return ((stockByLoc[locId] ?? {})[pid] ?? 0) + ((boxByLoc[locId] ?? {})[pid] ?? 0) * ppb;
   }
 
   // ── Supplier lookup: pick a supplier, see every product we've bought
@@ -140,47 +128,54 @@ function StatsDashboard() {
 
   const visibleSupplierRows = supplierRows.filter(r => !lowOnly || r.stock <= r.reorder_level);
 
-  const totalBack = products.reduce((s, p) => s + locTotal(backId, p.product_id, p.pieces_per_box ?? 0), 0);
-  const totalMain = products.reduce((s, p) => s + locTotal(mainId, p.product_id, p.pieces_per_box ?? 0), 0);
-  const inStock   = products.filter(p => totalForProduct(p.product_id, p.pieces_per_box ?? 0) > 0).length;
-  const outStock  = products.length - inStock;
-  const backCount = products.filter(p => locTotal(backId, p.product_id, p.pieces_per_box ?? 0) > 0).length;
-  const mainCount = products.filter(p => locTotal(mainId, p.product_id, p.pieces_per_box ?? 0) > 0).length;
+  // ── In-stock / out-of-stock lists, grouped by category, with a
+  // checklist so an order run can pick just what it needs for the PDF —
+  // leave nothing checked and the PDF includes everything in that list. ──
+  const [activeList, setActiveList]     = useState<'out_of_stock' | 'in_stock'>('out_of_stock');
+  const [selectedOut, setSelectedOut]   = useState<Set<number>>(new Set());
+  const [selectedIn,  setSelectedIn]    = useState<Set<number>>(new Set());
+  const [printReport, setPrintReport]   = useState<'in_stock' | 'out_of_stock' | null>(null);
 
-  // value = the total piece count for piece-pool cards, or the product
-  // count for status cards. sub = the secondary line under the value.
-  const CARDS: { label: string; value: number; sub: string; icon: string; href: string; tone: 'teal' | 'gold' | 'success' | 'danger' }[] = [
-    { label: 'Total Products', value: products.length, sub: 'all active products',     icon: '🗂️',  href: '/admin',                     tone: 'teal'    },
-    { label: 'In Stock',       value: inStock,         sub: `${products.length ? Math.round(100 * inStock / products.length) : 0}% of catalog`, icon: '✅', href: '/admin?filter=in_stock',     tone: 'success' },
-    { label: 'Out of Stock',   value: outStock,        sub: 'needs reorder',           icon: '⚠️',  href: '/admin?filter=out_of_stock', tone: 'danger'  },
-    { label: 'Back Godown',    value: totalBack,       sub: `${backCount} product${backCount === 1 ? '' : 's'}`, icon: '🏭', href: '/admin?filter=back_only', tone: 'gold' },
-    { label: 'Main Store',     value: totalMain,       sub: `${mainCount} product${mainCount === 1 ? '' : 's'}`, icon: '🏪', href: '/admin?filter=main_only', tone: 'teal' },
-    ...(companies.length > 1 ? companies.map((c, i) => ({
-      label: c.company_name.replace(/\s*Enterprise$/i, '') + ' stock',
-      value: companyTotalPieces(c.company_id),
-      sub:   `${companyProductCount(c.company_id)} product${companyProductCount(c.company_id) === 1 ? '' : 's'} in stock`,
-      icon:  '🏢',
-      href:  '/admin',
-      tone:  (i === 0 ? 'teal' : 'gold') as 'teal' | 'gold' | 'success' | 'danger',
-    })) : []),
-  ];
+  useEffect(() => {
+    if (!printReport) return;
+    const id = setTimeout(() => window.print(), 50);
+    function handleAfterPrint() { setPrintReport(null); }
+    window.addEventListener('afterprint', handleAfterPrint);
+    return () => { clearTimeout(id); window.removeEventListener('afterprint', handleAfterPrint); };
+  }, [printReport]);
 
-  const toneClass: Record<typeof CARDS[number]['tone'], { border: string; value: string }> = {
-    teal:    { border: 'border-teal/20 hover:border-teal/40',       value: 'text-teal' },
-    gold:    { border: 'border-gold/20 hover:border-gold/40',       value: 'text-gold' },
-    success: { border: 'border-success/20 hover:border-success/40', value: 'text-success' },
-    danger:  { border: 'border-danger/20 hover:border-danger/40',   value: 'text-danger' },
-  };
+  const inStockList     = products.filter(p => totalForProduct(p.product_id, p.pieces_per_box ?? 0) > 0);
+  const outOfStockList  = products.filter(p => totalForProduct(p.product_id, p.pieces_per_box ?? 0) === 0);
+  const inStockGroups   = groupByType(inStockList);
+  const outOfStockGroups = groupByType(outOfStockList);
+
+  const activeGroups      = activeList === 'in_stock' ? inStockGroups   : outOfStockGroups;
+  const activeSelected    = activeList === 'in_stock' ? selectedIn      : selectedOut;
+  const setActiveSelected = activeList === 'in_stock' ? setSelectedIn   : setSelectedOut;
+
+  function toggleSelect(pid: number) {
+    setActiveSelected(prev => {
+      const next = new Set(prev);
+      if (next.has(pid)) next.delete(pid); else next.add(pid);
+      return next;
+    });
+  }
+
+  const printBaseList = printReport === 'in_stock' ? inStockList : outOfStockList;
+  const printSelected = printReport === 'in_stock' ? selectedIn  : selectedOut;
+  const printMatches  = printReport
+    ? printBaseList.filter(p => printSelected.size === 0 || printSelected.has(p.product_id))
+    : [];
+  const printGroups = printReport ? groupByType(printMatches) : [];
 
   return (
     <div className="min-h-screen">
+    <div className="print-hide">
       <AdminNavbar onLogout={handleLogout} />
       <main className="pt-14 max-w-7xl mx-auto w-full px-4 pb-10">
-        <div className="pt-5 pb-3 flex items-center justify-between">
-          <div>
-            <h2 className="text-base font-bold text-slate-100">Stats</h2>
-            <p className="text-xs text-muted mt-0.5">Tap a card to open the inventory filtered to it</p>
-          </div>
+        <div className="pt-5 pb-3">
+          <h2 className="text-base font-bold text-slate-100">Reports</h2>
+          <p className="text-xs text-muted mt-0.5">Check off what you need, then export a PDF — leave nothing checked to include everything in the list.</p>
         </div>
 
         {loading ? (
@@ -188,31 +183,65 @@ function StatsDashboard() {
             <div className="w-8 h-8 rounded-full border-2 border-teal border-t-transparent animate-spin" />
           </div>
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3">
-            {CARDS.map((c, i) => (
-              <motion.div
-                key={c.label}
-                initial={{ opacity: 0, y: 8 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: i * 0.05, duration: 0.3 }}
+          <>
+            <div className="flex gap-1 p-1 rounded-2xl card-lux mb-3 w-fit">
+              <button
+                onClick={() => setActiveList('out_of_stock')}
+                className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${activeList === 'out_of_stock' ? 'btn-primary' : 'text-muted hover:text-slate-100'}`}
+              >Out of Stock ({outOfStockList.length})</button>
+              <button
+                onClick={() => setActiveList('in_stock')}
+                className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${activeList === 'in_stock' ? 'btn-primary' : 'text-muted hover:text-slate-100'}`}
+              >In Stock ({inStockList.length})</button>
+            </div>
+
+            <div className="flex items-center justify-between mb-2 gap-3">
+              <p className="text-[11px] text-muted">
+                {activeSelected.size > 0
+                  ? `${activeSelected.size} checked — only these go in the PDF`
+                  : 'Nothing checked — the PDF will include everything below'}
+              </p>
+              <div className="flex gap-3 shrink-0">
+                <button onClick={() => setActiveSelected(new Set(activeGroups.flatMap(g => g.items.map(i => i.product_id))))} className="text-[11px] font-semibold text-teal hover:underline">Select all</button>
+                <button onClick={() => setActiveSelected(new Set())} className="text-[11px] font-semibold text-muted hover:underline">Clear</button>
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-white/8 divide-y divide-white/5 max-h-[60vh] overflow-y-auto mb-3">
+              {activeGroups.length === 0 ? (
+                <p className="text-center text-sm text-muted py-10">Nothing here.</p>
+              ) : activeGroups.map(({ type, items }) => (
+                <div key={type}>
+                  <div className="px-3 py-1.5 bg-surface2 text-[10px] font-bold uppercase tracking-wide text-muted sticky top-0">{type} ({items.length})</div>
+                  {items.map(p => {
+                    const stock = totalForProduct(p.product_id, p.pieces_per_box ?? 0);
+                    return (
+                      <label key={p.product_id} className="flex items-center gap-3 px-3 py-2 hover:bg-white/[0.02] cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={activeSelected.has(p.product_id)}
+                          onChange={() => toggleSelect(p.product_id)}
+                          className="accent-teal w-4 h-4 shrink-0"
+                        />
+                        <span className="flex-1 text-sm text-slate-200 truncate">{p.product_name}</span>
+                        <span className="text-xs text-muted tabular-nums shrink-0">{stock}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              ))}
+            </div>
+
+            <div className="flex justify-end mb-8">
+              <button
+                onClick={() => setPrintReport(activeList)}
+                disabled={activeGroups.length === 0}
+                className="px-4 py-2.5 rounded-xl bg-teal/15 border border-teal/30 text-teal text-xs font-bold hover:bg-teal/25 transition-all disabled:opacity-40"
               >
-                <Link
-                  href={c.href}
-                  className={`flex flex-col p-5 rounded-2xl bg-surface border ${toneClass[c.tone].border} relative overflow-hidden cursor-pointer transition-all group`}
-                >
-                  <div className="absolute top-3 right-3 text-2xl opacity-50 group-hover:opacity-90 transition-opacity">{c.icon}</div>
-                  <span className={`text-3xl font-bold tabular-nums ${toneClass[c.tone].value}`}>
-                    {c.value}
-                  </span>
-                  <span className="text-xs text-slate-200 font-semibold mt-1">{c.label}</span>
-                  <span className="text-[10px] text-muted mt-0.5">{c.sub}</span>
-                  <span className="text-[10px] text-muted/60 mt-2 group-hover:text-teal transition-colors">
-                    Open filtered inventory →
-                  </span>
-                </Link>
-              </motion.div>
-            ))}
-          </div>
+                📄 Generate {activeList === 'in_stock' ? 'In-Stock' : 'Out-of-Stock'} PDF{activeSelected.size > 0 ? ` (${activeSelected.size})` : ' (all)'}
+              </button>
+            </div>
+          </>
         )}
 
         {/* ── Supplier lookup ──────────────────────────────────────── */}
@@ -285,6 +314,54 @@ function StatsDashboard() {
           )
         )}
       </main>
+    </div>
+
+    {printReport && (
+      <div className="fixed inset-0 z-200 bg-white overflow-y-auto">
+        <div className="print-hide sticky top-0 bg-white border-b border-gray-200 px-4 py-3 flex items-center justify-between gap-3">
+          <span className="text-sm font-semibold text-gray-700">
+            {printReport === 'in_stock' ? 'In-Stock Report' : 'Out-of-Stock Report'} — {printMatches.length} product{printMatches.length === 1 ? '' : 's'}
+          </span>
+          <div className="flex gap-2">
+            <button onClick={() => window.print()} className="px-3 py-1.5 rounded-lg bg-teal-600 text-white text-xs font-bold hover:bg-teal-700 transition-colors">Print / Save as PDF</button>
+            <button onClick={() => setPrintReport(null)} className="px-3 py-1.5 rounded-lg bg-gray-100 text-gray-700 text-xs font-bold hover:bg-gray-200 transition-colors">Close</button>
+          </div>
+        </div>
+
+        <div className="max-w-3xl mx-auto px-6 py-8 text-black">
+          <h1 className="text-xl font-bold mb-1">Jay Aadinath Enterprises</h1>
+          <p className="text-sm text-gray-600 mb-6">
+            {printReport === 'in_stock' ? 'In-Stock Products' : 'Out-of-Stock Products'} by category — {new Date().toLocaleDateString('en-KE', { day: '2-digit', month: 'short', year: 'numeric' })}
+          </p>
+
+          {printGroups.length === 0 ? (
+            <p className="text-sm text-gray-500">No products match.</p>
+          ) : printGroups.map(({ type, items }) => (
+            <div key={type} className="mb-6 break-inside-avoid">
+              <h2 className="text-xs font-bold uppercase tracking-wide border-b border-gray-300 pb-1 mb-2">{type} ({items.length})</h2>
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="text-left text-gray-500">
+                    <th className="py-1 pr-2 font-semibold">Product</th>
+                    <th className="py-1 pr-2 font-semibold">SKU</th>
+                    <th className="py-1 pr-2 font-semibold text-right">Stock</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {items.map(p => (
+                    <tr key={p.product_id} className="border-t border-gray-100">
+                      <td className="py-1 pr-2">{p.product_name}{p.brand ? ` · ${p.brand}` : ''}</td>
+                      <td className="py-1 pr-2 text-gray-500">{p.stock_keeping_unit || '—'}</td>
+                      <td className="py-1 pr-2 text-right font-semibold">{totalForProduct(p.product_id, p.pieces_per_box ?? 0)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ))}
+        </div>
+      </div>
+    )}
     </div>
   );
 }
