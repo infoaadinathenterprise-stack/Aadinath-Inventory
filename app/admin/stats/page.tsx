@@ -7,14 +7,9 @@ import { useProducts } from '@/lib/hooks/useProducts';
 import { SESSION_KEY, USER_KEY, ROLE_KEY, type Supplier, type Product } from '@/lib/types';
 import AdminNavbar from '../components/AdminNavbar';
 
-interface SupplierRow {
-  product_id:    number;
-  product_name:  string;
-  reorder_level: number;
-  stock:         number;
-  lastPrice:     number | null;
-  lastDate:      string | null;
-  timesBought:   number;
+interface SupplierPriceInfo {
+  lastPrice: number | null;
+  lastDate:  string | null;
 }
 
 function fmtKsh(n: number) {
@@ -32,11 +27,6 @@ function groupByType(list: Product[]) {
     .sort((a, b) => a[0].localeCompare(b[0]))
     .map(([type, items]) => ({ type, items: items.slice().sort((a, b) => a.product_name.localeCompare(b.product_name)) }));
 }
-
-// Stock-totals dashboard moved off the Inventory page so it doesn't eat
-// vertical space from the scrollable product list. Each card here is a
-// link back to /admin?filter=… that pre-filters the inventory list to
-// the matching set of products.
 
 export default function StatsPage() {
   const [authed, setAuthed] = useState<boolean | null>(null);
@@ -65,13 +55,14 @@ function StatsDashboard() {
       s + ((stockByLoc[l.location_id] ?? {})[pid] ?? 0) + ((boxByLoc[l.location_id] ?? {})[pid] ?? 0) * ppb, 0);
   }
 
-  // ── Supplier lookup: pick a supplier, see every product we've bought
-  // from them, current stock, and the price we paid last time. ──────────
-  const [suppliers,       setSuppliers]       = useState<Supplier[]>([]);
-  const [supplierId,      setSupplierId]      = useState<number | ''>('');
-  const [supplierRows,    setSupplierRows]    = useState<SupplierRow[]>([]);
-  const [supplierLoading, setSupplierLoading] = useState(false);
-  const [lowOnly,         setLowOnly]         = useState(false);
+  // ── Supplier filter: pick a supplier and everything below narrows to
+  // just what we've ever bought from them (price/date paid last shown
+  // inline). No supplier picked = every product, as before. ─────────────
+  const [suppliers,        setSuppliers]        = useState<Supplier[]>([]);
+  const [supplierId,       setSupplierId]       = useState<number | ''>('');
+  const [supplierLoading,  setSupplierLoading]  = useState(false);
+  const [supplierPriceMap, setSupplierPriceMap] = useState<Map<number, SupplierPriceInfo>>(new Map());
+  const [lowOnly,          setLowOnly]          = useState(false);
 
   useEffect(() => {
     supabase.from('suppliers').select('supplier_id, supplier_name, phone, address, notes, active_status')
@@ -91,46 +82,27 @@ function StatsDashboard() {
       .order('purchase_date', { foreignTable: 'purchases', ascending: false })
       .then(({ data, error }) => {
         if (cancelled) return;
-        if (error || !data) { setSupplierRows([]); setSupplierLoading(false); return; }
+        if (error || !data) { setSupplierPriceMap(new Map()); setSupplierLoading(false); return; }
         // Rows arrive newest-purchase-first, so the first time we see a
         // product_id its unit_price/date IS the last price paid.
-        const byProduct = new Map<number, { lastPrice: number | null; lastDate: string | null; timesBought: number }>();
+        const map = new Map<number, SupplierPriceInfo>();
         for (const row of data as unknown as { product_id: number; unit_price: number | null; purchases: { purchase_date: string | null } | null }[]) {
-          const pid = row.product_id;
-          const existing = byProduct.get(pid);
-          if (!existing) {
-            byProduct.set(pid, { lastPrice: row.unit_price, lastDate: row.purchases?.purchase_date ?? null, timesBought: 1 });
-          } else {
-            existing.timesBought++;
+          if (!map.has(row.product_id)) {
+            map.set(row.product_id, { lastPrice: row.unit_price, lastDate: row.purchases?.purchase_date ?? null });
           }
         }
-        const rows: SupplierRow[] = [];
-        for (const [pid, agg] of byProduct) {
-          const p = products.find(pp => pp.product_id === pid);
-          if (!p) continue;
-          rows.push({
-            product_id:    pid,
-            product_name:  p.product_name,
-            reorder_level: p.reorder_level ?? 0,
-            stock:         totalForProduct(pid, p.pieces_per_box ?? 0),
-            lastPrice:     agg.lastPrice,
-            lastDate:      agg.lastDate,
-            timesBought:   agg.timesBought,
-          });
-        }
-        rows.sort((a, b) => a.product_name.localeCompare(b.product_name));
-        setSupplierRows(rows);
+        setSupplierPriceMap(map);
         setSupplierLoading(false);
       });
     return () => { cancelled = true; };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [supplierId, products]);
+  }, [supplierId]);
 
-  const visibleSupplierRows = supplierRows.filter(r => !lowOnly || r.stock <= r.reorder_level);
+  const supplierActive = supplierId !== '';
 
   // ── In-stock / out-of-stock lists, grouped by category, with a
   // checklist so an order run can pick just what it needs for the PDF —
-  // leave nothing checked and the PDF includes everything in that list. ──
+  // leave nothing checked and the PDF includes everything in that list.
+  // A supplier pick (above) narrows both lists to just their products. ──
   const [activeList, setActiveList]     = useState<'out_of_stock' | 'in_stock'>('out_of_stock');
   const [selectedOut, setSelectedOut]   = useState<Set<number>>(new Set());
   const [selectedIn,  setSelectedIn]    = useState<Set<number>>(new Set());
@@ -144,9 +116,14 @@ function StatsDashboard() {
     return () => { clearTimeout(id); window.removeEventListener('afterprint', handleAfterPrint); };
   }, [printReport]);
 
-  const inStockList     = products.filter(p => totalForProduct(p.product_id, p.pieces_per_box ?? 0) > 0);
-  const outOfStockList  = products.filter(p => totalForProduct(p.product_id, p.pieces_per_box ?? 0) === 0);
-  const inStockGroups   = groupByType(inStockList);
+  const inStockAll    = products.filter(p => totalForProduct(p.product_id, p.pieces_per_box ?? 0) > 0);
+  const outOfStockAll = products.filter(p => totalForProduct(p.product_id, p.pieces_per_box ?? 0) === 0);
+
+  const bySupplier = (list: Product[]) => supplierActive ? list.filter(p => supplierPriceMap.has(p.product_id)) : list;
+
+  const inStockList    = bySupplier(inStockAll).filter(p => !lowOnly || totalForProduct(p.product_id, p.pieces_per_box ?? 0) <= (p.reorder_level ?? 0));
+  const outOfStockList = bySupplier(outOfStockAll);
+  const inStockGroups    = groupByType(inStockList);
   const outOfStockGroups = groupByType(outOfStockList);
 
   const activeGroups      = activeList === 'in_stock' ? inStockGroups   : outOfStockGroups;
@@ -167,6 +144,7 @@ function StatsDashboard() {
     ? printBaseList.filter(p => printSelected.size === 0 || printSelected.has(p.product_id))
     : [];
   const printGroups = printReport ? groupByType(printMatches) : [];
+  const printSupplierName = suppliers.find(s => s.supplier_id === supplierId)?.supplier_name ?? null;
 
   return (
     <div className="min-h-screen">
@@ -175,7 +153,26 @@ function StatsDashboard() {
       <main className="pt-14 max-w-7xl mx-auto w-full px-4 pb-10">
         <div className="pt-5 pb-3">
           <h2 className="text-base font-bold text-slate-100">Reports</h2>
-          <p className="text-xs text-muted mt-0.5">Check off what you need, then export a PDF — leave nothing checked to include everything in the list.</p>
+          <p className="text-xs text-muted mt-0.5">Pick a supplier to narrow the list to just their products, check off what you need, then export a PDF.</p>
+        </div>
+
+        {/* ── Supplier filter ──────────────────────────────────────── */}
+        <div className="flex flex-wrap items-center gap-3 mb-5">
+          <select
+            value={supplierId}
+            onChange={e => setSupplierId(e.target.value ? Number(e.target.value) : '')}
+            className="px-3 py-2.5 rounded-xl bg-surface2 border border-white/10 text-sm text-slate-100 outline-none focus:border-teal/40 min-w-48"
+          >
+            <option value="">All suppliers</option>
+            {suppliers.map(s => (
+              <option key={s.supplier_id} value={s.supplier_id}>{s.supplier_name}</option>
+            ))}
+          </select>
+          {supplierLoading && <div className="w-4 h-4 rounded-full border-2 border-teal border-t-transparent animate-spin" />}
+          <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer select-none">
+            <input type="checkbox" checked={lowOnly} onChange={e => setLowOnly(e.target.checked)} className="accent-danger w-4 h-4" />
+            Low stock only (in-stock tab)
+          </label>
         </div>
 
         {loading ? (
@@ -209,12 +206,15 @@ function StatsDashboard() {
 
             <div className="rounded-2xl border border-white/8 divide-y divide-white/5 max-h-[60vh] overflow-y-auto mb-3">
               {activeGroups.length === 0 ? (
-                <p className="text-center text-sm text-muted py-10">Nothing here.</p>
+                <p className="text-center text-sm text-muted py-10">
+                  {supplierActive ? "Nothing from this supplier is in this list." : 'Nothing here.'}
+                </p>
               ) : activeGroups.map(({ type, items }) => (
                 <div key={type}>
                   <div className="px-3 py-1.5 bg-surface2 text-[10px] font-bold uppercase tracking-wide text-muted sticky top-0">{type} ({items.length})</div>
                   {items.map(p => {
-                    const stock = totalForProduct(p.product_id, p.pieces_per_box ?? 0);
+                    const stock  = totalForProduct(p.product_id, p.pieces_per_box ?? 0);
+                    const supInfo = supplierActive ? supplierPriceMap.get(p.product_id) : undefined;
                     return (
                       <label key={p.product_id} className="flex items-center gap-3 px-3 py-2 hover:bg-white/[0.02] cursor-pointer">
                         <input
@@ -224,7 +224,12 @@ function StatsDashboard() {
                           className="accent-teal w-4 h-4 shrink-0"
                         />
                         <span className="flex-1 text-sm text-slate-200 truncate">{p.product_name}</span>
-                        <span className="text-xs text-muted tabular-nums shrink-0">{stock}</span>
+                        {supInfo && (
+                          <span className="text-[10px] text-gold tabular-nums shrink-0">
+                            {supInfo.lastPrice != null ? fmtKsh(supInfo.lastPrice) : '—'}{supInfo.lastDate ? ` · ${supInfo.lastDate}` : ''}
+                          </span>
+                        )}
+                        <span className="text-xs text-muted tabular-nums shrink-0 w-10 text-right">{stock}</span>
                       </label>
                     );
                   })}
@@ -242,76 +247,6 @@ function StatsDashboard() {
               </button>
             </div>
           </>
-        )}
-
-        {/* ── Supplier lookup ──────────────────────────────────────── */}
-        <div className="pt-8 pb-3">
-          <h2 className="text-base font-bold text-slate-100">Supplier Lookup</h2>
-          <p className="text-xs text-muted mt-0.5">Pick a supplier to see everything we buy from them — current stock and the price we paid last time.</p>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-3 mb-4">
-          <select
-            value={supplierId}
-            onChange={e => setSupplierId(e.target.value ? Number(e.target.value) : '')}
-            className="px-3 py-2.5 rounded-xl bg-surface2 border border-white/10 text-sm text-slate-100 outline-none focus:border-teal/40 min-w-48"
-          >
-            <option value="">Select a supplier…</option>
-            {suppliers.map(s => (
-              <option key={s.supplier_id} value={s.supplier_id}>{s.supplier_name}</option>
-            ))}
-          </select>
-          {supplierId !== '' && (
-            <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer select-none">
-              <input type="checkbox" checked={lowOnly} onChange={e => setLowOnly(e.target.checked)} className="accent-danger w-4 h-4" />
-              Low stock only
-            </label>
-          )}
-        </div>
-
-        {supplierId !== '' && (
-          supplierLoading ? (
-            <div className="flex justify-center py-10">
-              <div className="w-6 h-6 rounded-full border-2 border-teal border-t-transparent animate-spin" />
-            </div>
-          ) : supplierRows.length === 0 ? (
-            <p className="text-sm text-muted py-8 text-center">No purchases recorded from this supplier yet.</p>
-          ) : visibleSupplierRows.length === 0 ? (
-            <p className="text-sm text-muted py-8 text-center">Nothing from this supplier is low on stock.</p>
-          ) : (
-            <div className="overflow-x-auto rounded-2xl border border-white/8">
-              <table className="w-full text-xs">
-                <thead className="bg-surface2 text-muted">
-                  <tr>
-                    <th className="text-left  px-3 py-2.5 font-semibold">Product</th>
-                    <th className="text-right px-3 py-2.5 font-semibold">Stock</th>
-                    <th className="text-right px-3 py-2.5 font-semibold">Reorder at</th>
-                    <th className="text-right px-3 py-2.5 font-semibold">Last price</th>
-                    <th className="text-right px-3 py-2.5 font-semibold">Last bought</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-white/5">
-                  {visibleSupplierRows.map(r => {
-                    const low = r.stock <= r.reorder_level;
-                    return (
-                      <tr key={r.product_id} className="hover:bg-white/[0.02]">
-                        <td className="px-3 py-2.5 text-slate-200 font-medium">{r.product_name}</td>
-                        <td className={`px-3 py-2.5 text-right tabular-nums font-semibold ${low ? 'text-danger' : 'text-slate-200'}`}>
-                          {r.stock}
-                          {low && <span className="ml-1.5 text-[9px] font-bold uppercase tracking-wide bg-danger/15 text-danger px-1.5 py-0.5 rounded-full align-middle">Low</span>}
-                        </td>
-                        <td className="px-3 py-2.5 text-right tabular-nums text-muted">{r.reorder_level}</td>
-                        <td className="px-3 py-2.5 text-right tabular-nums text-gold font-semibold">
-                          {r.lastPrice != null ? fmtKsh(r.lastPrice) : '—'}
-                        </td>
-                        <td className="px-3 py-2.5 text-right text-muted">{r.lastDate ?? '—'}</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )
         )}
       </main>
     </div>
@@ -331,7 +266,8 @@ function StatsDashboard() {
         <div className="max-w-3xl mx-auto px-6 py-8 text-black">
           <h1 className="text-xl font-bold mb-1">Jay Aadinath Enterprises</h1>
           <p className="text-sm text-gray-600 mb-6">
-            {printReport === 'in_stock' ? 'In-Stock Products' : 'Out-of-Stock Products'} by category — {new Date().toLocaleDateString('en-KE', { day: '2-digit', month: 'short', year: 'numeric' })}
+            {printReport === 'in_stock' ? 'In-Stock Products' : 'Out-of-Stock Products'} by category
+            {printSupplierName ? ` — ${printSupplierName}` : ''} — {new Date().toLocaleDateString('en-KE', { day: '2-digit', month: 'short', year: 'numeric' })}
           </p>
 
           {printGroups.length === 0 ? (
@@ -344,17 +280,24 @@ function StatsDashboard() {
                   <tr className="text-left text-gray-500">
                     <th className="py-1 pr-2 font-semibold">Product</th>
                     <th className="py-1 pr-2 font-semibold">SKU</th>
+                    {printSupplierName && <th className="py-1 pr-2 font-semibold text-right">Last price</th>}
                     <th className="py-1 pr-2 font-semibold text-right">Stock</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {items.map(p => (
-                    <tr key={p.product_id} className="border-t border-gray-100">
-                      <td className="py-1 pr-2">{p.product_name}{p.brand ? ` · ${p.brand}` : ''}</td>
-                      <td className="py-1 pr-2 text-gray-500">{p.stock_keeping_unit || '—'}</td>
-                      <td className="py-1 pr-2 text-right font-semibold">{totalForProduct(p.product_id, p.pieces_per_box ?? 0)}</td>
-                    </tr>
-                  ))}
+                  {items.map(p => {
+                    const supInfo = printSupplierName ? supplierPriceMap.get(p.product_id) : undefined;
+                    return (
+                      <tr key={p.product_id} className="border-t border-gray-100">
+                        <td className="py-1 pr-2">{p.product_name}{p.brand ? ` · ${p.brand}` : ''}</td>
+                        <td className="py-1 pr-2 text-gray-500">{p.stock_keeping_unit || '—'}</td>
+                        {printSupplierName && (
+                          <td className="py-1 pr-2 text-right">{supInfo?.lastPrice != null ? fmtKsh(supInfo.lastPrice) : '—'}</td>
+                        )}
+                        <td className="py-1 pr-2 text-right font-semibold">{totalForProduct(p.product_id, p.pieces_per_box ?? 0)}</td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
