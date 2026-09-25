@@ -209,3 +209,95 @@ input[type="number"], .tabular-nums { font-variant-numeric: tabular-nums; }
   .label { border-color: #ddd !important; }
   @page { size: A4 portrait; margin: 0; }
 }
+
+/* ── Staff portal light theme ───────────────────────────────────────
+   Applied to every /admin page via app/admin/layout.tsx. Rather than
+   rewriting class names page by page, the design tokens are remapped
+   inside the `.theme-light` scope: surfaces go white, the slate scale
+   is inverted so `text-slate-100` reads as dark ink, and `white` alpha
+   utilities (`border-white/8`, `bg-white/5`) become subtle dark tints. */
+.theme-light {
+  color-scheme: light;
+
+  --color-navy:     #f4f6fa;
+  --color-surface:  #ffffff;
+  --color-surface2: #f1f4f9;
+  --color-teal:     #0284c7;
+  --color-gold:     #b45309;
+  --color-success:  #059669;
+  --color-danger:   #dc2626;
+  --color-muted:    #5b6b85;
+
+  --color-slate-50:  #020617;
+  --color-slate-100: #0f172a;
+  --color-slate-200: #1e293b;
+  --color-slate-300: #334155;
+  --color-slate-400: #475569;
+  --color-slate-600: #94a3b8;
+  --color-slate-700: #cbd5e1;
+  --color-slate-800: #e2e8f0;
+  --color-slate-900: #f1f5f9;
+
+  --color-blue-400:   #2563eb;
+  --color-yellow-400: #ca8a04;
+
+  /* Drives border-white/*, bg-white/*, ring-white/* tints */
+  --color-white: #0f172a;
+}
+
+/* Solid white stays white (button text, print sheets) */
+.theme-light .text-white,
+.theme-light .hover\:text-white:hover { color: #ffffff; }
+.theme-light .bg-white                { background-color: #ffffff; }
+.theme-light .border-white            { border-color: #ffffff; }
+
+body:has(.theme-light) {
+  background: #f4f6fa;
+}
+body:has(.theme-light) ::selection { background: rgba(2, 132, 199, 0.18); color: #0f172a; }
+body:has(.theme-light) ::-webkit-scrollbar-thumb       { background: #cbd5e1; }
+body:has(.theme-light) ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+
+.theme-light .card-lux {
+  background: #ffffff;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  box-shadow:
+    0 1px 2px rgba(15, 23, 42, 0.04),
+    0 8px 24px -14px rgba(15, 23, 42, 0.18);
+}
+
+.theme-light .glass {
+  background: rgba(255, 255, 255, 0.86);
+  border-color: rgba(15, 23, 42, 0.08);
+}
+
+.theme-light .text-gradient {
+  background: linear-gradient(100deg, #0284c7 0%, #2563eb 55%, #4f46e5 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+}
+.theme-light .text-gradient-gold {
+  background: linear-gradient(100deg, #d97706 0%, #b45309 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+}
+
+.theme-light .btn-primary {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.25),
+    0 6px 16px -8px rgba(37, 99, 235, 0.45);
+}
+
+.theme-light .shadow-\[0_8px_32px_rgba\(0\,0\,0\,0\.3\)\] {
+  box-shadow: 0 1px 0 rgba(15, 23, 42, 0.04), 0 6px 20px -12px rgba(15, 23, 42, 0.15);
+}
+
+.theme-light .label-page { box-shadow: 0 4px 20px rgba(15, 23, 42, 0.12); }
+
+/* Dark insets (inputs, card footers) become light gray; modal
+   backdrops soften to a slate scrim instead of near-black. */
+.theme-light .bg-black\/25 { background-color: #f1f4f9; }
+.theme-light .bg-black\/15 { background-color: #f8fafc; }
+.theme-light .bg-black\/60,
+.theme-light .bg-black\/65,
+.theme-light .bg-black\/70 { background-color: rgba(15, 23, 42, 0.45); }
