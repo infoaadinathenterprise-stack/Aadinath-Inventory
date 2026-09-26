@@ -152,7 +152,7 @@ function StatsDashboard() {
       <AdminNavbar onLogout={handleLogout} />
       <main className="pt-14 max-w-7xl mx-auto w-full px-4 pb-10">
         <div className="pt-5 pb-3">
-          <h2 className="text-base font-bold text-slate-100">Reports</h2>
+          <h2 className="text-base font-bold text-slate-100">Stock Checklist</h2>
           <p className="text-xs text-muted mt-0.5">Pick a supplier to narrow the list to just their products, check off what you need, then export a PDF.</p>
         </div>
 

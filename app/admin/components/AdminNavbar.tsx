@@ -15,9 +15,8 @@ const ALL_LINKS = [
   ...STORE_TABS.map(t => ({
     emoji: t.emoji, label: t.label, href: `/admin?loc=${t.locationId}`, roles: ['admin', 'staff'] as UserRole[],
   })),
-  { emoji: '💲', label: 'Pricing',   href: '/admin/pricing',           roles: ['admin'] as UserRole[] },
   { emoji: '🖼️', label: 'Images',    href: '/admin/images',            roles: ['admin'] as UserRole[] },
-  { emoji: '📊', label: 'Reports',   href: '/admin/stats',             roles: ['admin'] as UserRole[] },
+  { emoji: '📝', label: 'Stock Checklist', href: '/admin/stats',     roles: ['admin'] as UserRole[] },
   { emoji: '🛒', label: 'Sales',     href: '/admin/sales',             roles: ['admin'] as UserRole[] },
   { emoji: '📋', label: 'History',   href: '/admin/history',           roles: ['admin'] as UserRole[] },
   { emoji: '🧾', label: 'Purchases', href: '/admin/purchases',         roles: ['admin'] as UserRole[] },
@@ -114,22 +113,6 @@ export default function AdminNavbar({ onLogout }: Props) {
             </span>
           </div>
 
-          <div className="hidden lg:flex items-center gap-0.5">
-            <Links links={links} render={({ emoji, label, href }, active) => (
-                <Link
-                  key={href}
-                  href={href}
-                  className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
-                    active
-                      ? 'bg-teal/12 text-teal ring-1 ring-teal/25'
-                      : 'text-muted hover:text-slate-100 hover:bg-white/5'
-                  }`}
-                >
-                  <span>{emoji}</span>{label}
-                </Link>
-            )} />
-          </div>
-
           <div className="flex items-center gap-2">
             <button
               onClick={onLogout}
@@ -142,7 +125,7 @@ export default function AdminNavbar({ onLogout }: Props) {
               onClick={() => setOpen(o => !o)}
               aria-label="Open menu"
               aria-expanded={open}
-              className="w-10 h-10 -mr-1 rounded-lg card-lux hover:border-teal/30 transition-colors lg:hidden flex flex-col justify-center items-center gap-1 touch-manipulation"
+              className="w-10 h-10 -mr-1 rounded-lg card-lux hover:border-teal/30 transition-colors flex flex-col justify-center items-center gap-1 touch-manipulation"
             >
               <span className="w-4 h-0.5 bg-slate-300 rounded-full" />
               <span className="w-4 h-0.5 bg-slate-300 rounded-full" />
