@@ -4,6 +4,8 @@ import { useState, useEffect, useRef, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { motion, AnimatePresence } from 'framer-motion';
+import { logout as apiLogout } from '@/lib/auth';
+import AdminNavbar from '@/app/admin/components/AdminNavbar';
 import { useProducts } from '@/lib/hooks/useProducts';
 import { stockTxn, type StockOp } from '@/lib/stockActions';
 import { supabase } from '@/lib/supabase';
@@ -503,7 +505,10 @@ function LabelsDashboard() {
   }
 
   return (
-    <div className="h-screen bg-navy flex flex-col overflow-hidden">
+    <div className="h-screen pt-14 print:pt-0 bg-navy flex flex-col overflow-hidden">
+      <div className="print-hide">
+        <AdminNavbar onLogout={() => { apiLogout(); window.location.href = '/admin'; }} />
+      </div>
       <header className="print-hide shrink-0 bg-surface border-b border-white/8 px-4 flex items-center gap-3 h-14">
         <Link href="/admin" className="text-muted hover:text-slate-100 text-sm px-3 py-1.5 rounded-lg bg-surface2 border border-white/8 transition-colors print-hide">
           ← Back

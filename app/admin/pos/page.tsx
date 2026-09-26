@@ -4,6 +4,8 @@ import { useState, useEffect, useRef, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { motion, AnimatePresence } from 'framer-motion';
+import { logout as apiLogout } from '@/lib/auth';
+import AdminNavbar from '@/app/admin/components/AdminNavbar';
 import { useProducts } from '@/lib/hooks/useProducts';
 import { useProductComponents } from '@/lib/hooks/useProductComponents';
 import { supabase } from '@/lib/supabase';
@@ -783,7 +785,8 @@ function PosDashboard() {
   }
 
   return (
-    <div className="h-screen bg-navy flex flex-col overflow-hidden">
+    <div className="h-screen pt-14 bg-navy flex flex-col overflow-hidden">
+      <AdminNavbar onLogout={() => { apiLogout(); window.location.href = '/admin'; }} />
       <header className="shrink-0 glass border-b px-3 flex items-center gap-2 h-14">
         <Link href="/admin" className="text-muted hover:text-slate-100 text-sm px-3 py-1.5 rounded-lg bg-surface2 border border-white/8 transition-colors shrink-0">
           ← Back
