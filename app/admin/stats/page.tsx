@@ -6,6 +6,7 @@ import { supabase } from '@/lib/supabase';
 import { useProducts } from '@/lib/hooks/useProducts';
 import { SESSION_KEY, USER_KEY, ROLE_KEY, type Supplier, type Product } from '@/lib/types';
 import AdminNavbar from '../components/AdminNavbar';
+import { downloadXlsx } from '@/lib/xlsx';
 
 // One purchase_items row flattened with its purchase's supplier/date.
 interface PurchaseRecord {
@@ -205,11 +206,39 @@ function StatsDashboard() {
     });
   }
 
-  function generatePdf() {
-    const items = activeItems
+  // What an export contains: the checked rows, or the whole list if none.
+  function orderItems(): Product[] {
+    return activeItems
       .filter(p => activeSelected.size === 0 || activeSelected.has(p.product_id))
       .sort((a, b) => a.product_name.localeCompare(b.product_name));
-    setPrintItems(items);
+  }
+
+  function generatePdf() {
+    setPrintItems(orderItems());
+  }
+
+  function exportExcel() {
+    const items = orderItems();
+    const today = new Date();
+    const dateLabel = today.toLocaleDateString('en-KE', { day: '2-digit', month: 'short', year: 'numeric' });
+    const rows: (string | number)[][] = [
+      ['Jay Aadinath Enterprises — Purchase Order'],
+      [`Date: ${dateLabel}`],
+      ...(selSupplierName ? [[`To: ${selSupplierName}`]] : []),
+      [],
+      ['Product', 'Price', 'Quantity'],
+      ...items.map(p => {
+        const inp = orderInputs[p.product_id];
+        return [p.product_name, toNum(inp?.price), toNum(inp?.qty)];
+      }),
+    ];
+    const headerRow = rows.findIndex(r => r[0] === 'Product');
+    const safe = (selSupplierName ?? 'All suppliers').replace(/[^\w\- ]+/g, '').trim().replace(/\s+/g, '-');
+    downloadXlsx(`Purchase-Order-${safe}-${today.toISOString().slice(0, 10)}`, rows, {
+      sheetName: 'Purchase Order',
+      boldRows:  [0, headerRow],
+      colWidths: [50, 14, 12],
+    });
   }
 
   // Products in the current list that we've also bought from another
@@ -367,13 +396,23 @@ function StatsDashboard() {
               )}
             </div>
 
-            <div className="flex justify-end mb-8">
+            <div className="flex flex-wrap items-center justify-end gap-2 mb-8">
+              <span className="text-[11px] text-muted mr-1">
+                {activeSelected.size > 0 ? `${activeSelected.size} checked` : 'All in list'} · Product, Price, Quantity
+              </span>
               <button
                 onClick={generatePdf}
                 disabled={activeItems.length === 0}
                 className="px-4 py-2.5 rounded-xl bg-teal/15 border border-teal/30 text-teal text-xs font-bold hover:bg-teal/25 transition-all disabled:opacity-40"
               >
-                📄 Generate Order PDF{activeSelected.size > 0 ? ` (${activeSelected.size})` : ' (all)'}
+                🖨️ Print / PDF
+              </button>
+              <button
+                onClick={exportExcel}
+                disabled={activeItems.length === 0}
+                className="px-4 py-2.5 rounded-xl bg-success/10 border border-success/30 text-success text-xs font-bold hover:bg-success/20 transition-all disabled:opacity-40"
+              >
+                📊 Excel
               </button>
             </div>
 
