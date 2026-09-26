@@ -143,13 +143,13 @@ export default function AdminNavbar({ onLogout }: Props) {
               initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
               transition={{ duration: 0.2 }}
               onClick={() => setOpen(false)}
-              className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm"
+              className="fixed inset-0 z-60 bg-black/60 backdrop-blur-sm"
             />
             <motion.div
               key="drawer"
               initial={{ x: '-100%' }} animate={{ x: 0 }} exit={{ x: '-100%' }}
               transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-              className="fixed left-0 top-0 bottom-0 w-68 z-50 flex flex-col glass border-r shadow-2xl"
+              className="fixed left-0 top-0 bottom-0 w-68 z-70 flex flex-col bg-surface border-r border-white/8 shadow-2xl"
             >
               <div className="flex items-center justify-between px-5 h-14 border-b border-white/5">
                 <div className="flex items-center gap-2">
