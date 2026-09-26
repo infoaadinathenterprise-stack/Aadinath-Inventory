@@ -104,8 +104,7 @@ function SalesDashboard() {
     }
     setCompanies((compRes.data as Company[] | null)?.length
       ? (compRes.data as Company[])
-      : [{ company_id: 1, company_name: 'Aadinath Enterprise', active_status: true },
-         { company_id: 2, company_name: 'Jay Aadinath Enterprise', active_status: true }]);
+      : [{ company_id: 2, company_name: 'Jay Aadinath Enterprise', active_status: true }]);
 
     if (salesRes.error) {
       setError('Sales: ' + salesRes.error.message);
@@ -199,7 +198,7 @@ function SalesDashboard() {
       if (its.length === 0) {
         // No line items found — fall back to the sales row totals so
         // revenue reflects this sale. Profit can't be computed without
-        // the line breakdown, so it stays incomplete. Attribute to Aadinath.
+        // the line breakdown, so it stays incomplete. Attribute to the default company.
         if (s.total_amount) {
           revenue += s.total_amount;
           qtySold += s.item_count;
@@ -349,7 +348,7 @@ function SalesDashboard() {
             <div className="grid grid-cols-2 gap-2">
               {summary.byCompany.map(c => {
                 const name = companies.find(x => x.company_id === c.companyId)?.company_name?.replace(/\s*Enterprise$/i, '')
-                  ?? (c.companyId === DEFAULT_COMPANY_ID ? 'Aadinath' : `Company ${c.companyId}`);
+                  ?? (c.companyId === DEFAULT_COMPANY_ID ? 'Jay Aadinath' : `Company ${c.companyId}`);
                 return (
                   <div key={c.companyId} className="rounded-xl bg-surface border border-white/8 px-3.5 py-2.5">
                     <div className={`text-[11px] font-bold ${c.companyId === DEFAULT_COMPANY_ID ? 'text-teal' : 'text-gold'}`}>{name}</div>

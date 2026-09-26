@@ -1,5 +1,5 @@
 import { supabase } from '@/lib/supabase';
-import { USER_KEY } from '@/lib/types';
+import { USER_KEY, DEFAULT_COMPANY_ID } from '@/lib/types';
 
 function currentUser(): string {
   if (typeof window === 'undefined') return 'System';
@@ -14,7 +14,7 @@ function currentUser(): string {
 export interface StockOp {
   product_id:  number;
   location_id: number;
-  company_id?: number;               // which company's stock (defaults to Aadinath = 1)
+  company_id?: number;               // which company's stock (defaults to Jay Aadinath = 2)
   dq:          number;               // delta to loose pieces (can be negative)
   db:          number;               // delta to whole boxes  (can be negative)
   mov_type?:   string;               // SALE | TRANSFER | ADJUSTMENT_IN | ADJUSTMENT_OUT | AUTO_DEDUCT
@@ -72,7 +72,7 @@ export async function submitPendingRequest(
   locationId: number,
   qty:        number,
   reason:     string,
-  companyId   = 1,
+  companyId   = DEFAULT_COMPANY_ID,
 ): Promise<void> {
   const user  = currentUser();
   const now   = new Date().toISOString();

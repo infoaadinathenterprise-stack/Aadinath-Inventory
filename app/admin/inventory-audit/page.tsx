@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import { supabase } from '@/lib/supabase';
-import { SESSION_KEY, ROLE_KEY, USER_KEY, type UserRole } from '@/lib/types';
+import { SESSION_KEY, ROLE_KEY, USER_KEY, DEFAULT_COMPANY_ID, type UserRole } from '@/lib/types';
 import type { Product } from '@/lib/types';
 import { stockTxn, type StockOp } from '@/lib/stockActions';
 import AdminNavbar from '../components/AdminNavbar';
@@ -16,11 +16,6 @@ interface LocationInfo {
   location_id:   number;
   location_name: string;
 }
-
-// Aadinath (1) and Jay Aadinath (2) — see lib/types.ts DEFAULT_COMPANY_ID and
-// supabase/06_companies.sql. Hardcoded here the same way useProducts()'s
-// fallback company list does, since the audit page only needs the ids.
-const COMPANY_IDS = [1, 2];
 
 interface CompanyStock { quantity: number; box_quantity: number }
 
@@ -217,7 +212,7 @@ function InventoryAuditDashboard() {
       const perCompany: Record<number, Record<number, CompanyStock>> = {};
       for (const row of stockData ?? []) {
         const pid = row.product_id as number;
-        const cid = (row.company_id as number) ?? 1;
+        const cid = (row.company_id as number) ?? DEFAULT_COMPANY_ID;
         const q = row.quantity     ?? 0;
         const b = row.box_quantity ?? 0;
         if (!stockMap[pid]) stockMap[pid] = { quantity: 0, box_quantity: 0 };
@@ -301,11 +296,13 @@ function InventoryAuditDashboard() {
   // Build the stock_txn ops for a corrected total. The combined total is
   // one number, but stock is stored per-company — so an increase lands on
   // whichever firm already holds more of this product here (defaults to
-  // Aadinath when tied or absent), and a decrease drains that firm first,
+  // the default company when tied or absent), and a decrease drains that firm first,
   // spilling into the other firm only if it alone doesn't have enough.
   function buildEditOps(row: AuditRow, delta: number, ppb: number): StockOp[] {
     const co = (cid: number): CompanyStock => row.perCompany[cid] ?? { quantity: 0, box_quantity: 0 };
-    const totals = COMPANY_IDS.map(cid => ({ cid, ...co(cid), total: co(cid).quantity + co(cid).box_quantity * ppb }));
+    // Every company holding stock here, default (Jay Aadinath) first.
+    const companyIds = Array.from(new Set([DEFAULT_COMPANY_ID, ...Object.keys(row.perCompany).map(Number)]));
+    const totals = companyIds.map(cid => ({ cid, ...co(cid), total: co(cid).quantity + co(cid).box_quantity * ppb }));
     const primary = [...totals].sort((a, b) => b.total - a.total)[0];
     const order = [primary, ...totals.filter(t => t.cid !== primary.cid)];
 

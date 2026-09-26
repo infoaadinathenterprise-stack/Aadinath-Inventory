@@ -4,11 +4,12 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
 import { redirectIfSessionInvalid } from '@/lib/auth';
 import type { Product, StockByLoc, LocationInfo, Company, StockByCompany } from '@/lib/types';
+import { DEFAULT_COMPANY_ID } from '@/lib/types';
 
 interface ProductsData {
   products:    Product[];
   locations:   LocationInfo[];          // all active locations from DB
-  companies:   Company[];               // Aadinath, Jay Aadinath, …
+  companies:   Company[];               // Jay Aadinath (Aadinath was merged in)
   stockByLoc:  StockByLoc;              // location_id → product_id → pieces (ALL companies combined)
   boxByLoc:    StockByLoc;              // location_id → product_id → boxes  (ALL companies combined)
   stockByCompany: StockByCompany;       // company_id → location_id → product_id → pieces
@@ -66,7 +67,7 @@ export function useProducts(): ProductsData {
       const bbc: StockByCompany = {};
       for (const row of stock ?? []) {
         const lid = row.location_id as number;
-        const cid = (row.company_id as number) ?? 1;
+        const cid = (row.company_id as number) ?? DEFAULT_COMPANY_ID;
         const q = row.quantity ?? 0;
         const b = row.box_quantity ?? 0;
         // combined — SUM across companies (never overwrite)
@@ -96,7 +97,6 @@ export function useProducts(): ProductsData {
       let companyList = (comps ?? []) as Company[];
       if (companyList.length === 0) {
         companyList = [
-          { company_id: 1, company_name: 'Aadinath Enterprise',     active_status: true },
           { company_id: 2, company_name: 'Jay Aadinath Enterprise', active_status: true },
         ];
       }

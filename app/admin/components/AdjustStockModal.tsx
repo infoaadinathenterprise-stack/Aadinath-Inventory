@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { formatStock } from '@/lib/formatStock';
 import { stockTxn, submitPendingRequest, type StockOp } from '@/lib/stockActions';
 import type { Product, StockByLoc, StockByCompany, Company, AdjAction, LocationInfo, ComponentMap, UserRole } from '@/lib/types';
+import { DEFAULT_COMPANY_ID } from '@/lib/types';
 
 interface Props {
   product:      Product | null;
@@ -16,7 +17,7 @@ interface Props {
   componentMap?: ComponentMap;
   allProducts?:  Product[];
   userRole?:    UserRole;
-  companyId?:   number;   // which company's stock to adjust (default Aadinath)
+  companyId?:   number;   // which company's stock to adjust (default Jay Aadinath)
   // Per-company stock maps + company list. When present, auto-deducted
   // components are pulled from ANY company that has them (stock is shared
   // across companies). Absent → components fall back to companyId only.
@@ -51,7 +52,7 @@ export default function AdjustStockModal({
   locations, stockByLoc, boxByLoc,
   componentMap = {}, allProducts = [],
   userRole = 'admin',
-  companyId = 1,
+  companyId = DEFAULT_COMPANY_ID,
   stockByCompany, boxByCompany, companies = [],
   onClose, onSuccess, onError, onDone,
 }: Props) {

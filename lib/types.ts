@@ -41,8 +41,9 @@ export interface Company {
   active_status: boolean;
 }
 
-// Aadinath owns all pre-existing stock. Jay Aadinath is company 2.
-export const DEFAULT_COMPANY_ID = 1;
+// Aadinath (company 1) was merged into Jay Aadinath (company 2) — see
+// supabase/10_merge_companies.sql. Jay Aadinath is the only company.
+export const DEFAULT_COMPANY_ID = 2;
 
 // Per-company stock: company_id → location_id → product_id → qty
 export type StockByCompany = Record<number, StockByLoc>;

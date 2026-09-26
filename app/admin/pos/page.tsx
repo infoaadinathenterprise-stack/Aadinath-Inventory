@@ -15,7 +15,7 @@ import AdjustStockModal from '@/app/admin/components/AdjustStockModal';
 import BarcodeScanner   from '@/app/admin/components/BarcodeScanner';
 import Toast, { type ToastState } from '@/app/admin/components/Toast';
 import type { Product, LocationInfo } from '@/lib/types';
-import { SESSION_KEY, ROLE_KEY } from '@/lib/types';
+import { SESSION_KEY, ROLE_KEY, DEFAULT_COMPANY_ID } from '@/lib/types';
 
 // ── Auth guard ─────────────────────────────────────────────────────────────────
 
@@ -178,13 +178,13 @@ function PosDashboard() {
     return locations.reduce((s, l) => s + ((sc[l.location_id] ?? {})[p.product_id] ?? 0) + ((bc[l.location_id] ?? {})[p.product_id] ?? 0) * ppb, 0);
   }
 
-  // Default company for a new cart line: the one with stock (Aadinath first).
+  // Default company for a new cart line: the one with stock (lowest id first).
   function defaultCompanyFor(p: Product): number {
     const withStock = companies
       .map(c => c.company_id)
       .filter(cid => companyTotalPieces(p, cid) > 0)
       .sort((a, b) => a - b);
-    return withStock[0] ?? (companies[0]?.company_id ?? 1);
+    return withStock[0] ?? (companies[0]?.company_id ?? DEFAULT_COMPANY_ID);
   }
 
   // Max sellable of a product. The two companies are just billing labels over
@@ -192,7 +192,7 @@ function PosDashboard() {
   // company and location — the company only decides which bill it goes on.
   // (companyId is accepted for call-site compatibility but no longer limits
   // the amount.)
-  function maxForProduct(p: Product, unit: CartUnit = 'piece', _companyId = 1): number {
+  function maxForProduct(p: Product, unit: CartUnit = 'piece', _companyId = DEFAULT_COMPANY_ID): number {
     const ppb = p.pieces_per_box ?? 0;
     const pool = companies.reduce((s, c) => s + companyTotalPieces(p, c.company_id), 0);
     if (unit === 'box' && ppb > 0) return Math.floor(pool / ppb);
@@ -439,7 +439,7 @@ function PosDashboard() {
     unit: CartUnit,
     sellPrice: number | null,
     groupChoices: Record<string, number> = {},
-    companyId = 1,
+    companyId = DEFAULT_COMPANY_ID,
   ): StockOp[] {
     // The two companies are just billing labels over ONE shared physical
     // stock, sold from the same locations. So BOTH the product and its
@@ -577,7 +577,7 @@ function PosDashboard() {
     unit: CartUnit,
     destLocationId: number,
     groupChoices: Record<string, number> = {},
-    companyId = 1,
+    companyId = DEFAULT_COMPANY_ID,
   ): StockOp[] {
     // Transfer within the chosen company's stock.
     const stockByLoc = stockByCompany[companyId] ?? {};

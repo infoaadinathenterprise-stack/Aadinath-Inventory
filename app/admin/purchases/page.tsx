@@ -224,7 +224,6 @@ function PurchasesDashboard() {
       ]);
       const comps = (cr.data ?? []) as Company[];
       setCompanies(comps.length > 0 ? comps : [
-        { company_id: 1, company_name: 'Aadinath Enterprise',     active_status: true },
         { company_id: 2, company_name: 'Jay Aadinath Enterprise', active_status: true },
       ]);
     }
@@ -268,7 +267,7 @@ function PurchasesDashboard() {
   }
 
   function companyName(id: number | null | undefined) {
-    return companies.find(c => c.company_id === (id ?? DEFAULT_COMPANY_ID))?.company_name ?? 'Aadinath Enterprise';
+    return companies.find(c => c.company_id === (id ?? DEFAULT_COMPANY_ID))?.company_name ?? 'Jay Aadinath Enterprise';
   }
   const shortCompany = (id: number | null | undefined) => companyName(id).replace(/\s*Enterprise$/i, '');
 
@@ -491,11 +490,13 @@ function PurchasesDashboard() {
                     {p.notes ? ' · ' + p.notes : ''}
                   </div>
                   <div className="flex items-center gap-1.5 shrink-0">
+                    {companies.length > 1 && (
                     <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
                       (p.company_id ?? DEFAULT_COMPANY_ID) === DEFAULT_COMPANY_ID
                         ? 'bg-teal/10 border-teal/25 text-teal'
                         : 'bg-gold/10 border-gold/30 text-gold'
                     }`}>{shortCompany(p.company_id)}</span>
+                    )}
                     <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
                       p.status === 'CONFIRMED'
                         ? 'bg-success/10 border-success/20 text-success'
@@ -594,7 +595,8 @@ function DetailDrawer({
           {data.purchase.notes && <div className="text-xs text-muted/70 mt-1">{data.purchase.notes}</div>}
         </div>
 
-        {/* Company + convert */}
+        {/* Company + convert (only meaningful with more than one company) */}
+        {companies.length > 1 && (
         <div className="bg-surface2 rounded-xl p-4 mb-4 flex items-center justify-between gap-3 flex-wrap">
           <div>
             <div className="text-[10px] font-bold text-muted uppercase tracking-widest mb-1">Company</div>
@@ -615,6 +617,7 @@ function DetailDrawer({
             ))}
           </div>
         </div>
+        )}
 
         <div className="text-[10px] font-bold text-muted uppercase tracking-widest mb-2">Items ({data.items.length})</div>
         {data.items.map((item, i) => (
