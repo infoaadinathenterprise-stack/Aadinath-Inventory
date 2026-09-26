@@ -13,7 +13,7 @@ import AdjustStockModal from '@/app/admin/components/AdjustStockModal';
 import BarcodeScanner   from '@/app/admin/components/BarcodeScanner';
 import Toast, { type ToastState } from '@/app/admin/components/Toast';
 import type { Product, LocationInfo } from '@/lib/types';
-import { SESSION_KEY } from '@/lib/types';
+import { SESSION_KEY, ROLE_KEY } from '@/lib/types';
 
 // ── Auth guard ─────────────────────────────────────────────────────────────────
 
@@ -125,6 +125,9 @@ function PosDashboard() {
   const [scannerOpen, setScannerOpen] = useState(false);
   const [cart,        setCart]        = useState<CartItem[]>([]);
   const [cartOpen,    setCartOpen]    = useState(false);
+  // Sales page is admin-only, so only admins get the Sales shortcut.
+  const [isAdmin,     setIsAdmin]     = useState(false);
+  useEffect(() => { setIsAdmin((localStorage.getItem(ROLE_KEY) ?? 'admin') === 'admin'); }, []);
   const [processing,        setProcessing]        = useState(false);
   const [toast,             setToast]             = useState<ToastState | null>(null);
   const [restockBannerOpen, setRestockBannerOpen] = useState(true);
@@ -802,6 +805,19 @@ function PosDashboard() {
             className="w-full pl-8 pr-3 py-2 rounded-xl bg-surface2 border border-teal text-sm text-slate-100 placeholder:text-muted/50 font-mono outline-none shadow-[0_0_0_2px_rgba(0,212,255,0.15)] transition-colors"
           />
         </div>
+
+        {isAdmin && (
+          <Link
+            href="/admin/sales"
+            onClick={e => {
+              // The cart only lives in memory — leaving POS clears it.
+              if (cart.length > 0 && !window.confirm(`Leave POS? The ${cart.length} item(s) in the cart will be cleared.`)) e.preventDefault();
+            }}
+            className="px-3 py-2 rounded-xl bg-surface2 border border-white/8 text-muted hover:text-teal hover:border-teal/30 transition-all text-xs font-bold shrink-0"
+          >
+            📊 Sales
+          </Link>
+        )}
 
         <button
           onClick={() => setScannerOpen(true)}

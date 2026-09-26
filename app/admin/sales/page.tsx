@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import { supabase } from '@/lib/supabase';
@@ -300,13 +301,18 @@ function SalesDashboard() {
 
         {/* ── Day picker strip ── */}
         <div className="pt-5 pb-3 flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h2 className="text-base font-bold text-slate-100">Sales · {fmtDay(day)}</h2>
-            <p className="text-xs text-muted mt-0.5">
-              {sales.length} sale{sales.length === 1 ? '' : 's'}
-              {summary.voidedSales > 0 && ` · ${summary.voidedSales} voided`}
-              {' · '}{summary.qtySold} item{summary.qtySold === 1 ? '' : 's'}
-            </p>
+          <div className="flex items-center gap-3">
+            <Link href="/admin/pos" className="text-muted hover:text-slate-100 text-sm px-3 py-1.5 rounded-lg bg-surface2 border border-white/8 transition-colors shrink-0">
+              ← POS
+            </Link>
+            <div>
+              <h2 className="text-base font-bold text-slate-100">Sales · {fmtDay(day)}</h2>
+              <p className="text-xs text-muted mt-0.5">
+                {sales.length} sale{sales.length === 1 ? '' : 's'}
+                {summary.voidedSales > 0 && ` · ${summary.voidedSales} voided`}
+                {' · '}{summary.qtySold} item{summary.qtySold === 1 ? '' : 's'}
+              </p>
+            </div>
           </div>
           <div className="flex items-center gap-1.5">
             <button onClick={() => shiftDay(-1)} className="w-8 h-8 rounded-lg border border-white/8 bg-surface2 text-slate-200 text-sm hover:border-teal/30">‹</button>
