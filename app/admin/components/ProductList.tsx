@@ -15,14 +15,18 @@ interface Props {
   onAdjust:    (product: Product, direction: 'plus' | 'minus', locationId: number) => void;
   onEdit?:     (product: Product) => void;
   stockFilter?: StockFilter;
+  // When set, the location is chosen from the admin menu (?loc=) and the
+  // in-page location switcher is hidden.
+  locationId?: number;
 }
 
 export default function ProductList({
   products, locations, stockByLoc, boxByLoc, onAdjust, onEdit,
-  stockFilter = 'all',
+  stockFilter = 'all', locationId: fixedLocId,
 }: Props) {
   const firstLocId = locations[0]?.location_id ?? 0;
-  const [locationId, setLocationId] = useState<number>(firstLocId);
+  const [pickedLocId, setLocationId] = useState<number>(firstLocId);
+  const locationId = fixedLocId ?? pickedLocId;
   const [category,   setCategory]   = useState('All');
   const [search,     setSearch]     = useState('');
   const [scanMsg,    setScanMsg]    = useState<{ text: string; ok: boolean } | null>(null);
@@ -30,8 +34,8 @@ export default function ProductList({
 
   // When locations load, set default if not set
   useEffect(() => {
-    if (!locationId && locations.length > 0) setLocationId(locations[0].location_id);
-  }, [locations, locationId]);
+    if (!pickedLocId && locations.length > 0) setLocationId(locations[0].location_id);
+  }, [locations, pickedLocId]);
 
   useEffect(() => {
     const t = setTimeout(() => barcodeRef.current?.focus(), 300);
@@ -129,6 +133,7 @@ export default function ProductList({
     <div className="px-4 flex flex-col flex-1 min-h-0">
       <div className="shrink-0">
         {/* Dynamic location tabs — segmented control */}
+        {fixedLocId === undefined && (
         <div className="flex gap-1 mb-4 p-1 rounded-2xl card-lux overflow-x-auto scrollbar-none">
           {locations.map(loc => (
             <button
@@ -144,6 +149,7 @@ export default function ProductList({
             </button>
           ))}
         </div>
+        )}
 
         <div className="relative mb-2">
           <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gold text-sm">📷</span>
@@ -188,7 +194,7 @@ export default function ProductList({
           <span>{visible.length} product{visible.length !== 1 ? 's' : ''}</span>
           {outCount > 0 && <span className="text-danger">· {outCount} out of stock here</span>}
           {stockFilter !== 'all' && (
-            <a href="/admin" className="ml-auto inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-gold/10 border border-gold/30 text-gold text-[10px] font-bold hover:bg-gold/20 transition-all">
+            <a href={fixedLocId !== undefined ? `/admin?loc=${fixedLocId}` : '/admin'} className="ml-auto inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-gold/10 border border-gold/30 text-gold text-[10px] font-bold hover:bg-gold/20 transition-all">
               Clear filter ✕
             </a>
           )}

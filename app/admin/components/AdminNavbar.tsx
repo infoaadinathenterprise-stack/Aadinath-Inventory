@@ -1,10 +1,10 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, Suspense, type ReactNode } from 'react';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useSearchParams } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ROLE_KEY, type UserRole } from '@/lib/types';
+import { ROLE_KEY, STORE_TABS, type UserRole } from '@/lib/types';
 import { isAuthenticated, logout as authLogout } from '@/lib/auth';
 
 interface Props {
@@ -12,7 +12,9 @@ interface Props {
 }
 
 const ALL_LINKS = [
-  { emoji: '📦', label: 'Inventory', href: '/admin',                   roles: ['admin', 'staff'] as UserRole[] },
+  ...STORE_TABS.map(t => ({
+    emoji: t.emoji, label: t.label, href: `/admin?loc=${t.locationId}`, roles: ['admin', 'staff'] as UserRole[],
+  })),
   { emoji: '💲', label: 'Pricing',   href: '/admin/pricing',           roles: ['admin'] as UserRole[] },
   { emoji: '🖼️', label: 'Images',    href: '/admin/images',            roles: ['admin'] as UserRole[] },
   { emoji: '📊', label: 'Reports',   href: '/admin/stats',             roles: ['admin'] as UserRole[] },
@@ -27,10 +29,44 @@ const ALL_LINKS = [
   { emoji: '👥', label: 'Staff',     href: '/admin/staff',             roles: ['admin'] as UserRole[] },
 ];
 
+type NavLink = typeof ALL_LINKS[number];
+
+// Store tabs all live on /admin and differ only by ?loc=, so matching on
+// pathname alone would light up all three. A bare /admin counts as the
+// first store tab (the page's default location).
+function isActive(href: string, pathname: string, loc: string | null): boolean {
+  const [path, query] = href.split('?');
+  if (pathname !== path) return false;
+  if (!query) return true;
+  const want = new URLSearchParams(query).get('loc');
+  return (loc ?? String(STORE_TABS[0].locationId)) === want;
+}
+
+// useSearchParams needs a Suspense boundary in static export, so the links
+// read it here and the fallback renders them with pathname-only matching.
+function NavLinksWithParams(props: { links: NavLink[]; render: (l: NavLink, active: boolean) => ReactNode }) {
+  const loc = useSearchParams()?.get('loc') ?? null;
+  return <NavLinks {...props} loc={loc} />;
+}
+
+function NavLinks({ links, render, loc }: { links: NavLink[]; render: (l: NavLink, active: boolean) => ReactNode; loc: string | null | undefined }) {
+  const pathname = usePathname();
+  return <>{links.map(l => render(l, loc === undefined
+    ? !l.href.includes('?') && pathname === l.href
+    : isActive(l.href, pathname, loc)))}</>;
+}
+
+function Links(props: { links: NavLink[]; render: (l: NavLink, active: boolean) => ReactNode }) {
+  return (
+    <Suspense fallback={<NavLinks {...props} loc={undefined} />}>
+      <NavLinksWithParams {...props} />
+    </Suspense>
+  );
+}
+
 export default function AdminNavbar({ onLogout }: Props) {
   const [open, setOpen]   = useState(false);
   const [role, setRole]   = useState<UserRole>('admin');
-  const pathname          = usePathname();
 
   useEffect(() => {
     setRole((localStorage.getItem(ROLE_KEY) as UserRole) || 'admin');
@@ -79,9 +115,7 @@ export default function AdminNavbar({ onLogout }: Props) {
           </div>
 
           <div className="hidden lg:flex items-center gap-0.5">
-            {links.map(({ emoji, label, href }) => {
-              const active = pathname === href;
-              return (
+            <Links links={links} render={({ emoji, label, href }, active) => (
                 <Link
                   key={href}
                   href={href}
@@ -93,8 +127,7 @@ export default function AdminNavbar({ onLogout }: Props) {
                 >
                   <span>{emoji}</span>{label}
                 </Link>
-              );
-            })}
+            )} />
           </div>
 
           <div className="flex items-center gap-2">
@@ -156,9 +189,7 @@ export default function AdminNavbar({ onLogout }: Props) {
               </div>
 
               <nav className="flex-1 px-3 py-5 flex flex-col gap-1 overflow-y-auto">
-                {links.map(({ emoji, label, href }) => {
-                  const active = pathname === href;
-                  return (
+                <Links links={links} render={({ emoji, label, href }, active) => (
                     <Link
                       key={href}
                       href={href}
@@ -170,8 +201,7 @@ export default function AdminNavbar({ onLogout }: Props) {
                       <span>{emoji}</span>{label}
                       {active && <span className="ml-auto w-1.5 h-1.5 rounded-full bg-teal" />}
                     </Link>
-                  );
-                })}
+                )} />
 
                 <div className="my-3 border-t border-white/8" />
 

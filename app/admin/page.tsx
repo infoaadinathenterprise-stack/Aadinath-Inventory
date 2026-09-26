@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { supabase } from '@/lib/supabase';
 import type { Product, UserRole, StockMap } from '@/lib/types';
-import { ROLE_KEY, DEFAULT_COMPANY_ID } from '@/lib/types';
+import { ROLE_KEY, DEFAULT_COMPANY_ID, STORE_TABS } from '@/lib/types';
 import { useProductComponents } from '@/lib/hooks/useProductComponents';
 import { useProducts } from '@/lib/hooks/useProducts';
 import { stockTxn, type StockOp } from '@/lib/stockActions';
@@ -1066,8 +1066,9 @@ function Dashboard({ role }: { role: UserRole }) {
         <div className="shrink-0">
           <div className="px-4 pt-5 pb-3 flex items-center justify-between">
             <div>
-              <h2 className="text-lg font-extrabold text-slate-100 tracking-tight" style={{ fontFamily: 'var(--font-display)' }}>Inventory</h2>
-              <p className="text-xs text-muted mt-0.5">{products.length} active products</p>
+              <Suspense fallback={<h2 className="text-lg font-extrabold text-slate-100 tracking-tight" style={{ fontFamily: 'var(--font-display)' }}>Inventory</h2>}>
+                <InventoryHeading locations={locations} count={products.length} />
+              </Suspense>
             </div>
             {isAdmin && (
               <button
@@ -1196,5 +1197,31 @@ function InventoryListWithFilter(props: {
   const params = useSearchParams();
   const raw = (params?.get('filter') ?? 'all') as StockFilter;
   const stockFilter: StockFilter = (['all', 'in_stock', 'out_of_stock'] as StockFilter[]).includes(raw) ? raw : 'all';
-  return <ProductList {...props} stockFilter={stockFilter} />;
+  const locationId = resolveLocationId(params?.get('loc') ?? null, props.locations);
+  return <ProductList {...props} stockFilter={stockFilter} locationId={locationId} />;
+}
+
+// ?loc= picks which store the inventory shows (set by the admin menu tabs).
+// Missing or unknown values fall back to the first menu tab, then to the
+// first active location.
+function resolveLocationId(raw: string | null, locations: LocationInfo[]): number | undefined {
+  const ids = locations.map(l => l.location_id);
+  const wanted = raw ? parseInt(raw, 10) : NaN;
+  if (ids.includes(wanted)) return wanted;
+  const firstTab = STORE_TABS.find(t => ids.includes(t.locationId));
+  return firstTab?.locationId ?? ids[0];
+}
+
+function InventoryHeading({ locations, count }: { locations: LocationInfo[]; count: number }) {
+  const params = useSearchParams();
+  const locId = resolveLocationId(params?.get('loc') ?? null, locations);
+  const name = STORE_TABS.find(t => t.locationId === locId)?.label
+    ?? locations.find(l => l.location_id === locId)?.location_name
+    ?? 'Inventory';
+  return (
+    <>
+      <h2 className="text-lg font-extrabold text-slate-100 tracking-tight" style={{ fontFamily: 'var(--font-display)' }}>{name}</h2>
+      <p className="text-xs text-muted mt-0.5">{count} active products</p>
+    </>
+  );
 }

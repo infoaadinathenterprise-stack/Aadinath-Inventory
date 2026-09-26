@@ -160,3 +160,13 @@ export interface Withdrawal {
   performed_by:    string | null;
   created_at:      string;
 }
+
+// Store locations shown as their own tabs in the admin menu, in menu order.
+// Each opens the inventory page scoped to that location via /admin?loc=<id>.
+// IDs match the `locations` table. The first entry is also the default
+// when /admin is opened without a ?loc= param.
+export const STORE_TABS = [
+  { locationId: 2, label: 'Back Godown',            emoji: '🏚️' },
+  { locationId: 1, label: 'Main Store',             emoji: '🏬' },
+  { locationId: 3, label: 'Main Store First Floor', emoji: '🏪' },
+] as const;
