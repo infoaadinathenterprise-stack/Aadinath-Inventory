@@ -16,7 +16,6 @@ const enc = new TextEncoder();
 function esc(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
     // strip control chars that are illegal in XML
-    // eslint-disable-next-line no-control-regex
     .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '');
 }
 
