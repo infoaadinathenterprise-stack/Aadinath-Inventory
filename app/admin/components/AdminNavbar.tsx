@@ -94,43 +94,43 @@ export default function AdminNavbar({ onLogout }: Props) {
     <>
       <nav className="fixed top-0 inset-x-0 z-50 glass border-b shadow-[0_8px_32px_rgba(0,0,0,0.3)]">
         <div className="max-w-7xl mx-auto px-4 h-14 flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2.5 min-w-0">
-            <span
-              className="w-7 h-7 rounded-lg flex items-center justify-center text-white font-extrabold text-[11px] shrink-0"
-              style={{ background: 'linear-gradient(135deg, #38bdf8 0%, #2563eb 100%)', fontFamily: 'var(--font-display)' }}
-            >
-              JA
-            </span>
-            <span className="font-bold text-[15px] text-slate-100 tracking-tight leading-none truncate" style={{ fontFamily: 'var(--font-display)' }}>
-              Jay Aadinath
-            </span>
-            <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full border uppercase tracking-[0.14em] shrink-0 ${
-              isAdmin
-                ? 'bg-gold/12 border-gold/30 text-gold'
-                : 'bg-teal/12 border-teal/30 text-teal'
-            }`}>
-              {isAdmin ? 'Admin' : 'Staff'}
-            </span>
-          </div>
+          <button
+            type="button"
+            onClick={() => setOpen(o => !o)}
+            aria-label="Open menu"
+            aria-expanded={open}
+            className="w-10 h-10 -ml-1 rounded-lg shrink-0 card-lux hover:border-teal/30 transition-colors flex flex-col justify-center items-center gap-1 touch-manipulation"
+          >
+            <span className="w-4 h-0.5 bg-slate-300 rounded-full" />
+            <span className="w-4 h-0.5 bg-slate-300 rounded-full" />
+            <span className="w-4 h-0.5 bg-slate-300 rounded-full" />
+          </button>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 min-w-0">
             <button
               onClick={onLogout}
-              className="text-xs text-muted hover:text-danger transition-colors duration-200 px-3 py-1.5 rounded-lg hover:bg-danger/10 border border-transparent hover:border-danger/20"
+              className="shrink-0 text-xs text-muted hover:text-danger transition-colors duration-200 px-3 py-1.5 rounded-lg hover:bg-danger/10 border border-transparent hover:border-danger/20"
             >
               Sign out
             </button>
-            <button
-              type="button"
-              onClick={() => setOpen(o => !o)}
-              aria-label="Open menu"
-              aria-expanded={open}
-              className="w-10 h-10 -mr-1 rounded-lg card-lux hover:border-teal/30 transition-colors flex flex-col justify-center items-center gap-1 touch-manipulation"
-            >
-              <span className="w-4 h-0.5 bg-slate-300 rounded-full" />
-              <span className="w-4 h-0.5 bg-slate-300 rounded-full" />
-              <span className="w-4 h-0.5 bg-slate-300 rounded-full" />
-            </button>
+            <div className="flex items-center gap-2.5 min-w-0">
+              <span
+                className="w-7 h-7 rounded-lg flex items-center justify-center text-white font-extrabold text-[11px] shrink-0"
+                style={{ background: 'linear-gradient(135deg, #38bdf8 0%, #2563eb 100%)', fontFamily: 'var(--font-display)' }}
+              >
+                JA
+              </span>
+              <span className="font-bold text-[15px] text-slate-100 tracking-tight leading-none truncate" style={{ fontFamily: 'var(--font-display)' }}>
+                Jay Aadinath
+              </span>
+              <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full border uppercase tracking-[0.14em] shrink-0 ${
+                isAdmin
+                  ? 'bg-gold/12 border-gold/30 text-gold'
+                  : 'bg-teal/12 border-teal/30 text-teal'
+              }`}>
+                {isAdmin ? 'Admin' : 'Staff'}
+              </span>
+            </div>
           </div>
         </div>
       </nav>
@@ -147,9 +147,9 @@ export default function AdminNavbar({ onLogout }: Props) {
             />
             <motion.div
               key="drawer"
-              initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }}
+              initial={{ x: '-100%' }} animate={{ x: 0 }} exit={{ x: '-100%' }}
               transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-              className="fixed right-0 top-0 bottom-0 w-68 z-50 flex flex-col glass border-l shadow-2xl"
+              className="fixed left-0 top-0 bottom-0 w-68 z-50 flex flex-col glass border-r shadow-2xl"
             >
               <div className="flex items-center justify-between px-5 h-14 border-b border-white/5">
                 <div className="flex items-center gap-2">
