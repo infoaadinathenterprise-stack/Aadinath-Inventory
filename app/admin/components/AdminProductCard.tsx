@@ -4,7 +4,19 @@ import { motion } from 'framer-motion';
 import { formatStock } from '@/lib/formatStock';
 import type { Product, StockByLoc, LocationInfo } from '@/lib/types';
 
+// Stock at this location over a chosen period, rebuilt from the movement
+// history (see ProductList). All figures in pieces.
+export interface StockHistory {
+  opening:   number;   // at the start of the From day
+  closing:   number;   // at the end of the To day
+  inQty:     number;
+  outQty:    number;
+  fromLabel: string;
+  toLabel:   string;
+}
+
 interface Props {
+  history?:   StockHistory;
   product:    Product;
   index:      number;
   locationId: number;
@@ -16,7 +28,7 @@ interface Props {
 }
 
 export default function AdminProductCard({
-  product: p, index, locationId, locations, stockByLoc, boxByLoc, onAdjust, onEdit,
+  product: p, index, locationId, locations, stockByLoc, boxByLoc, onAdjust, onEdit, history,
 }: Props) {
   const ppb     = p.pieces_per_box || 0;
   const qty     = (stockByLoc[locationId] ?? {})[p.product_id] ?? 0;
@@ -29,10 +41,15 @@ export default function AdminProductCard({
     .filter(l => l.location_id !== locationId)
     .reduce((s, l) => s + ((stockByLoc[l.location_id] ?? {})[p.product_id] ?? 0) + ((boxByLoc[l.location_id] ?? {})[p.product_id] ?? 0) * ppb, 0);
 
-  const stockClass =
-    total === 0      ? 'text-danger' :
-    total <= reorder ? 'text-gold'   :
-                       'text-success/80';
+  // Red = out of stock, orange = low (at or below the reorder level),
+  // green = enough.
+  const level = total === 0 ? 'out' : total <= reorder ? 'low' : 'ok';
+  const tone = {
+    out: { text: 'text-danger',     bar: 'bg-danger',     card: 'border-danger/40 bg-danger/[0.04]',         row: 'bg-danger/10' },
+    low: { text: 'text-orange-500', bar: 'bg-orange-500', card: 'border-orange-500/40 bg-orange-500/[0.04]', row: 'bg-orange-500/10' },
+    ok:  { text: 'text-success',    bar: 'bg-success',    card: 'border-success/30',                         row: 'bg-success/[0.06]' },
+  }[level];
+  const stockClass = tone.text;
 
   const stockLabel =
     !fmt.inStock        ? 'Out of stock'         :
@@ -46,8 +63,9 @@ export default function AdminProductCard({
       initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ delay: Math.min(index * 0.02, 0.25), duration: 0.25 }}
-      className="flex flex-col rounded-2xl card-lux hover:border-teal/30 transition-colors duration-200 overflow-hidden"
+      className={`relative flex flex-col rounded-2xl card-lux ${tone.card} hover:border-teal/30 transition-colors duration-200 overflow-hidden`}
     >
+      <span aria-hidden className={`absolute left-0 top-0 bottom-0 w-1 ${tone.bar}`} />
       {/* ── Name block: full card width so long names wrap, never clip ── */}
       <div className="px-4 pt-3.5 pb-2.5 flex items-start gap-2">
         <div className="flex-1 min-w-0">
@@ -75,13 +93,32 @@ export default function AdminProductCard({
       </div>
 
       {/* ── Stock + controls row ── */}
-      <div className="px-4 py-2.5 border-t border-white/6 bg-black/15 flex items-center justify-between gap-3">
+      {history && (() => {
+        const drift = history.closing !== total;
+        const suspect = history.opening < 0 || history.closing < 0;
+        return (
+          <div className="px-4 py-2 border-t border-white/6 text-[11px] leading-relaxed">
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 tabular-nums">
+              <span className="text-muted">{history.fromLabel} start</span>
+              <span className="font-bold text-slate-100">{history.opening}</span>
+              {history.inQty > 0 && <span className="text-success font-semibold">+{history.inQty} in</span>}
+              {history.outQty > 0 && <span className="text-danger font-semibold">−{history.outQty} out</span>}
+              <span className="text-muted">→ {history.toLabel} end</span>
+              <span className="font-bold text-slate-100">{history.closing}</span>
+              {drift && <span className="text-muted">· now {total}</span>}
+            </div>
+            {suspect && <p className="text-orange-500 text-[10px] mt-0.5">⚠ Below zero — history before this period is incomplete for this item.</p>}
+          </div>
+        );
+      })()}
+
+      <div className={`px-4 py-2.5 border-t border-white/6 ${tone.row} flex items-center justify-between gap-3`}>
         <div className="min-w-0">
           <p className={`text-xs font-semibold ${stockClass}`}>
             {total <= reorder && total > 0 && '⚠ '}{stockLabel}
           </p>
           {total <= reorder && otherTotal > 0 && (
-            <p className="text-[10px] text-gold/70 mt-0.5">{otherTotal} available elsewhere</p>
+            <p className={`text-[10px] ${tone.text} opacity-75 mt-0.5`}>{otherTotal} available elsewhere</p>
           )}
         </div>
 
