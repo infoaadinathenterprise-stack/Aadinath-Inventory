@@ -229,7 +229,7 @@ function StatsDashboard() {
     const today = new Date();
     const dateLabel = today.toLocaleDateString('en-KE', { day: '2-digit', month: 'short', year: 'numeric' });
     const rows: (string | number)[][] = [
-      ['Jay Aadinath Enterprises — Purchase Order'],
+      ['Purchase Order'],
       [`Date: ${dateLabel}`],
       ...(selSupplierName ? [[`To: ${selSupplierName}`]] : []),
       [],

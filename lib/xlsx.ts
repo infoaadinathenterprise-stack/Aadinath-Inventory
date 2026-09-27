@@ -1,7 +1,10 @@
 // Minimal .xlsx writer — one sheet, strings and numbers, optional bold rows
 // and column widths. Enough for simple exports without pulling in a
 // spreadsheet library. The file is a ZIP (stored, no compression) of the
-// handful of XML parts Excel needs.
+// handful of XML parts Excel needs. Every sheet opens with the company
+// letterhead (lib/company.ts) unless `letterhead: false` is passed.
+
+import { COMPANY } from './company';
 
 export type Cell = string | number | null | undefined;
 
@@ -9,6 +12,16 @@ export interface SheetOptions {
   sheetName?:  string;
   boldRows?:   number[];   // 0-based row indexes to render bold
   colWidths?:  number[];   // in Excel "characters"
+  letterhead?: boolean;    // default true
+}
+
+// Cell style indexes — must match cellXfs in styles.xml below.
+const S_BOLD = 1, S_TITLE = 2, S_CENTER = 3, S_CENTER_BOLD = 4, S_CENTER_WRAP = 5;
+
+interface Layout {
+  rowStyles:  Map<number, number>;
+  rowHeights: Map<number, number>;   // in points
+  merges:     string[];
 }
 
 const enc = new TextEncoder();
@@ -25,26 +38,63 @@ function colName(i: number): string {
   return s;
 }
 
-function sheetXml(rows: Cell[][], opts: SheetOptions): string {
-  const bold = new Set(opts.boldRows ?? []);
+function sheetXml(rows: Cell[][], opts: SheetOptions, layout: Layout): string {
   const cols = opts.colWidths?.length
     ? `<cols>${opts.colWidths.map((w, i) => `<col min="${i + 1}" max="${i + 1}" width="${w}" customWidth="1"/>`).join('')}</cols>`
     : '';
   const body = rows.map((row, r) => {
-    const style = bold.has(r) ? ' s="1"' : '';
+    const s = layout.rowStyles.get(r);
+    const style = s ? ` s="${s}"` : '';
     const cells = row.map((v, c) => {
       if (v === null || v === undefined || v === '') return '';
       const ref = `${colName(c)}${r + 1}`;
       if (typeof v === 'number' && Number.isFinite(v)) return `<c r="${ref}"${style}><v>${v}</v></c>`;
       return `<c r="${ref}"${style} t="inlineStr"><is><t xml:space="preserve">${esc(String(v))}</t></is></c>`;
     }).join('');
-    return `<row r="${r + 1}">${cells}</row>`;
+    const ht = layout.rowHeights.get(r);
+    return `<row r="${r + 1}"${ht ? ` ht="${ht}" customHeight="1"` : ''}>${cells}</row>`;
   }).join('');
+  const merges = layout.merges.length
+    ? `<mergeCells count="${layout.merges.length}">${layout.merges.map(m => `<mergeCell ref="${m}"/>`).join('')}</mergeCells>`
+    : '';
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">${cols}<sheetData>${body}</sheetData></worksheet>`;
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">${cols}<sheetData>${body}</sheetData>${merges}</worksheet>`;
+}
+
+// Prepends the letterhead rows, each merged across the sheet's columns and
+// centred, and shifts the caller's bold rows down past them.
+function withLetterhead(rows: Cell[][], opts: SheetOptions): { rows: Cell[][]; layout: Layout } {
+  const layout: Layout = { rowStyles: new Map(), rowHeights: new Map(), merges: [] };
+  const head = opts.letterhead === false ? [] : [
+    // perLine: characters that fit per unit of column width; lineHt in pt.
+    { text: COMPANY.name,    style: S_TITLE,       perLine: 0.6,  lineHt: 21 },
+    { text: COMPANY.address, style: S_CENTER,      perLine: 0.85, lineHt: 16 },
+    { text: COMPANY.contact, style: S_CENTER,      perLine: 0.85, lineHt: 16 },
+    { text: COMPANY.pin,     style: S_CENTER_BOLD, perLine: 0.8,  lineHt: 16 },
+    { text: COMPANY.dealers, style: S_CENTER_WRAP, perLine: 1.0,  lineHt: 12 },
+  ];
+  if (head.length) {
+    const nCols = Math.max(opts.colWidths?.length ?? 0, ...rows.map(r => r.length), 1);
+    const lastCol = colName(nCols - 1);
+    // Every line wraps inside its merged cell, and Excel doesn't grow a
+    // merged row to fit, so size each row from a rough (generous) estimate
+    // of how many lines its text needs at the sheet's total width.
+    const totalWidth = (opts.colWidths ?? []).reduce((a, w) => a + w, 0) || nCols * 9;
+    head.forEach((h, i) => {
+      layout.rowStyles.set(i, h.style);
+      layout.merges.push(`A${i + 1}:${lastCol}${i + 1}`);
+      const lines = Math.max(1, Math.ceil(h.text.length / (totalWidth * h.perLine)));
+      layout.rowHeights.set(i, lines * h.lineHt + 2);
+    });
+  }
+  const offset = head.length ? head.length + 1 : 0;   // + a blank spacer row
+  for (const r of opts.boldRows ?? []) layout.rowStyles.set(r + offset, S_BOLD);
+  const headRows: Cell[][] = head.length ? [...head.map(h => [h.text]), []] : [];
+  return { rows: [...headRows, ...rows], layout };
 }
 
 function parts(rows: Cell[][], opts: SheetOptions): Record<string, string> {
+  const sheet = withLetterhead(rows, opts);
   const name = esc((opts.sheetName ?? 'Sheet1').replace(/[\\/?*[\]:]/g, ' ').slice(0, 31) || 'Sheet1');
   return {
     '[Content_Types].xml': `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -56,8 +106,8 @@ function parts(rows: Cell[][], opts: SheetOptions): Record<string, string> {
     'xl/_rels/workbook.xml.rels': `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>`,
     'xl/styles.xml': `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font></fonts><fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills><borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="2"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/></cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>`,
-    'xl/worksheets/sheet1.xml': sheetXml(rows, opts),
+<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="4"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="15"/><name val="Calibri"/></font><font><i/><sz val="9"/><name val="Calibri"/></font></fonts><fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills><borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="6"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/><xf numFmtId="0" fontId="2" fillId="0" borderId="0" xfId="0" applyFont="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0" applyAlignment="1"><alignment horizontal="center" vertical="top" wrapText="1"/></xf><xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1" applyAlignment="1"><alignment horizontal="center" vertical="top" wrapText="1"/></xf><xf numFmtId="0" fontId="3" fillId="0" borderId="0" xfId="0" applyFont="1" applyAlignment="1"><alignment horizontal="center" vertical="top" wrapText="1"/></xf></cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>`,
+    'xl/worksheets/sheet1.xml': sheetXml(sheet.rows, opts, sheet.layout),
   };
 }
 
