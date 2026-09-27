@@ -8,6 +8,7 @@ import type { StockMovement, Product } from '@/lib/types';
 import { SESSION_KEY, ROLE_KEY } from '@/lib/types';
 import AdminNavbar from '../components/AdminNavbar';
 import Toast, { type ToastState } from '../components/Toast';
+import DayCountPicker, { ymd, fmtYmd } from '../components/DayCountPicker';
 
 const MOVEMENT_TYPES = ['ALL', 'SALE', 'TRANSFER', 'ADJUSTMENT_IN', 'ADJUSTMENT_OUT', 'PURCHASE_IN', 'AUTO_DEDUCT', 'DAMAGED'];
 
@@ -85,6 +86,27 @@ function parseSaleTotal(reason: string | null): number | null {
   return isNaN(n) ? null : n;
 }
 
+// Supabase caps a select at 1000 rows, so page through a query.
+async function fetchAll<T>(page: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>) {
+  const PAGE = 1000;
+  const out: T[] = [];
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await page(from, from + PAGE - 1);
+    if (error) return { data: out, error };
+    out.push(...(data ?? []));
+    if ((data ?? []).length < PAGE) return { data: out, error: null };
+  }
+}
+
+// [start of `from` day, start of the day after `to`) as ISO instants, in
+// the browser's local time.
+function dayRange(from: string, to: string): [string, string] {
+  const start = new Date(`${from}T00:00:00`);
+  const end = new Date(`${to}T00:00:00`);
+  end.setDate(end.getDate() + 1);
+  return [start.toISOString(), end.toISOString()];
+}
+
 function HistoryDashboard() {
   const [movements, setMovements] = useState<StockMovement[]>([]);
   const [products,  setProducts]  = useState<Product[]>([]);
@@ -99,19 +121,52 @@ function HistoryDashboard() {
   const toastId = useRef(0);
   const router = useRouter();
 
+  // Date range shown — defaults to today.
+  const [fromDate, setFromDate] = useState(() => ymd(new Date()));
+  const [toDate,   setToDate]   = useState(() => ymd(new Date()));
+
+  // Movements per local day across all history, for the calendar badges.
+  const [dayCounts, setDayCounts] = useState<Record<string, number>>({});
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const [mov, req] = await Promise.all([
+        fetchAll<{ movement_at: string | null }>((a, b) =>
+          supabase.from('stock_movements').select('movement_at').order('movement_id').range(a, b)),
+        fetchAll<{ requested_at: string | null }>((a, b) =>
+          supabase.from('stock_requests').select('requested_at').neq('status', 'PENDING').order('request_id').range(a, b)),
+      ]);
+      if (cancelled) return;
+      const counts: Record<string, number> = {};
+      for (const iso of [...mov.data.map(r => r.movement_at), ...req.data.map(r => r.requested_at)]) {
+        if (!iso) continue;
+        const k = ymd(new Date(iso));
+        counts[k] = (counts[k] ?? 0) + 1;
+      }
+      setDayCounts(counts);
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
   useEffect(() => {
     const ok   = typeof window !== 'undefined' && localStorage.getItem(SESSION_KEY) === '1';
     const role = (typeof window !== 'undefined' ? localStorage.getItem(ROLE_KEY) : null) ?? 'admin';
     if (!ok || role !== 'admin') router.replace('/admin');
   }, [router]);
 
-  const firstLoad = useRef(true);
   const load = useCallback(async () => {
-    if (firstLoad.current) setLoading(true);
+    setLoading(true);
     setLoadError(null);
+    const [start, end] = dayRange(fromDate, toDate);
     const [movRes, reqRes, prodRes, locRes] = await Promise.all([
-      supabase.from('stock_movements').select('movement_id, product_id, from_location_id, to_location_id, quantity, movement_type, reason, notes, movement_at').order('movement_id', { ascending: false }).limit(500),
-      supabase.from('stock_requests').select('*').neq('status', 'PENDING').order('request_id', { ascending: false }).limit(500),
+      fetchAll<Record<string, unknown>>((a, b) => supabase.from('stock_movements')
+        .select('movement_id, product_id, from_location_id, to_location_id, quantity, movement_type, reason, notes, movement_at')
+        .gte('movement_at', start).lt('movement_at', end)
+        .order('movement_id', { ascending: false }).range(a, b)),
+      fetchAll<Record<string, unknown>>((a, b) => supabase.from('stock_requests')
+        .select('*').neq('status', 'PENDING')
+        .gte('requested_at', start).lt('requested_at', end)
+        .order('request_id', { ascending: false }).range(a, b)),
       supabase.from('products').select('product_id, product_name, stock_keeping_unit, type, brand, model, unit_of_measure, display_unit, pieces_per_box, selling_price, buying_price, box_selling_price'),
       supabase.from('locations').select('location_id, location_name'),
     ]);
@@ -160,9 +215,8 @@ function HistoryDashboard() {
       setLoadError(prodRes.error.message);
       setToast({ msg: 'Failed to load products: ' + prodRes.error.message, type: 'error', id: ++toastId.current });
     }
-    firstLoad.current = false;
     setLoading(false);
-  }, []);
+  }, [fromDate, toDate]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -174,6 +228,12 @@ function HistoryDashboard() {
     localStorage.removeItem(SESSION_KEY);
     window.location.href = '/admin';
   }
+
+  const today = ymd(new Date());
+  const isToday = fromDate === today && toDate === today;
+  const rangeLabel = isToday ? 'Today'
+    : fromDate === toDate ? fmtYmd(fromDate)
+    : `${fmtYmd(fromDate)} – ${fmtYmd(toDate)}`;
 
   const filtered = movements.filter(m => {
     if (typeFilter !== 'ALL' && m.movement_type !== typeFilter) return false;
@@ -204,7 +264,29 @@ function HistoryDashboard() {
 
         <div className="pt-5 pb-3">
           <h2 className="text-base font-bold text-slate-100">Stock Movement History</h2>
-          <p className="text-xs text-muted mt-0.5">{filtered.length} records</p>
+          <p className="text-xs text-muted mt-0.5">{filtered.length} records · {rangeLabel}</p>
+        </div>
+
+        <div className="flex flex-wrap items-end gap-2 mb-3">
+          <DayCountPicker
+            label="From"
+            value={fromDate}
+            max={toDate}
+            counts={dayCounts}
+            onChange={setFromDate}
+          />
+          <DayCountPicker
+            label="To"
+            value={toDate}
+            min={fromDate}
+            counts={dayCounts}
+            onChange={setToDate}
+          />
+          <button
+            onClick={() => { const t = ymd(new Date()); setFromDate(t); setToDate(t); }}
+            disabled={isToday}
+            className="px-4 py-2.5 rounded-xl bg-surface border border-white/8 text-xs font-bold text-slate-300 hover:border-white/20 disabled:opacity-40"
+          >Today</button>
         </div>
 
         <div className="relative mb-3">
@@ -240,7 +322,14 @@ function HistoryDashboard() {
         ) : filtered.length === 0 ? (
           <div className="text-center py-20 text-muted">
             <div className="text-4xl mb-3">📋</div>
-            <p className="text-sm">No movements found</p>
+            <p className="text-sm">
+              {movements.length === 0
+                ? (isToday ? 'No stock movements today yet.' : `No stock movements ${fromDate === toDate ? `on ${fmtYmd(fromDate)}` : `between ${fmtYmd(fromDate)} and ${fmtYmd(toDate)}`}.`)
+                : 'No movements match your search or filter.'}
+            </p>
+            {movements.length === 0 && (
+              <p className="text-xs mt-1">Pick other dates above — days with movements show a count in the calendar.</p>
+            )}
             {loadError && (
               <p className="mt-3 text-xs text-danger/80 break-words px-4">{loadError}</p>
             )}
