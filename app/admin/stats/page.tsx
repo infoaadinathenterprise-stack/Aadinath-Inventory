@@ -6,6 +6,7 @@ import { supabase } from '@/lib/supabase';
 import { useProducts } from '@/lib/hooks/useProducts';
 import { SESSION_KEY, USER_KEY, ROLE_KEY, type Supplier, type Product } from '@/lib/types';
 import AdminNavbar from '../components/AdminNavbar';
+import CompanyLetterhead from '../components/CompanyLetterhead';
 import { downloadXlsx } from '@/lib/xlsx';
 import { openOrderPdf, type OrderLine, type SavedOrder } from '@/lib/orderPdf';
 
@@ -792,10 +793,10 @@ function StatsDashboard() {
         </div>
 
         <div className="max-w-3xl mx-auto px-6 py-8 text-black">
-          <div className="flex items-start justify-between gap-4 border-b-2 border-black pb-3 mb-5">
+          <CompanyLetterhead />
+          <div className="flex items-start justify-between gap-4 border-b border-gray-400 pb-3 mb-5">
             <div>
-              <h1 className="text-xl font-bold">Jay Aadinath Enterprises</h1>
-              <p className="text-sm font-semibold uppercase tracking-wide text-gray-700">Purchase Order</p>
+              <p className="text-base font-bold uppercase tracking-wide">Purchase Order</p>
             </div>
             <div className="text-right text-sm">
               <p>Date: {new Date().toLocaleDateString('en-KE', { day: '2-digit', month: 'short', year: 'numeric' })}</p>

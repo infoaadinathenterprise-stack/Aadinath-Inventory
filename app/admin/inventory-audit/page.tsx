@@ -8,6 +8,7 @@ import { SESSION_KEY, ROLE_KEY, USER_KEY, DEFAULT_COMPANY_ID, type UserRole } fr
 import type { Product } from '@/lib/types';
 import { stockTxn, type StockOp } from '@/lib/stockActions';
 import AdminNavbar from '../components/AdminNavbar';
+import CompanyLetterhead from '../components/CompanyLetterhead';
 import Toast, { type ToastState } from '../components/Toast';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -462,9 +463,9 @@ function InventoryAuditDashboard() {
 
         {/* Header */}
         <div style={{ fontFamily: 'Arial, sans-serif', fontSize: '12px', color: '#111' }}>
-          <div style={{ textAlign: 'center', borderBottom: '2px solid #333', paddingBottom: '10px', marginBottom: '12px' }}>
-            <p style={{ fontSize: '18px', fontWeight: 'bold', margin: 0 }}>Jay Aadinath Enterprises LTD</p>
-            <p style={{ fontSize: '13px', margin: '3px 0 0' }}>Inventory Count Sheet — {locName}</p>
+          <CompanyLetterhead />
+          <div style={{ textAlign: 'center', borderBottom: '1px solid #999', paddingBottom: '8px', marginBottom: '12px' }}>
+            <p style={{ fontSize: '14px', fontWeight: 'bold', margin: 0 }}>Inventory Count Sheet — {locName}</p>
             <p style={{ fontSize: '11px', color: '#555', margin: '4px 0 0' }}>Date: {today}</p>
           </div>
 

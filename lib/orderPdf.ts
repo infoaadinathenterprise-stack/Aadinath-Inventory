@@ -1,6 +1,8 @@
 // Builds a purchase-order PDF from the plain data saved in purchase_orders,
 // so the stored order is just text and the PDF is re-created on demand.
 
+import { COMPANY } from './company';
+
 export interface OrderLine {
   product_id:   number | null;
   product_name: string;
@@ -37,21 +39,36 @@ export async function buildOrderPdf(order: SavedOrder): Promise<Blob> {
   const left = 15, right = pageW - 15;
   const colNo = left, colName = left + 10, colPrice = right - 55, colQty = right - 28, colTotal = right;
 
+  // ── Letterhead ──
+  const mid = pageW / 2;
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(16);
-  doc.text('Jay Aadinath Enterprises', left, 20);
-  doc.setFontSize(10);
-  doc.text('PURCHASE ORDER', left, 26);
-
+  doc.setFontSize(15);
+  doc.text(COMPANY.name, mid, 16, { align: 'center' });
   doc.setFont('helvetica', 'normal');
-  doc.text(`Order no: ${order.order_no}`, right, 20, { align: 'right' });
-  doc.text(`Date: ${fmtDate(order.order_date)}`, right, 25, { align: 'right' });
-  if (order.supplier_name) doc.text(`To: ${order.supplier_name}`, right, 30, { align: 'right' });
-
+  doc.setFontSize(9);
+  doc.text(COMPANY.address, mid, 21.5, { align: 'center' });
+  doc.text(COMPANY.contact, mid, 26, { align: 'center' });
+  doc.setFont('helvetica', 'italic');
+  doc.setFontSize(8);
+  const dealerLines: string[] = doc.splitTextToSize(COMPANY.dealers, right - left);
+  doc.text(dealerLines, mid, 31, { align: 'center' });
+  const headY = 31 + (dealerLines.length - 1) * 3.6 + 3;
   doc.setLineWidth(0.6);
-  doc.line(left, 34, right, 34);
+  doc.line(left, headY, right, headY);
 
-  let y = 42;
+  // ── Order details ──
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(11);
+  doc.text('PURCHASE ORDER', left, headY + 7);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(10);
+  doc.text(`Order no: ${order.order_no}`, right, headY + 7, { align: 'right' });
+  doc.text(`Date: ${fmtDate(order.order_date)}`, right, headY + 12, { align: 'right' });
+  if (order.supplier_name) doc.text(`To: ${order.supplier_name}`, right, headY + 17, { align: 'right' });
+  doc.setLineWidth(0.2);
+  doc.line(left, headY + 21, right, headY + 21);
+
+  let y = headY + 29;
   const header = () => {
     doc.setFont('helvetica', 'bold');
     doc.text('#', colNo, y);
