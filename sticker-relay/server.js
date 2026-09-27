@@ -17,13 +17,72 @@
 // relay address to whichever LAN address this prints on startup, and the
 // printer's own IP address (check the XB330B's network/WLAN settings menu
 // or print its self-test/config label to find it).
+//
+// USB instead of WiFi: run this on the PC the printer is plugged into, set the
+// relay address to localhost:8787 and the printer IP to "usb". Needs a print
+// queue named "XPrinter Label" (Generic / Text Only driver) on the printer's
+// USB port — override the name with USB_QUEUE=... if yours differs.
 
 const http = require('http');
 const net = require('net');
 const os = require('os');
+const fs = require('fs');
+const path = require('path');
+const { execFile } = require('child_process');
 
 const PORT = Number(process.env.PORT) || 8787;
 const GAP_MM = 2; // gap between die-cut labels; use 0 for continuous/black-mark stock
+
+// USB mode: set the printer IP on the Label Printer page to "usb" and the job
+// is spooled RAW to this Windows print queue (see raw-print.ps1), which sits
+// on the printer's USB port with the "Generic / Text Only" driver.
+const USB_QUEUE = process.env.USB_QUEUE || 'XPrinter Label';
+
+// 2-up rolls: 25 x 25 mm labels come two per row, so pairs of labels are
+// stitched side by side into one row-wide bitmap. Offsets are whole bytes
+// (8 dots = 1 mm at 203 dpi) so the raster can be copied row by row; they
+// were measured off a test print on the XB-370B, whose print origin is the
+// printhead's left edge rather than the roll's. shiftDots < 0 moves the print
+// up the label (TSPL SHIFT).
+const TWO_UP = {
+  widthMm: 25, heightMm: 25,
+  leftOffsetBytes: 6, rightOffsetBytes: 37, rowBytes: 63,
+  gapMm: 3, shiftDots: -32,
+};
+
+function expandTwoUp(jobs) {
+  const out = [];
+  const pending = [];
+  for (const job of jobs) {
+    if (job.widthMm !== TWO_UP.widthMm || job.heightMm !== TWO_UP.heightMm) { out.push(job); continue; }
+    for (let i = 0; i < Math.max(1, Number(job.copies) || 1); i++) pending.push(job);
+  }
+  for (let i = 0; i < pending.length; i += 2) {
+    const left = pending[i];
+    const right = pending[i + 1];
+    const { bytesPerRow, heightPx } = left;
+    const rowBytes = TWO_UP.rowBytes;
+    const row = Buffer.alloc(rowBytes * heightPx);
+    const leftRaster = Buffer.from(left.rasterBase64, 'base64');
+    const rightRaster = right ? Buffer.from(right.rasterBase64, 'base64') : null;
+    const rightOffset = TWO_UP.rightOffsetBytes;
+    for (let y = 0; y < heightPx; y++) {
+      leftRaster.copy(row, y * rowBytes + TWO_UP.leftOffsetBytes, y * bytesPerRow, (y + 1) * bytesPerRow);
+      if (rightRaster) rightRaster.copy(row, y * rowBytes + rightOffset, y * bytesPerRow, (y + 1) * bytesPerRow);
+    }
+    out.push({
+      widthMm: rowBytes, // 8 dots per mm at 203 dpi, so bytes == mm
+      heightMm: TWO_UP.heightMm,
+      bytesPerRow: rowBytes,
+      heightPx,
+      rasterBase64: row.toString('base64'),
+      copies: 1,
+      gapMm: TWO_UP.gapMm,
+      shiftDots: TWO_UP.shiftDots,
+    });
+  }
+  return out;
+}
 
 function lanAddresses() {
   const nets = os.networkInterfaces();
@@ -41,10 +100,12 @@ function buildTsplBuffer(job) {
   if (!widthMm || !heightMm || !bytesPerRow || !heightPx || !rasterBase64) {
     throw new Error('Malformed label job');
   }
-  const raster = Buffer.from(rasterBase64, 'base64');
+  // The page sets bit 1 for black; TSPL BITMAP prints 0 bits as black.
+  const raster = Buffer.from(rasterBase64, 'base64').map((b) => ~b & 0xff);
   const header = Buffer.from(
     `SIZE ${widthMm} mm,${heightMm} mm\r\n` +
-    `GAP ${GAP_MM} mm,0 mm\r\n` +
+    `GAP ${job.gapMm ?? GAP_MM} mm,0 mm\r\n` +
+    (job.shiftDots ? `SHIFT ${job.shiftDots}\r\n` : '') +
     `DIRECTION 1\r\n` +
     `CLS\r\n` +
     `BITMAP 0,0,${bytesPerRow},${heightPx},0,`,
@@ -70,6 +131,22 @@ function sendToPrinter(ip, port, buffers) {
     socket.on('error', (err) => {
       clearTimeout(timeout);
       reject(err);
+    });
+  });
+}
+
+function sendToUsb(buffers) {
+  const file = path.join(os.tmpdir(), `sticker-job-${Date.now()}.bin`);
+  fs.writeFileSync(file, Buffer.concat(buffers));
+  return new Promise((resolve, reject) => {
+    execFile('powershell.exe', [
+      '-NoProfile', '-ExecutionPolicy', 'Bypass',
+      '-File', path.join(__dirname, 'raw-print.ps1'),
+      '-Printer', USB_QUEUE, '-Path', file,
+    ], (err, stdout, stderr) => {
+      fs.unlink(file, () => {});
+      if (err) reject(new Error((stderr || err.message).trim()));
+      else resolve(stdout.trim());
     });
   });
 }
@@ -161,10 +238,13 @@ const server = http.createServer(async (req, res) => {
       if (!printerIp || !Array.isArray(jobs) || jobs.length === 0) {
         throw new Error('Missing printer IP or label jobs');
       }
-      const buffers = jobs.map(buildTsplBuffer);
-      await sendToPrinter(printerIp, Number(printerPort) || 9100, buffers);
+      const buffers = expandTwoUp(jobs).map(buildTsplBuffer);
+      const usb = String(printerIp).trim().toLowerCase() === 'usb';
+      if (usb) await sendToUsb(buffers);
+      else await sendToPrinter(printerIp, Number(printerPort) || 9100, buffers);
+      const target = usb ? `USB printer "${USB_QUEUE}"` : `${printerIp}:${Number(printerPort) || 9100}`;
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-      res.end(resultPage(true, `${jobs.length} label${jobs.length === 1 ? '' : 's'} sent to ${printerIp}:${Number(printerPort) || 9100}.`));
+      res.end(resultPage(true, `${jobs.length} label${jobs.length === 1 ? '' : 's'} sent to ${target}.`));
       return;
     }
 
