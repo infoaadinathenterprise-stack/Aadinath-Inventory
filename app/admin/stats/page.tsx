@@ -340,27 +340,36 @@ function StatsDashboard() {
   const [orderTo,     setOrderTo]     = useState('');
 
   // The date range is applied in the query, so it reaches past the newest
-  // 500 orders when looking further back.
-  async function loadOrders(from: string, to: string) {
-    setOrders(null);
-    setOrdersError(null);
-    let q = supabase.from('purchase_orders').select('*');
-    if (from) q = q.gte('order_date', from);
-    if (to)   q = q.lte('order_date', to);
-    const { data, error } = await q.order('order_id', { ascending: false }).limit(500);
-    if (error) { setOrdersError(error.message); return; }
-    setOrders((data ?? []) as SavedOrder[]);
-  }
+  // 500 orders when looking further back. Reloads whenever the range
+  // changes; a slower, older response is dropped so it can't overwrite
+  // the current range's results.
+  const [ordersReload, setOrdersReload] = useState(0);
+  useEffect(() => {
+    if (!ordersOpen) return;
+    let cancelled = false;
+    (async () => {
+      let q = supabase.from('purchase_orders').select('*');
+      if (orderFrom) q = q.gte('order_date', orderFrom);
+      if (orderTo)   q = q.lte('order_date', orderTo);
+      const { data, error } = await q.order('order_id', { ascending: false }).limit(500);
+      if (cancelled) return;
+      if (error) { setOrdersError(error.message); return; }
+      setOrdersError(null);
+      setOrders((data ?? []) as SavedOrder[]);
+    })();
+    return () => { cancelled = true; };
+  }, [ordersOpen, orderFrom, orderTo, ordersReload]);
 
   function openPreviousOrders() {
+    setOrders(null);
+    setOrdersReload(n => n + 1);
     setOrdersOpen(true);
-    loadOrders(orderFrom, orderTo);
   }
 
   function setOrderRange(from: string, to: string) {
+    setOrders(null);
     setOrderFrom(from);
     setOrderTo(to);
-    loadOrders(from, to);
   }
 
   const orderQuery = orderSearch.trim().toLowerCase();
@@ -705,7 +714,7 @@ function StatsDashboard() {
                 <span className="text-[10px] text-muted block mb-1">From</span>
                 <input
                   type="date" value={orderFrom} max={orderTo || undefined}
-                  onChange={e => setOrderRange(e.target.value, orderTo)}
+                  onChange={e => { setOrders(null); setOrderFrom(e.target.value); }}
                   className="w-full px-3 py-2 rounded-xl bg-surface2 border border-white/10 text-sm text-slate-100 outline-none focus:border-teal/40"
                 />
               </label>
@@ -713,7 +722,7 @@ function StatsDashboard() {
                 <span className="text-[10px] text-muted block mb-1">To</span>
                 <input
                   type="date" value={orderTo} min={orderFrom || undefined}
-                  onChange={e => setOrderRange(orderFrom, e.target.value)}
+                  onChange={e => { setOrders(null); setOrderTo(e.target.value); }}
                   className="w-full px-3 py-2 rounded-xl bg-surface2 border border-white/10 text-sm text-slate-100 outline-none focus:border-teal/40"
                 />
               </label>
