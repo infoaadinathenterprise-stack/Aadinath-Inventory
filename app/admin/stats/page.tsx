@@ -336,14 +336,31 @@ function StatsDashboard() {
   const [orders,      setOrders]      = useState<SavedOrder[] | null>(null);
   const [ordersError, setOrdersError] = useState<string | null>(null);
   const [orderSearch, setOrderSearch] = useState('');
+  const [orderFrom,   setOrderFrom]   = useState('');   // yyyy-mm-dd, inclusive
+  const [orderTo,     setOrderTo]     = useState('');
 
-  async function openPreviousOrders() {
-    setOrdersOpen(true);
+  // The date range is applied in the query, so it reaches past the newest
+  // 500 orders when looking further back.
+  async function loadOrders(from: string, to: string) {
+    setOrders(null);
     setOrdersError(null);
-    const { data, error } = await supabase.from('purchase_orders')
-      .select('*').order('order_id', { ascending: false }).limit(500);
+    let q = supabase.from('purchase_orders').select('*');
+    if (from) q = q.gte('order_date', from);
+    if (to)   q = q.lte('order_date', to);
+    const { data, error } = await q.order('order_id', { ascending: false }).limit(500);
     if (error) { setOrdersError(error.message); return; }
     setOrders((data ?? []) as SavedOrder[]);
+  }
+
+  function openPreviousOrders() {
+    setOrdersOpen(true);
+    loadOrders(orderFrom, orderTo);
+  }
+
+  function setOrderRange(from: string, to: string) {
+    setOrderFrom(from);
+    setOrderTo(to);
+    loadOrders(from, to);
   }
 
   const orderQuery = orderSearch.trim().toLowerCase();
@@ -351,6 +368,48 @@ function StatsDashboard() {
     || o.order_no.toLowerCase().includes(orderQuery)
     || o.order_no.replace(/^PO-0*/i, '') === orderQuery.replace(/^(po-?)?0*/i, '')
     || (o.supplier_name ?? '').toLowerCase().includes(orderQuery));
+  const visibleOrdersTotal = visibleOrders.reduce((s, o) => s + Number(o.total_amount), 0);
+
+  // ── Last time each product's stock changed (for the out-of-stock list) ──
+  // stock_by_location stamps updated_at on every stock change, so the
+  // latest one across locations is when the product last moved. Products
+  // that never had stock fall back to when they were created.
+  const [stockChangedAt, setStockChangedAt] = useState<Map<number, string>>(new Map());
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const PAGE = 1000;
+      const latest = new Map<number, string>();
+      for (let from = 0; ; from += PAGE) {
+        const { data, error } = await supabase.from('stock_by_location')
+          .select('product_id, location_id, company_id, updated_at')
+          .not('updated_at', 'is', null)
+          .order('product_id').order('location_id').order('company_id')
+          .range(from, from + PAGE - 1);
+        if (error || cancelled) return;
+        for (const r of (data ?? []) as { product_id: number; updated_at: string }[]) {
+          const prev = latest.get(r.product_id);
+          if (!prev || r.updated_at > prev) latest.set(r.product_id, r.updated_at);
+        }
+        if ((data ?? []).length < PAGE) break;
+      }
+      if (!cancelled) setStockChangedAt(latest);
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  function lastChanged(p: Product): string | null {
+    const iso = stockChangedAt.get(p.product_id) ?? (p as Product & { created_at?: string | null }).created_at ?? null;
+    if (!iso) return null;
+    return new Date(iso).toLocaleDateString('en-KE', { day: '2-digit', month: 'short', year: 'numeric' });
+  }
+
+  // ── Running total for the order being built ──
+  // Covers the checked rows, or the whole list when nothing is checked —
+  // the same rows Print / Excel export.
+  const totalRows = activeItems.filter(p => activeSelected.size === 0 || activeSelected.has(p.product_id));
+  const totalQty    = totalRows.reduce((s, p) => s + toNum(orderInputs[p.product_id]?.qty), 0);
+  const totalAmount = totalRows.reduce((s, p) => s + toNum(orderInputs[p.product_id]?.price) * toNum(orderInputs[p.product_id]?.qty), 0);
 
   // Products in the current list that we've also bought from another
   // supplier (with a supplier picked), or from 2+ suppliers (no pick).
@@ -501,7 +560,10 @@ function StatsDashboard() {
                             </td>
                             <td className="px-2 py-2 cursor-pointer" onClick={() => toggleSelect(p.product_id)}>
                               <span className="block text-slate-200">{p.product_name}</span>
-                              <span className="block text-[10px] text-muted">In stock: {stock}</span>
+                              <span className="block text-[10px] text-muted">
+                                In stock: {stock}
+                                {activeList === 'out_of_stock' && lastChanged(p) && <> · Last changed: {lastChanged(p)}</>}
+                              </span>
                             </td>
                             <td className="px-2 py-2 text-right tabular-nums whitespace-nowrap">
                               {last?.price != null ? (
@@ -538,6 +600,20 @@ function StatsDashboard() {
                       })}
                     </tbody>
                   ))}
+                  <tfoot className="sticky bottom-0 z-10 bg-surface">
+                    <tr className="border-t-2 border-white/15 text-sm font-bold">
+                      <td className="px-3 py-2.5"></td>
+                      <td className="px-2 py-2.5 text-slate-100">
+                        Total
+                        <span className="block text-[10px] font-normal text-muted">
+                          {activeSelected.size > 0 ? `${activeSelected.size} checked` : `All ${activeItems.length} in list`}
+                        </span>
+                      </td>
+                      <td className="px-2 py-2.5"></td>
+                      <td className="px-2 py-2.5 text-right tabular-nums text-gold whitespace-nowrap">{fmtKsh(totalAmount)}</td>
+                      <td className="px-3 py-2.5 text-right tabular-nums text-slate-100">{totalQty.toLocaleString('en-KE')}</td>
+                    </tr>
+                  </tfoot>
                 </table>
               )}
             </div>
@@ -623,6 +699,34 @@ function StatsDashboard() {
               aria-label="Search orders"
               className="w-full px-3 py-2.5 rounded-xl bg-surface2 border border-white/10 text-sm text-slate-100 outline-none focus:border-teal/40"
             />
+            <div className="flex flex-wrap items-end gap-2 mt-2">
+              <label className="flex-1 min-w-32">
+                <span className="text-[10px] text-muted block mb-1">From</span>
+                <input
+                  type="date" value={orderFrom} max={orderTo || undefined}
+                  onChange={e => setOrderRange(e.target.value, orderTo)}
+                  className="w-full px-3 py-2 rounded-xl bg-surface2 border border-white/10 text-sm text-slate-100 outline-none focus:border-teal/40"
+                />
+              </label>
+              <label className="flex-1 min-w-32">
+                <span className="text-[10px] text-muted block mb-1">To</span>
+                <input
+                  type="date" value={orderTo} min={orderFrom || undefined}
+                  onChange={e => setOrderRange(orderFrom, e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl bg-surface2 border border-white/10 text-sm text-slate-100 outline-none focus:border-teal/40"
+                />
+              </label>
+              <button
+                onClick={() => setOrderRange('', '')}
+                disabled={!orderFrom && !orderTo}
+                className="px-3 py-2 rounded-xl bg-surface2 border border-white/10 text-slate-300 text-xs font-bold hover:border-white/25 disabled:opacity-40"
+              >Clear dates</button>
+            </div>
+            {orders && orders.length > 0 && (
+              <p className="text-[11px] text-muted mt-2">
+                {visibleOrders.length} order{visibleOrders.length === 1 ? '' : 's'} · Total {fmtKsh(visibleOrdersTotal)}
+              </p>
+            )}
           </div>
           <div className="flex-1 overflow-y-auto px-5 pb-5">
             {ordersError ? (
