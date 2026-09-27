@@ -256,7 +256,8 @@ function StatsDashboard() {
 
   // ── Add a product that isn't in the database yet ──
   // Saved with just its name; the rest (type, brand, prices) is filled in
-  // later from the inventory tab, which also generates its SKU.
+  // later from the inventory tab, which also generates its SKU. `type` is
+  // required, so it starts as a placeholder group until then.
   const [newName, setNewName] = useState('');
   const [adding,  setAdding]  = useState(false);
 
@@ -275,7 +276,7 @@ function StatsDashboard() {
     }
     setAdding(true);
     const { data, error } = await supabase.from('products')
-      .insert({ product_name: name, unit_of_measure: 'Piece', unit_type: 'piece', reorder_level: 0, active_status: true })
+      .insert({ product_name: name, type: 'New Product', unit_of_measure: 'Piece', unit_type: 'piece', reorder_level: 0, active_status: true })
       .select('product_id').single();
     setAdding(false);
     if (error || !data) { setNotice({ text: `Couldn't add "${name}": ${error?.message ?? 'no row returned'}`, error: true }); return; }
