@@ -746,7 +746,7 @@ function StatsDashboard() {
                 <div className="w-6 h-6 rounded-full border-2 border-teal border-t-transparent animate-spin" />
               </div>
             ) : visibleOrders.length === 0 ? (
-              <p className="text-sm text-muted py-10 text-center">{orders.length === 0 ? 'No orders placed yet.' : 'No order matches.'}</p>
+              <p className="text-sm text-muted py-10 text-center">{orders.length > 0 ? 'No order matches.' : orderFrom || orderTo ? 'No orders in these dates.' : 'No orders placed yet.'}</p>
             ) : (
               <ul className="rounded-2xl border border-white/8 divide-y divide-white/5">
                 {visibleOrders.map(o => (
