@@ -16,7 +16,7 @@ const ALL_LINKS = [
     emoji: t.emoji, label: t.label, href: `/admin?loc=${t.locationId}`, roles: ['admin', 'staff'] as UserRole[],
   })),
   { emoji: '🖼️', label: 'Images',    href: '/admin/images',            roles: ['admin'] as UserRole[] },
-  { emoji: '📝', label: 'Stock Checklist', href: '/admin/stats',     roles: ['admin'] as UserRole[] },
+  { emoji: '📦', label: 'Place an Order', href: '/admin/stats',      roles: ['admin'] as UserRole[] },
   { emoji: '🛒', label: 'Sales',     href: '/admin/sales',             roles: ['admin'] as UserRole[] },
   { emoji: '📋', label: 'History',   href: '/admin/history',           roles: ['admin'] as UserRole[] },
   { emoji: '🧾', label: 'Purchases', href: '/admin/purchases',         roles: ['admin'] as UserRole[] },

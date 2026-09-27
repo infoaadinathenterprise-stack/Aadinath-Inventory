@@ -7,6 +7,7 @@ import { useProducts } from '@/lib/hooks/useProducts';
 import { SESSION_KEY, USER_KEY, ROLE_KEY, type Supplier, type Product } from '@/lib/types';
 import AdminNavbar from '../components/AdminNavbar';
 import { downloadXlsx } from '@/lib/xlsx';
+import { openOrderPdf, type OrderLine, type SavedOrder } from '@/lib/orderPdf';
 
 // One purchase_items row flattened with its purchase's supplier/date.
 interface PurchaseRecord {
@@ -100,7 +101,7 @@ export default function StatsPage() {
 }
 
 function StatsDashboard() {
-  const { products, locations, stockByLoc, boxByLoc, loading } = useProducts();
+  const { products, locations, stockByLoc, boxByLoc, loading, refresh } = useProducts();
 
   function handleLogout() {
     localStorage.removeItem(SESSION_KEY);
@@ -188,7 +189,12 @@ function StatsDashboard() {
   const inStockAll    = products.filter(p => totalForProduct(p.product_id, p.pieces_per_box ?? 0) > 0);
   const outOfStockAll = products.filter(p => totalForProduct(p.product_id, p.pieces_per_box ?? 0) === 0);
 
-  const bySupplier = (list: Product[]) => supplierActive ? list.filter(p => lastBySupplier.get(p.product_id)?.has(selKey)) : list;
+  // Products typed in on this page have no purchase history yet, so they
+  // stay visible whichever supplier is picked.
+  const [addedIds, setAddedIds] = useState<Set<number>>(new Set());
+  const bySupplier = (list: Product[]) => supplierActive
+    ? list.filter(p => addedIds.has(p.product_id) || lastBySupplier.get(p.product_id)?.has(selKey))
+    : list;
 
   const inStockList    = bySupplier(inStockAll).filter(p => !lowOnly || totalForProduct(p.product_id, p.pieces_per_box ?? 0) <= (p.reorder_level ?? 0));
   const outOfStockList = bySupplier(outOfStockAll);
@@ -241,6 +247,110 @@ function StatsDashboard() {
     });
   }
 
+  const [notice, setNotice] = useState<{ text: string; error?: boolean } | null>(null);
+  useEffect(() => {
+    if (!notice) return;
+    const id = setTimeout(() => setNotice(null), 4000);
+    return () => clearTimeout(id);
+  }, [notice]);
+
+  // ── Add a product that isn't in the database yet ──
+  // Saved with just its name; the rest (type, brand, prices) is filled in
+  // later from the inventory tab, which also generates its SKU.
+  const [newName, setNewName] = useState('');
+  const [adding,  setAdding]  = useState(false);
+
+  async function addManualProduct() {
+    const name = newName.trim().replace(/\s+/g, ' ');
+    if (!name) return;
+    const existing = products.find(p => p.product_name.trim().toLowerCase() === name.toLowerCase());
+    if (existing) {
+      const inStock = totalForProduct(existing.product_id, existing.pieces_per_box ?? 0) > 0;
+      setActiveList(inStock ? 'in_stock' : 'out_of_stock');
+      (inStock ? setSelectedIn : setSelectedOut)(prev => new Set(prev).add(existing.product_id));
+      setAddedIds(prev => new Set(prev).add(existing.product_id));
+      setNewName('');
+      setNotice({ text: `"${existing.product_name}" is already on file — ticked it for you.` });
+      return;
+    }
+    setAdding(true);
+    const { data, error } = await supabase.from('products')
+      .insert({ product_name: name, unit_of_measure: 'Piece', unit_type: 'piece', reorder_level: 0, active_status: true })
+      .select('product_id').single();
+    setAdding(false);
+    if (error || !data) { setNotice({ text: `Couldn't add "${name}": ${error?.message ?? 'no row returned'}`, error: true }); return; }
+    const pid = (data as { product_id: number }).product_id;
+    setAddedIds(prev => new Set(prev).add(pid));
+    setSelectedOut(prev => new Set(prev).add(pid));
+    setActiveList('out_of_stock');
+    setNewName('');
+    refresh();
+    setNotice({ text: `Added "${name}". Fill in its details from the inventory tab later to give it a SKU.` });
+  }
+
+  // ── Place order: save it, then show its PDF ──
+  const [placing, setPlacing] = useState(false);
+
+  async function placeOrder() {
+    const items = activeItems
+      .filter(p => activeSelected.has(p.product_id))
+      .sort((a, b) => a.product_name.localeCompare(b.product_name));
+    if (items.length === 0) { setNotice({ text: 'Tick the products to order first.', error: true }); return; }
+    const lines: OrderLine[] = items.map(p => ({
+      product_id:   p.product_id,
+      product_name: p.product_name,
+      price:        toNum(orderInputs[p.product_id]?.price),
+      qty:          toNum(orderInputs[p.product_id]?.qty),
+    }));
+    const total = lines.reduce((s, l) => s + l.price * l.qty, 0);
+    const pdfWin = window.open('', '_blank');
+    setPlacing(true);
+    const { data, error } = await supabase.from('purchase_orders').insert({
+      supplier_id:   supplierActive ? supplierId : null,
+      supplier_name: selSupplierName,
+      created_by:    localStorage.getItem(USER_KEY),
+      items:         lines,
+      total_amount:  total,
+    }).select('*').single();
+    setPlacing(false);
+    if (error || !data) {
+      pdfWin?.close();
+      setNotice({ text: `Couldn't save the order: ${error?.message ?? 'no row returned'}`, error: true });
+      return;
+    }
+    const order = data as SavedOrder;
+    setOrders(prev => prev ? [order, ...prev] : prev);
+    setActiveSelected(new Set());
+    setOrderInputs(prev => {
+      const next = { ...prev };
+      for (const p of items) delete next[p.product_id];
+      return next;
+    });
+    setNotice({ text: `Order ${order.order_no} saved.` });
+    await openOrderPdf(order, pdfWin);
+  }
+
+  // ── Previous orders ──
+  const [ordersOpen,  setOrdersOpen]  = useState(false);
+  const [orders,      setOrders]      = useState<SavedOrder[] | null>(null);
+  const [ordersError, setOrdersError] = useState<string | null>(null);
+  const [orderSearch, setOrderSearch] = useState('');
+
+  async function openPreviousOrders() {
+    setOrdersOpen(true);
+    setOrdersError(null);
+    const { data, error } = await supabase.from('purchase_orders')
+      .select('*').order('order_id', { ascending: false }).limit(500);
+    if (error) { setOrdersError(error.message); return; }
+    setOrders((data ?? []) as SavedOrder[]);
+  }
+
+  const orderQuery = orderSearch.trim().toLowerCase();
+  const visibleOrders = (orders ?? []).filter(o => !orderQuery
+    || o.order_no.toLowerCase().includes(orderQuery)
+    || o.order_no.replace(/^PO-0*/i, '') === orderQuery.replace(/^(po-?)?0*/i, '')
+    || (o.supplier_name ?? '').toLowerCase().includes(orderQuery));
+
   // Products in the current list that we've also bought from another
   // supplier (with a supplier picked), or from 2+ suppliers (no pick).
   const commonProducts = activeItems
@@ -261,9 +371,17 @@ function StatsDashboard() {
     <div className="print-hide">
       <AdminNavbar onLogout={handleLogout} />
       <main className="pt-14 max-w-7xl mx-auto w-full px-4 pb-10">
-        <div className="pt-5 pb-3">
-          <h2 className="text-base font-bold text-slate-100">Stock Checklist</h2>
-          <p className="text-xs text-muted mt-0.5">Pick a supplier, tick products, enter the new price and quantity, then generate an order PDF. Blank price or quantity prints as 0.</p>
+        <div className="pt-5 pb-3 flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="text-base font-bold text-slate-100">Place an Order</h2>
+            <p className="text-xs text-muted mt-0.5">Pick a supplier, tick products, enter the new price and quantity, then place the order. Blank price or quantity counts as 0.</p>
+          </div>
+          <button
+            onClick={openPreviousOrders}
+            className="shrink-0 px-4 py-2.5 rounded-xl bg-surface2 border border-white/10 text-slate-100 text-xs font-bold hover:border-teal/40 transition-colors"
+          >
+            🧾 Previous Orders
+          </button>
         </div>
 
         {/* ── Supplier filter ──────────────────────────────────────── */}
@@ -305,15 +423,42 @@ function StatsDashboard() {
               >In Stock ({inStockList.length})</button>
             </div>
 
+            <form
+              onSubmit={e => { e.preventDefault(); addManualProduct(); }}
+              className="flex flex-wrap items-center gap-2 mb-3"
+            >
+              <input
+                value={newName}
+                onChange={e => setNewName(e.target.value)}
+                placeholder="Buying something new? Type its name…"
+                aria-label="New product name"
+                className="flex-1 min-w-56 px-3 py-2.5 rounded-xl bg-surface2 border border-white/10 text-sm text-slate-100 outline-none focus:border-teal/40"
+              />
+              <button
+                type="submit"
+                disabled={!newName.trim() || adding}
+                className="px-4 py-2.5 rounded-xl bg-teal/15 border border-teal/30 text-teal text-xs font-bold hover:bg-teal/25 transition-all disabled:opacity-40"
+              >
+                {adding ? 'Adding…' : '➕ Add product'}
+              </button>
+            </form>
+
             <div className="flex items-center justify-between mb-2 gap-3">
               <p className="text-[11px] text-muted">
                 {activeSelected.size > 0
-                  ? `${activeSelected.size} checked — only these go in the PDF`
-                  : 'Nothing checked — the PDF will include everything below'}
+                  ? `${activeSelected.size} checked — only these go in the order`
+                  : 'Nothing checked — Print / Excel will include everything below'}
               </p>
-              <div className="flex gap-3 shrink-0">
-                <button onClick={() => setActiveSelected(new Set(activeItems.map(i => i.product_id)))} className="text-[11px] font-semibold text-teal hover:underline">Select all</button>
-                <button onClick={() => setActiveSelected(new Set())} className="text-[11px] font-semibold text-muted hover:underline">Clear</button>
+              <div className="flex gap-2 shrink-0">
+                <button
+                  onClick={() => setActiveSelected(new Set(activeItems.map(i => i.product_id)))}
+                  className="px-3 py-1.5 rounded-lg bg-teal/15 border border-teal/30 text-teal text-[11px] font-bold hover:bg-teal/25 transition-all"
+                >Select all</button>
+                <button
+                  onClick={() => setActiveSelected(new Set())}
+                  disabled={activeSelected.size === 0}
+                  className="px-3 py-1.5 rounded-lg bg-surface2 border border-white/10 text-slate-300 text-[11px] font-bold hover:border-white/25 transition-all disabled:opacity-40"
+                >Clear</button>
               </div>
             </div>
 
@@ -401,6 +546,13 @@ function StatsDashboard() {
                 {activeSelected.size > 0 ? `${activeSelected.size} checked` : 'All in list'} · Product, Price, Quantity
               </span>
               <button
+                onClick={placeOrder}
+                disabled={activeSelected.size === 0 || placing}
+                className="px-4 py-2.5 rounded-xl btn-primary text-xs font-bold transition-all disabled:opacity-40"
+              >
+                {placing ? 'Saving…' : '📦 Place Order'}
+              </button>
+              <button
                 onClick={generatePdf}
                 disabled={activeItems.length === 0}
                 className="px-4 py-2.5 rounded-xl bg-teal/15 border border-teal/30 text-teal text-xs font-bold hover:bg-teal/25 transition-all disabled:opacity-40"
@@ -451,6 +603,66 @@ function StatsDashboard() {
         )}
       </main>
     </div>
+
+    {ordersOpen && (
+      <div className="print-hide fixed inset-0 z-150 bg-black/70 backdrop-blur-sm flex items-end sm:items-center justify-center" onClick={() => setOrdersOpen(false)}>
+        <div
+          className="w-full max-w-2xl max-h-[85vh] flex flex-col bg-surface border border-white/10 rounded-t-3xl sm:rounded-3xl"
+          onClick={e => e.stopPropagation()}
+        >
+          <div className="px-5 pt-5 pb-3 flex items-center justify-between gap-3">
+            <h3 className="text-base font-bold text-slate-100">🧾 Previous Orders</h3>
+            <button onClick={() => setOrdersOpen(false)} className="px-3 py-1.5 rounded-lg bg-surface2 border border-white/10 text-slate-300 text-xs font-bold hover:border-white/25">Close</button>
+          </div>
+          <div className="px-5 pb-3">
+            <input
+              value={orderSearch}
+              onChange={e => setOrderSearch(e.target.value)}
+              placeholder="Search by order no (e.g. PO-0012 or 12) or supplier…"
+              aria-label="Search orders"
+              className="w-full px-3 py-2.5 rounded-xl bg-surface2 border border-white/10 text-sm text-slate-100 outline-none focus:border-teal/40"
+            />
+          </div>
+          <div className="flex-1 overflow-y-auto px-5 pb-5">
+            {ordersError ? (
+              <p className="text-xs text-danger py-6 text-center">Couldn&apos;t load orders: {ordersError}</p>
+            ) : orders === null ? (
+              <div className="flex justify-center py-10">
+                <div className="w-6 h-6 rounded-full border-2 border-teal border-t-transparent animate-spin" />
+              </div>
+            ) : visibleOrders.length === 0 ? (
+              <p className="text-sm text-muted py-10 text-center">{orders.length === 0 ? 'No orders placed yet.' : 'No order matches.'}</p>
+            ) : (
+              <ul className="rounded-2xl border border-white/8 divide-y divide-white/5">
+                {visibleOrders.map(o => (
+                  <li key={o.order_id} className="px-3 py-2.5 flex items-center gap-3">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-bold text-slate-100 tabular-nums">{o.order_no}</p>
+                      <p className="text-[11px] text-muted truncate">
+                        {o.order_date} · {o.supplier_name ?? 'All suppliers'} · {o.items.length} item{o.items.length === 1 ? '' : 's'}
+                      </p>
+                    </div>
+                    <span className="text-xs font-semibold text-gold tabular-nums whitespace-nowrap">{fmtKsh(Number(o.total_amount))}</span>
+                    <button
+                      onClick={() => openOrderPdf(o)}
+                      className="px-3 py-1.5 rounded-lg bg-teal/15 border border-teal/30 text-teal text-[11px] font-bold hover:bg-teal/25 transition-all"
+                    >📄 PDF</button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </div>
+      </div>
+    )}
+
+    {notice && (
+      <div className={`print-hide fixed bottom-6 left-1/2 -translate-x-1/2 z-300 max-w-[90vw] px-5 py-2.5 rounded-xl border text-sm font-semibold shadow-2xl pointer-events-none ${
+        notice.error ? 'bg-danger/15 border-danger/30 text-danger' : 'bg-success/15 border-success/30 text-success'
+      }`}>
+        {notice.text}
+      </div>
+    )}
 
     {printItems && (
       <div className="fixed inset-0 z-200 bg-white overflow-y-auto">
