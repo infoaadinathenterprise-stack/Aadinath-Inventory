@@ -8,6 +8,7 @@ export default function CompanyLetterhead() {
       <p style={{ fontSize: '18px', fontWeight: 'bold', margin: 0, letterSpacing: '0.5px' }}>{COMPANY.name}</p>
       <p style={{ fontSize: '11px', margin: '3px 0 0' }}>{COMPANY.address}</p>
       <p style={{ fontSize: '11px', margin: '2px 0 0' }}>{COMPANY.contact}</p>
+      <p style={{ fontSize: '11px', fontWeight: 'bold', margin: '2px 0 0' }}>{COMPANY.pin}</p>
       <p style={{ fontSize: '10px', fontStyle: 'italic', color: '#333', margin: '4px 0 0', lineHeight: 1.35 }}>{COMPANY.dealers}</p>
     </div>
   );

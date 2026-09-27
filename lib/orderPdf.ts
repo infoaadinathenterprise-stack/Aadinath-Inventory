@@ -48,11 +48,13 @@ export async function buildOrderPdf(order: SavedOrder): Promise<Blob> {
   doc.setFontSize(9);
   doc.text(COMPANY.address, mid, 21.5, { align: 'center' });
   doc.text(COMPANY.contact, mid, 26, { align: 'center' });
+  doc.setFont('helvetica', 'bold');
+  doc.text(COMPANY.pin, mid, 30.5, { align: 'center' });
   doc.setFont('helvetica', 'italic');
   doc.setFontSize(8);
   const dealerLines: string[] = doc.splitTextToSize(COMPANY.dealers, right - left);
-  doc.text(dealerLines, mid, 31, { align: 'center' });
-  const headY = 31 + (dealerLines.length - 1) * 3.6 + 3;
+  doc.text(dealerLines, mid, 35.5, { align: 'center' });
+  const headY = 35.5 + (dealerLines.length - 1) * 3.6 + 3;
   doc.setLineWidth(0.6);
   doc.line(left, headY, right, headY);
 
