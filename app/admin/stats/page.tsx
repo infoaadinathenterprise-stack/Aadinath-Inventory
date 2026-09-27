@@ -371,9 +371,11 @@ function StatsDashboard() {
   const visibleOrdersTotal = visibleOrders.reduce((s, o) => s + Number(o.total_amount), 0);
 
   // ── Last time each product's stock changed (for the out-of-stock list) ──
-  // stock_by_location stamps updated_at on every stock change, so the
-  // latest one across locations is when the product last moved. Products
-  // that never had stock fall back to when they were created.
+  // Taken from the stock movement history (sales, purchases, transfers,
+  // adjustments), newest first, so the first movement seen per product is
+  // its latest. stock_by_location.updated_at isn't usable: the company
+  // merge (10_merge_companies.sql) re-stamped every row. Products with no
+  // movements fall back to when they were created.
   const [stockChangedAt, setStockChangedAt] = useState<Map<number, string>>(new Map());
   useEffect(() => {
     let cancelled = false;
@@ -381,15 +383,14 @@ function StatsDashboard() {
       const PAGE = 1000;
       const latest = new Map<number, string>();
       for (let from = 0; ; from += PAGE) {
-        const { data, error } = await supabase.from('stock_by_location')
-          .select('product_id, location_id, company_id, updated_at')
-          .not('updated_at', 'is', null)
-          .order('product_id').order('location_id').order('company_id')
+        const { data, error } = await supabase.from('stock_movements')
+          .select('product_id, movement_at')
+          .not('movement_at', 'is', null)
+          .order('movement_id', { ascending: false })
           .range(from, from + PAGE - 1);
         if (error || cancelled) return;
-        for (const r of (data ?? []) as { product_id: number; updated_at: string }[]) {
-          const prev = latest.get(r.product_id);
-          if (!prev || r.updated_at > prev) latest.set(r.product_id, r.updated_at);
+        for (const r of (data ?? []) as { product_id: number; movement_at: string }[]) {
+          if (!latest.has(r.product_id)) latest.set(r.product_id, r.movement_at);
         }
         if ((data ?? []).length < PAGE) break;
       }
