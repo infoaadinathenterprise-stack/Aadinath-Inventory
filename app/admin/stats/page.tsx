@@ -41,6 +41,12 @@ function toNum(s: string | undefined): number {
   return Number.isFinite(n) && n > 0 ? n : 0;
 }
 
+// Search box match: name, SKU, brand, model or category.
+function matchesQuery(p: Product, q: string): boolean {
+  return [p.product_name, p.stock_keeping_unit, p.brand, p.model, p.type]
+    .some(v => v?.toLowerCase().includes(q));
+}
+
 function groupByType(list: Product[]) {
   const map = new Map<string, Product[]>();
   for (const p of list) {
@@ -249,9 +255,21 @@ function StatsDashboard() {
   const outOfStockList = bySupplier(outOfStockAll);
 
   const activeItems       = activeList === 'in_stock' ? inStockList  : outOfStockList;
-  const activeGroups      = groupByType(activeItems);
   const activeSelected    = activeList === 'in_stock' ? selectedIn   : selectedOut;
   const setActiveSelected = activeList === 'in_stock' ? setSelectedIn : setSelectedOut;
+
+  // ── Search / add box ──
+  // Typing filters the table. Only when nothing matches anywhere does it
+  // offer to add the name as a new product. Checked rows stay in the
+  // order even while a search hides them.
+  const [newName, setNewName] = useState('');
+  const query        = newName.trim().replace(/\s+/g, ' ').toLowerCase();
+  const shownItems   = query ? activeItems.filter(p => matchesQuery(p, query)) : activeItems;
+  const activeGroups = groupByType(shownItems);
+  const otherList    = activeList === 'in_stock' ? outOfStockList : inStockList;
+  const otherMatches = query ? otherList.filter(p => matchesQuery(p, query)).length : 0;
+  const anyMatch     = query !== '' && products.some(p => matchesQuery(p, query));
+  const exactMatch   = query !== '' && products.some(p => p.product_name.trim().replace(/\s+/g, ' ').toLowerCase() === query);
 
   function toggleSelect(pid: number) {
     setActiveSelected(prev => {
@@ -304,10 +322,8 @@ function StatsDashboard() {
   }, [notice]);
 
   // ── Add a product that isn't in the database yet ──
-  // Saved with just its name; the rest (type, brand, prices) is filled in
-  // later from the inventory tab, which also generates its SKU. `type` is
-  // required, so it starts as a placeholder group until then.
-  const [newName, setNewName] = useState('');
+  // Saved with just its name as an order-only product (lib/orderOnly.ts).
+  // `type` is required, so it gets the placeholder type.
   const [adding,  setAdding]  = useState(false);
 
   async function addManualProduct() {
@@ -593,24 +609,58 @@ function StatsDashboard() {
             </div>
 
             <form
-              onSubmit={e => { e.preventDefault(); addManualProduct(); }}
-              className="flex flex-wrap items-center gap-2 mb-3"
+              // Enter on an exact name ticks that product; on a name that
+              // matches nothing it adds it. Otherwise Enter just searches.
+              onSubmit={e => { e.preventDefault(); if (exactMatch || (query && !anyMatch)) addManualProduct(); }}
+              className="relative mb-3"
             >
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted text-sm">🔍</span>
               <input
                 value={newName}
                 onChange={e => setNewName(e.target.value)}
-                placeholder="Buying something new? Type its name…"
-                aria-label="New product name"
-                className="flex-1 min-w-56 px-3 py-2.5 rounded-xl bg-surface2 border border-white/10 text-sm text-slate-100 outline-none focus:border-teal/40"
+                placeholder="Search products — or type a new one to add…"
+                aria-label="Search or add a product"
+                className="w-full pl-9 pr-9 py-2.5 rounded-xl bg-surface2 border border-white/10 text-sm text-slate-100 outline-none focus:border-teal/40"
               />
-              <button
-                type="submit"
-                disabled={!newName.trim() || adding}
-                className="px-4 py-2.5 rounded-xl bg-teal/15 border border-teal/30 text-teal text-xs font-bold hover:bg-teal/25 transition-all disabled:opacity-40"
-              >
-                {adding ? 'Adding…' : '➕ Add product'}
-              </button>
+              {newName && (
+                <button type="button" onClick={() => setNewName('')} aria-label="Clear search"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted hover:text-slate-100 text-lg leading-none">×</button>
+              )}
             </form>
+
+            {query && !anyMatch && (
+              <div className="mb-3 px-4 py-3 rounded-2xl border border-teal/30 bg-teal/5 flex flex-wrap items-center justify-between gap-3">
+                <p className="text-sm text-slate-200">
+                  <span className="font-semibold">“{newName.trim()}”</span> isn&apos;t in your products. Add it as a new product{selSupplierName ? <> for <span className="font-semibold">{selSupplierName}</span></> : ''}?
+                </p>
+                <button onClick={addManualProduct} disabled={adding}
+                  className="px-4 py-2 rounded-xl btn-primary text-xs font-bold disabled:opacity-40">
+                  {adding ? 'Adding…' : '➕ Add product'}
+                </button>
+              </div>
+            )}
+            {query && anyMatch && shownItems.length === 0 && (
+              <div className="mb-3 px-4 py-3 rounded-2xl border border-white/10 bg-surface2 text-xs text-slate-300 flex flex-wrap items-center gap-2">
+                <span>No match in {activeList === 'in_stock' ? 'In Stock' : 'Out of Stock'}{supplierActive ? ` for ${selSupplierName}` : ''}.</span>
+                {otherMatches > 0 && (
+                  <button onClick={() => setActiveList(activeList === 'in_stock' ? 'out_of_stock' : 'in_stock')}
+                    className="px-2.5 py-1 rounded-lg bg-teal/15 border border-teal/30 text-teal font-bold">
+                    {otherMatches} in {activeList === 'in_stock' ? 'Out of Stock' : 'In Stock'} →
+                  </button>
+                )}
+                {otherMatches === 0 && (supplierActive || lowOnly) && (
+                  <span className="text-muted">It&apos;s hidden by the {supplierActive ? 'supplier' : 'low-stock'} filter.</span>
+                )}
+              </div>
+            )}
+            {query && anyMatch && !exactMatch && shownItems.length > 0 && (
+              <p className="mb-2 text-[11px] text-muted">
+                Not what you&apos;re looking for?{' '}
+                <button onClick={addManualProduct} disabled={adding} className="font-semibold text-teal hover:underline disabled:opacity-40">
+                  Add “{newName.trim()}” as a new product
+                </button>
+              </p>
+            )}
 
             <div className="flex items-center justify-between mb-2 gap-3">
               <p className="text-[11px] text-muted">
@@ -620,7 +670,7 @@ function StatsDashboard() {
               </p>
               <div className="flex gap-2 shrink-0">
                 <button
-                  onClick={() => setActiveSelected(new Set(activeItems.map(i => i.product_id)))}
+                  onClick={() => setActiveSelected(prev => new Set([...(query ? prev : []), ...shownItems.map(i => i.product_id)]))}
                   className="px-3 py-1.5 rounded-lg bg-teal/15 border border-teal/30 text-teal text-[11px] font-bold hover:bg-teal/25 transition-all"
                 >Select all</button>
                 <button
@@ -640,7 +690,7 @@ function StatsDashboard() {
             <div className="rounded-2xl border border-white/8 max-h-[60vh] overflow-auto mb-3">
               {activeGroups.length === 0 ? (
                 <p className="text-center text-sm text-muted py-10">
-                  {supplierActive ? 'Nothing from this supplier is in this list.' : 'Nothing here.'}
+                  {query ? 'No products match your search.' : supplierActive ? 'Nothing from this supplier is in this list.' : 'Nothing here.'}
                 </p>
               ) : (
                 <table className="w-full min-w-[560px] text-sm">
