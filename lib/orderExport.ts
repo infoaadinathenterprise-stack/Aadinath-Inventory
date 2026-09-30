@@ -2,7 +2,7 @@
 // handing them to the user: download, or the device's share sheet
 // (WhatsApp, email, …) where the browser supports sharing files.
 
-import { buildOrderPdf, lineName, showsPrices, type SavedOrder } from './orderPdf';
+import { buildOrderPdf, lineName, showsPrices, unitLabel, type SavedOrder } from './orderPdf';
 import { buildXlsx, type Cell } from './xlsx';
 
 export type OrderFileKind = 'pdf' | 'xlsx';
@@ -29,17 +29,18 @@ function orderSheet(order: SavedOrder): Uint8Array {
     [`Date: ${date}`],
     ...(order.supplier_name ? [[`To: ${order.supplier_name}`]] : []),
     [],
-    priced ? ['#', 'Product', 'Price', 'Qty', 'Amount'] : ['#', 'Product', 'Qty'],
+    priced ? ['#', 'Product', 'Price', 'Qty', 'Unit', 'Amount'] : ['#', 'Product', 'Qty', 'Unit'],
     ...order.items.map((l, i) => priced
-      ? [i + 1, lineName(l), l.price > 0 ? l.price : '', l.qty, l.price > 0 ? l.price * l.qty : '']
-      : [i + 1, lineName(l), l.qty]),
-    ...(priced ? [[], ['', '', '', 'Total', Number(order.total_amount)]] : []),
+      ? [i + 1, lineName(l), l.price > 0 ? l.price : '', l.qty, unitLabel(l.unit, l.qty), l.price > 0 ? l.price * l.qty : '']
+      : [i + 1, lineName(l), l.qty, unitLabel(l.unit, l.qty)]),
+    ...(priced ? [[], ['', '', '', '', 'Total', Number(order.total_amount)]] : []),
   ];
   const header = rows.findIndex(r => r[0] === '#');
   return buildXlsx(rows, {
     sheetName: order.order_no,
-    boldRows:  priced ? [0, header, rows.length - 1] : [0, header],
-    colWidths: priced ? [5, 46, 12, 8, 14] : [5, 60, 10],
+    // Title, the supplier line, the table header and the total in bold.
+    boldRows:  [0, ...(order.supplier_name ? [3] : []), header, ...(priced ? [rows.length - 1] : [])],
+    colWidths: priced ? [5, 46, 12, 7, 8, 14] : [5, 60, 8, 8],
   });
 }
 

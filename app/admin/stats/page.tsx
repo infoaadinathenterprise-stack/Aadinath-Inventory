@@ -8,7 +8,8 @@ import { SESSION_KEY, USER_KEY, ROLE_KEY, type Supplier, type Product } from '@/
 import AdminNavbar from '../components/AdminNavbar';
 import CompanyLetterhead from '../components/CompanyLetterhead';
 import { downloadXlsx } from '@/lib/xlsx';
-import { openOrderPdf, lineName, showsPrices, type OrderLine, type SavedOrder } from '@/lib/orderPdf';
+import { openOrderPdf, lineName, showsPrices, qtyWithUnit, unitLabel, ORDER_UNITS, type OrderLine, type OrderUnit, type SavedOrder } from '@/lib/orderPdf';
+import EditOrderDialog from '../components/EditOrderDialog';
 import { buildOrderFile, downloadFile } from '@/lib/orderExport';
 import PlaceOrderWizard from '../components/PlaceOrderWizard';
 import { ORDER_ONLY_TYPE } from '@/lib/orderOnly';
@@ -34,7 +35,8 @@ function isPageAdded(p: Product): boolean {
 // What the user types for an order line. Blank = 0 in the PDF.
 // supName: the supplier's name for the product as typed; undefined means
 // not edited, so the saved name (supplier_product_names) shows instead.
-interface OrderInput { price: string; qty: string; supName?: string }
+// unit: what the quantity counts (pieces by default).
+interface OrderInput { price: string; qty: string; supName?: string; unit?: OrderUnit }
 
 function fmtKsh(n: number) {
   return 'Ksh ' + n.toLocaleString('en-KE');
@@ -367,6 +369,7 @@ function StatsDashboard() {
         supplier_product_name: name || null,
         price:        toNum(inp?.price),
         qty:          toNum(inp?.qty),
+        unit:         inp?.unit ?? 'pc',
       };
     });
   }
@@ -393,15 +396,17 @@ function StatsDashboard() {
       [`Date: ${dateLabel}`],
       ...(selSupplierName ? [[`To: ${selSupplierName}`]] : []),
       [],
-      priced ? ['Product', 'Price', 'Quantity'] : ['Product', 'Quantity'],
-      ...lines.map(l => priced ? [lineName(l), l.price > 0 ? l.price : '', l.qty] : [lineName(l), l.qty]),
+      priced ? ['Product', 'Price', 'Quantity', 'Unit'] : ['Product', 'Quantity', 'Unit'],
+      ...lines.map(l => priced
+        ? [lineName(l), l.price > 0 ? l.price : '', l.qty, unitLabel(l.unit, l.qty)]
+        : [lineName(l), l.qty, unitLabel(l.unit, l.qty)]),
     ];
     const headerRow = rows.findIndex(r => r[0] === 'Product');
     const safe = (selSupplierName ?? 'All suppliers').replace(/[^\w\- ]+/g, '').trim().replace(/\s+/g, '-');
     downloadXlsx(`Purchase-Order-${safe}-${today.toISOString().slice(0, 10)}`, rows, {
       sheetName: 'Purchase Order',
       boldRows:  [0, headerRow],
-      colWidths: priced ? [50, 14, 12] : [60, 12],
+      colWidths: priced ? [50, 14, 10, 8] : [60, 10, 8],
     });
   }
 
@@ -563,6 +568,15 @@ function StatsDashboard() {
   const [orders,      setOrders]      = useState<SavedOrder[] | null>(null);
   const [ordersError, setOrdersError] = useState<string | null>(null);
   const [orderSearch, setOrderSearch] = useState('');
+  const [editingOrder, setEditingOrder] = useState<SavedOrder | null>(null);
+
+  function onOrderEdited(updated: SavedOrder) {
+    const swap = (list: SavedOrder[]) => list.map(o => (o.order_id === updated.order_id ? updated : o));
+    setOrders(prev => (prev ? swap(prev) : prev));
+    setOrderHistory(swap);
+    setEditingOrder(null);
+    setNotice({ text: `${updated.order_no} saved — its PDF and Excel now use the changes.` });
+  }
   const [orderFrom,   setOrderFrom]   = useState('');   // yyyy-mm-dd, inclusive
   const [orderTo,     setOrderTo]     = useState('');
 
@@ -795,7 +809,7 @@ function StatsDashboard() {
                   {query ? 'No products match your search.' : supplierActive ? 'Nothing from this supplier is in this list.' : 'Nothing here.'}
                 </p>
               ) : (
-                <table className="w-full min-w-[760px] text-sm">
+                <table className="w-full min-w-[860px] text-sm">
                   <thead className="sticky top-0 z-10 bg-surface">
                     <tr className="text-left text-[10px] font-bold uppercase tracking-wide text-muted border-b border-white/8">
                       <th className="w-10 px-3 py-2"></th>
@@ -803,13 +817,14 @@ function StatsDashboard() {
                       <th className="px-2 py-2 whitespace-nowrap">Supplier product name</th>
                       <th className="px-2 py-2 text-right whitespace-nowrap">Last purchase price</th>
                       <th className="px-2 py-2 text-right whitespace-nowrap">New purchase price</th>
-                      <th className="px-3 py-2 text-right">Quantity</th>
+                      <th className="px-2 py-2 text-right">Quantity</th>
+                      <th className="px-3 py-2">Unit</th>
                     </tr>
                   </thead>
                   {activeGroups.map(({ type, items }) => (
                     <tbody key={type}>
                       <tr>
-                        <td colSpan={6} className={`px-3 py-1.5 text-[10px] font-bold uppercase tracking-wide ${type === NEW_PRODUCT_TYPE ? 'bg-orange-500/10 text-orange-500' : 'bg-surface2 text-muted'}`}>
+                        <td colSpan={7} className={`px-3 py-1.5 text-[10px] font-bold uppercase tracking-wide ${type === NEW_PRODUCT_TYPE ? 'bg-orange-500/10 text-orange-500' : 'bg-surface2 text-muted'}`}>
                           {type === NEW_PRODUCT_TYPE ? '🆕 Added here' : type} ({items.length})
                         </td>
                       </tr>
@@ -900,6 +915,17 @@ function StatsDashboard() {
                                 className={inputCls}
                               />
                             </td>
+                            <td className="px-3 py-2">
+                              {/* Pc/Pcs, Box/Boxes, Roll/Rolls — the word follows the quantity */}
+                              <select
+                                value={inp?.unit ?? 'pc'}
+                                onChange={e => setOrderInputs(prev => ({ ...prev, [p.product_id]: { ...(prev[p.product_id] ?? { price: '', qty: '' }), unit: e.target.value as OrderUnit } }))}
+                                aria-label={`Unit for ${p.product_name}`}
+                                className="w-24 px-2 py-1.5 rounded-lg bg-surface2 border border-white/10 text-sm text-slate-100 outline-none focus:border-teal/40"
+                              >
+                                {ORDER_UNITS.map(u => <option key={u} value={u}>{unitLabel(u, toNum(inp?.qty))}</option>)}
+                              </select>
+                            </td>
                           </tr>
                         );
                       })}
@@ -917,7 +943,8 @@ function StatsDashboard() {
                       </td>
                       <td className="px-2 py-2.5"></td>
                       <td className="px-2 py-2.5 text-right tabular-nums text-gold whitespace-nowrap">{fmtKsh(totalAmount)}</td>
-                      <td className="px-3 py-2.5 text-right tabular-nums text-slate-100">{totalQty.toLocaleString('en-KE')}</td>
+                      <td className="px-2 py-2.5 text-right tabular-nums text-slate-100">{totalQty.toLocaleString('en-KE')}</td>
+                      <td className="px-3 py-2.5"></td>
                     </tr>
                   </tfoot>
                 </table>
@@ -1055,6 +1082,15 @@ function StatsDashboard() {
       </div>
     )}
 
+    {editingOrder && (
+      <EditOrderDialog
+        order={editingOrder}
+        suppliers={suppliers}
+        onSaved={onOrderEdited}
+        onClose={() => setEditingOrder(null)}
+      />
+    )}
+
     {ordersOpen && (
       <div className="print-hide fixed inset-0 z-150 bg-black/70 backdrop-blur-sm flex items-end sm:items-center justify-center" onClick={() => setOrdersOpen(false)}>
         <div
@@ -1118,10 +1154,14 @@ function StatsDashboard() {
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-bold text-slate-100 tabular-nums">{o.order_no}</p>
                       <p className="text-[11px] text-muted truncate">
-                        {o.order_date} · {o.supplier_name ?? 'No supplier'} · {o.items.length} item{o.items.length === 1 ? '' : 's'}
+                        {o.order_date} · {o.supplier_name ?? 'No supplier'} · {o.items.length} item{o.items.length === 1 ? '' : 's'}{o.updated_at ? ' · edited' : ''}
                       </p>
                     </div>
                     <span className="text-xs font-semibold text-gold tabular-nums whitespace-nowrap">{fmtKsh(Number(o.total_amount))}</span>
+                    <button
+                      onClick={() => setEditingOrder(o)}
+                      className="px-3 py-1.5 rounded-lg bg-surface2 border border-white/10 text-slate-200 text-[11px] font-bold hover:border-white/25 transition-all"
+                    >✏️ Edit</button>
                     <button
                       onClick={() => openOrderPdf(o)}
                       className="px-3 py-1.5 rounded-lg bg-teal/15 border border-teal/30 text-teal text-[11px] font-bold hover:bg-teal/25 transition-all"
@@ -1167,7 +1207,7 @@ function StatsDashboard() {
             </div>
             <div className="text-right text-sm">
               <p>Date: {new Date().toLocaleDateString('en-KE', { day: '2-digit', month: 'short', year: 'numeric' })}</p>
-              {selSupplierName && <p>To: <span className="font-semibold">{selSupplierName}</span></p>}
+              {selSupplierName && <p className="font-bold">To: {selSupplierName}</p>}
             </div>
           </div>
 
@@ -1193,7 +1233,7 @@ function StatsDashboard() {
                         <td className="py-1.5 pr-2 text-gray-500">{i + 1}</td>
                         <td className="py-1.5 pr-2">{lineName(l)}</td>
                         {priced && <td className="py-1.5 pr-2 text-right tabular-nums">{l.price > 0 ? fmtKsh(l.price) : ''}</td>}
-                        <td className="py-1.5 text-right tabular-nums">{l.qty}</td>
+                        <td className="py-1.5 text-right tabular-nums">{qtyWithUnit(l)}</td>
                       </tr>
                     ))}
                   </tbody>

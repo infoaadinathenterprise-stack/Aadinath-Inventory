@@ -11,6 +11,24 @@ export interface OrderLine {
   supplier_product_name?: string | null;
   price:        number;
   qty:          number;
+  unit?:        OrderUnit;       // what the quantity counts; pieces if unset
+}
+
+export type OrderUnit = 'pc' | 'box' | 'roll';
+export const ORDER_UNITS: OrderUnit[] = ['pc', 'box', 'roll'];
+
+// "Pc" / "Pcs", "Box" / "Boxes", "Roll" / "Rolls" — singular only for 1.
+export function unitLabel(unit: OrderUnit | undefined, qty: number): string {
+  const one = qty === 1;
+  switch (unit ?? 'pc') {
+    case 'box':  return one ? 'Box'  : 'Boxes';
+    case 'roll': return one ? 'Roll' : 'Rolls';
+    default:     return one ? 'Pc'   : 'Pcs';
+  }
+}
+
+export function qtyWithUnit(l: OrderLine): string {
+  return `${l.qty} ${unitLabel(l.unit, l.qty)}`;
 }
 
 // Name printed on the order: the supplier's, else ours.
@@ -34,6 +52,7 @@ export interface SavedOrder {
   items:         OrderLine[];
   total_amount:  number;
   created_at:    string;
+  updated_at?:   string | null;  // set when the order was edited
 }
 
 function ksh(n: number) {
@@ -67,11 +86,7 @@ export async function buildOrderPdf(order: SavedOrder): Promise<Blob> {
   doc.text(COMPANY.contact, mid, 26, { align: 'center' });
   doc.setFont('helvetica', 'bold');
   doc.text(COMPANY.pin, mid, 30.5, { align: 'center' });
-  doc.setFont('helvetica', 'italic');
-  doc.setFontSize(8);
-  const dealerLines: string[] = doc.splitTextToSize(COMPANY.dealers, right - left);
-  doc.text(dealerLines, mid, 35.5, { align: 'center' });
-  const headY = 35.5 + (dealerLines.length - 1) * 3.6 + 3;
+  const headY = 34;
   doc.setLineWidth(0.6);
   doc.line(left, headY, right, headY);
 
@@ -83,7 +98,11 @@ export async function buildOrderPdf(order: SavedOrder): Promise<Blob> {
   doc.setFontSize(10);
   doc.text(`Order no: ${order.order_no}`, right, headY + 7, { align: 'right' });
   doc.text(`Date: ${fmtDate(order.order_date)}`, right, headY + 12, { align: 'right' });
-  if (order.supplier_name) doc.text(`To: ${order.supplier_name}`, right, headY + 17, { align: 'right' });
+  if (order.supplier_name) {
+    doc.setFont('helvetica', 'bold');
+    doc.text(`To: ${order.supplier_name}`, right, headY + 17, { align: 'right' });
+    doc.setFont('helvetica', 'normal');
+  }
   doc.setLineWidth(0.2);
   doc.line(left, headY + 21, right, headY + 21);
 
@@ -110,7 +129,7 @@ export async function buildOrderPdf(order: SavedOrder): Promise<Blob> {
     doc.text(nameLines, colName, y);
     // A line without a new price is left blank rather than "Ksh 0".
     if (priced && it.price > 0) doc.text(ksh(it.price), colPrice, y, { align: 'right' });
-    doc.text(String(it.qty), colQty, y, { align: 'right' });
+    doc.text(qtyWithUnit(it), colQty, y, { align: 'right' });
     if (priced && it.price > 0) doc.text(ksh(it.price * it.qty), colTotal, y, { align: 'right' });
     y += rowH;
     doc.setDrawColor(220);

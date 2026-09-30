@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import type { Supplier } from '@/lib/types';
 import type { OrderLine, SavedOrder } from '@/lib/orderPdf';
-import { lineName, openOrderPdf } from '@/lib/orderPdf';
+import { lineName, openOrderPdf, qtyWithUnit } from '@/lib/orderPdf';
 import { buildOrderFile, canShareFile, downloadFile, shareFile, type OrderFileKind } from '@/lib/orderExport';
 
 type ChosenSupplier = { id: number; name: string } | null;
@@ -193,7 +193,7 @@ export default function PlaceOrderWizard({ linesFor, suppliers, initialSupplierI
                       {lineName(l) !== l.product_name && <span className="block text-[10px] text-muted">ours: {l.product_name}</span>}
                     </span>
                     <span className="shrink-0 text-right text-[11px] text-muted tabular-nums">
-                      {l.qty} × {ksh(l.price)}
+                      {qtyWithUnit(l)} × {ksh(l.price)}
                       <span className="block text-slate-100 font-semibold text-xs">{ksh(l.price * l.qty)}</span>
                     </span>
                   </li>

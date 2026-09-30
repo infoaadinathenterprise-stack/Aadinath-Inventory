@@ -16,7 +16,8 @@ export interface SheetOptions {
 }
 
 // Cell style indexes — must match cellXfs in styles.xml below.
-const S_BOLD = 1, S_TITLE = 2, S_CENTER = 3, S_CENTER_BOLD = 4, S_CENTER_WRAP = 5;
+// (index 5, centred wrapped italic, is unused since the "Dealers in" line went.)
+const S_BOLD = 1, S_TITLE = 2, S_CENTER = 3, S_CENTER_BOLD = 4;
 
 interface Layout {
   rowStyles:  Map<number, number>;
@@ -71,7 +72,6 @@ function withLetterhead(rows: Cell[][], opts: SheetOptions): { rows: Cell[][]; l
     { text: COMPANY.address, style: S_CENTER,      perLine: 0.85, lineHt: 16 },
     { text: COMPANY.contact, style: S_CENTER,      perLine: 0.85, lineHt: 16 },
     { text: COMPANY.pin,     style: S_CENTER_BOLD, perLine: 0.8,  lineHt: 16 },
-    { text: COMPANY.dealers, style: S_CENTER_WRAP, perLine: 1.0,  lineHt: 12 },
   ];
   if (head.length) {
     const nCols = Math.max(opts.colWidths?.length ?? 0, ...rows.map(r => r.length), 1);
