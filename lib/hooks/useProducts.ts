@@ -5,6 +5,7 @@ import { supabase } from '@/lib/supabase';
 import { redirectIfSessionInvalid } from '@/lib/auth';
 import type { Product, StockByLoc, LocationInfo, Company, StockByCompany } from '@/lib/types';
 import { DEFAULT_COMPANY_ID } from '@/lib/types';
+import { isOrderOnly } from '@/lib/orderOnly';
 
 interface ProductsData {
   products:    Product[];
@@ -19,7 +20,9 @@ interface ProductsData {
   refresh:     () => void;
 }
 
-export function useProducts(): ProductsData {
+// includeOrderOnly: also return products that exist only on the Place an
+// Order page (see lib/orderOnly.ts). Every other page leaves them out.
+export function useProducts({ includeOrderOnly = false }: { includeOrderOnly?: boolean } = {}): ProductsData {
   const [products,   setProducts]   = useState<Product[]>([]);
   const [locations,  setLocations]  = useState<LocationInfo[]>([]);
   const [companies,  setCompanies]  = useState<Company[]>([]);
@@ -101,7 +104,10 @@ export function useProducts(): ProductsData {
         ];
       }
 
-      setProducts(prods ?? []);
+      const all = (prods ?? []) as Product[];
+      const totalStock = (p: Product) => Object.keys(sbl).reduce((s, lid) =>
+        s + (sbl[+lid][p.product_id] ?? 0) + (bbl[+lid][p.product_id] ?? 0) * (p.pieces_per_box || 1), 0);
+      setProducts(includeOrderOnly ? all : all.filter(p => !isOrderOnly(p, totalStock(p))));
       setLocations(locationList);
       setCompanies(companyList);
       setStockByLoc(sbl);
@@ -114,7 +120,7 @@ export function useProducts(): ProductsData {
 
     load();
     return () => { cancelled = true; };
-  }, [tick]);
+  }, [tick, includeOrderOnly]);
 
   const refresh = useCallback(() => setTick(t => t + 1), []);
 

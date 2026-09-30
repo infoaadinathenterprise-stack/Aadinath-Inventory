@@ -20,6 +20,8 @@ export interface Product {
   // Optional product image (URL or data URL). Falls back to the default
   // placeholder when not set.
   image_url?:         string | null;
+  // Supplier an order-only product (lib/orderOnly.ts) was added/ordered for.
+  order_supplier_id?: number | null;
   // Computed join field: sum of stock_by_location quantities across all locations
   total_stock?:       number;
 }

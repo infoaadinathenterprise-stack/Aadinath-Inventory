@@ -9,6 +9,7 @@ import AdminNavbar from '../components/AdminNavbar';
 import CompanyLetterhead from '../components/CompanyLetterhead';
 import { downloadXlsx } from '@/lib/xlsx';
 import { openOrderPdf, type OrderLine, type SavedOrder } from '@/lib/orderPdf';
+import { ORDER_ONLY_TYPE } from '@/lib/orderOnly';
 
 // One purchase_items row flattened with its purchase's supplier/date.
 interface PurchaseRecord {
@@ -18,11 +19,15 @@ interface PurchaseRecord {
   price:        number | null;
   date:         string | null;
   purchaseId:   number;
+  fromOrder?:   boolean;         // taken from a placed order, not a purchase bill
 }
 
-// Placeholder type for products typed in on this page (type is required).
-// Also how the page recognises them later, to allow deleting them.
-const NEW_PRODUCT_TYPE = 'New Product';
+// Products typed in on this page (see lib/orderOnly.ts): placeholder type
+// and no SKU yet. They only appear on this page.
+const NEW_PRODUCT_TYPE = ORDER_ONLY_TYPE;
+function isPageAdded(p: Product): boolean {
+  return p.type === NEW_PRODUCT_TYPE && !p.stock_keeping_unit?.trim();
+}
 
 // What the user types for an order line. Blank = 0 in the PDF.
 interface OrderInput { price: string; qty: string }
@@ -106,7 +111,7 @@ export default function StatsPage() {
 }
 
 function StatsDashboard() {
-  const { products, locations, stockByLoc, boxByLoc, loading, refresh } = useProducts();
+  const { products, locations, stockByLoc, boxByLoc, loading, refresh } = useProducts({ includeOrderOnly: true });
 
   function handleLogout() {
     localStorage.removeItem(SESSION_KEY);
@@ -149,18 +154,57 @@ function StatsDashboard() {
     return () => { cancelled = true; };
   }, []);
 
+  // Placed orders. Products added on this page never appear on a purchase
+  // bill, so their "last price" and supplier come from these instead.
+  const [orderHistory, setOrderHistory] = useState<SavedOrder[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    supabase.from('purchase_orders').select('*').order('order_id', { ascending: false }).limit(2000)
+      .then(({ data }) => { if (!cancelled) setOrderHistory((data ?? []) as SavedOrder[]); });
+    return () => { cancelled = true; };
+  }, []);
+
   // product_id → (supplierKey → latest record), plus latest from anyone.
   const { lastBySupplier, lastAny } = useMemo(() => {
+    const pageAdded = new Map(products.filter(isPageAdded).map(p => [p.product_id, p]));
+    const supName = new Map(suppliers.map(s => [s.supplier_id, s.supplier_name]));
+    const fromOrders: PurchaseRecord[] = [];
+    for (const o of orderHistory) {
+      for (const line of o.items ?? []) {
+        if (line.product_id == null || !pageAdded.has(line.product_id)) continue;
+        fromOrders.push({
+          productId:    line.product_id,
+          supplierKey:  o.supplier_id != null ? `id:${o.supplier_id}` : 'none',
+          supplierName: o.supplier_name ?? 'No supplier',
+          price:        line.price > 0 ? line.price : null,
+          date:         o.order_date,
+          purchaseId:   -o.order_id,
+          fromOrder:    true,
+        });
+      }
+    }
+    const all = [...records, ...fromOrders]
+      .sort((a, b) => (b.date ?? '').localeCompare(a.date ?? '') || b.purchaseId - a.purchaseId);
     const bySup = new Map<number, Map<string, PurchaseRecord>>();
     const any   = new Map<number, PurchaseRecord>();
-    for (const r of records) {
+    for (const r of all) {
       if (!any.has(r.productId)) any.set(r.productId, r);
       let m = bySup.get(r.productId);
       if (!m) { m = new Map(); bySup.set(r.productId, m); }
       if (!m.has(r.supplierKey)) m.set(r.supplierKey, r);
     }
+    // A product added while a supplier was picked belongs to that
+    // supplier even before it's ordered.
+    for (const p of pageAdded.values()) {
+      const sid = p.order_supplier_id;
+      if (sid == null) continue;
+      let m = bySup.get(p.product_id);
+      if (!m) { m = new Map(); bySup.set(p.product_id, m); }
+      const key = `id:${sid}`;
+      if (!m.has(key)) m.set(key, { productId: p.product_id, supplierKey: key, supplierName: supName.get(sid) ?? `Supplier #${sid}`, price: null, date: null, purchaseId: 0, fromOrder: true });
+    }
     return { lastBySupplier: bySup, lastAny: any };
-  }, [records]);
+  }, [records, orderHistory, products, suppliers]);
 
   const supplierActive = supplierId !== '';
   const selKey = supplierActive ? `id:${supplierId}` : '';
@@ -281,7 +325,10 @@ function StatsDashboard() {
     }
     setAdding(true);
     const { data, error } = await supabase.from('products')
-      .insert({ product_name: name, type: NEW_PRODUCT_TYPE, unit_of_measure: 'Piece', unit_type: 'piece', reorder_level: 0, active_status: true })
+      .insert({
+        product_name: name, type: NEW_PRODUCT_TYPE, unit_of_measure: 'Piece', unit_type: 'piece', reorder_level: 0, active_status: true,
+        order_supplier_id: supplierActive ? supplierId : null,
+      })
       .select('product_id').single();
     setAdding(false);
     if (error || !data) { setNotice({ text: `Couldn't add "${name}": ${error?.message ?? 'no row returned'}`, error: true }); return; }
@@ -300,7 +347,6 @@ function StatsDashboard() {
   // Everything already in the database stays untouchable from this page.
   // Deleting hides the product (active_status = false), the same as the
   // inventory tab's delete, so past orders and history keep their rows.
-  const isPageAdded = (p: Product) => p.type === NEW_PRODUCT_TYPE && !p.stock_keeping_unit?.trim();
   const deletableSelected = activeItems.filter(p =>
     activeSelected.has(p.product_id) && isPageAdded(p) && totalForProduct(p.product_id, p.pieces_per_box ?? 0) === 0);
   const [deleting, setDeleting] = useState(false);
@@ -365,6 +411,15 @@ function StatsDashboard() {
     }
     const order = data as SavedOrder;
     setOrders(prev => prev ? [order, ...prev] : prev);
+    setOrderHistory(prev => [order, ...prev]);
+    // Page-added products ordered from a supplier are kept under it, so
+    // they're listed there next time with this order's price.
+    const unlinked = items.filter(p => isPageAdded(p) && p.order_supplier_id == null).map(p => p.product_id);
+    if (supplierActive && unlinked.length > 0) {
+      await supabase.from('products').update({ order_supplier_id: supplierId })
+        .in('product_id', unlinked).is('order_supplier_id', null);
+      refresh();
+    }
     setActiveSelected(new Set());
     setOrderInputs(prev => {
       const next = { ...prev };
@@ -635,7 +690,7 @@ function StatsDashboard() {
                                 <>
                                   <span className="block text-slate-300">{fmtKsh(last.price)}</span>
                                   <span className="block text-[10px] text-muted">
-                                    {last.date ?? ''}{!supplierActive ? `${last.date ? ' · ' : ''}${last.supplierName}` : ''}
+                                    {last.date ?? ''}{!supplierActive ? `${last.date ? ' · ' : ''}${last.supplierName}` : ''}{last.fromOrder ? ' · ordered' : ''}
                                   </span>
                                 </>
                               ) : <span className="text-muted">—</span>}
