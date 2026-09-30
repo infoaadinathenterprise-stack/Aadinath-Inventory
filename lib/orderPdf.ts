@@ -6,8 +6,22 @@ import { COMPANY } from './company';
 export interface OrderLine {
   product_id:   number | null;
   product_name: string;
+  // What the supplier calls it (supplier_product_names); the PDF / Excel
+  // show this instead of our name when set.
+  supplier_product_name?: string | null;
   price:        number;
   qty:          number;
+}
+
+// Name printed on the order: the supplier's, else ours.
+export function lineName(l: OrderLine): string {
+  return l.supplier_product_name?.trim() || l.product_name;
+}
+
+// Prices (and amounts / total) only go on the order when at least one line
+// has one; an order with every price blank is quantities only.
+export function showsPrices(lines: OrderLine[]): boolean {
+  return lines.some(l => l.price > 0);
 }
 
 export interface SavedOrder {
@@ -37,7 +51,10 @@ export async function buildOrderPdf(order: SavedOrder): Promise<Blob> {
   const pageW = doc.internal.pageSize.getWidth();
   const pageH = doc.internal.pageSize.getHeight();
   const left = 15, right = pageW - 15;
-  const colNo = left, colName = left + 10, colPrice = right - 55, colQty = right - 28, colTotal = right;
+  const priced = showsPrices(order.items);
+  const colNo = left, colName = left + 10, colPrice = right - 55, colTotal = right;
+  const colQty = priced ? right - 28 : right;
+  const nameWidth = (priced ? colPrice - 22 : colQty - 20) - colName;
 
   // ── Letterhead ──
   const mid = pageW / 2;
@@ -75,9 +92,9 @@ export async function buildOrderPdf(order: SavedOrder): Promise<Blob> {
     doc.setFont('helvetica', 'bold');
     doc.text('#', colNo, y);
     doc.text('Product', colName, y);
-    doc.text('Price', colPrice, y, { align: 'right' });
+    if (priced) doc.text('Price', colPrice, y, { align: 'right' });
     doc.text('Qty', colQty, y, { align: 'right' });
-    doc.text('Amount', colTotal, y, { align: 'right' });
+    if (priced) doc.text('Amount', colTotal, y, { align: 'right' });
     doc.setLineWidth(0.2);
     doc.line(left, y + 2, right, y + 2);
     doc.setFont('helvetica', 'normal');
@@ -86,24 +103,27 @@ export async function buildOrderPdf(order: SavedOrder): Promise<Blob> {
   header();
 
   order.items.forEach((it, i) => {
-    const nameLines: string[] = doc.splitTextToSize(it.product_name, colPrice - colName - 22);
+    const nameLines: string[] = doc.splitTextToSize(lineName(it), nameWidth);
     const rowH = nameLines.length * 5 + 2;
     if (y + rowH > pageH - 25) { doc.addPage(); y = 20; header(); }
     doc.text(String(i + 1), colNo, y);
     doc.text(nameLines, colName, y);
-    doc.text(ksh(it.price), colPrice, y, { align: 'right' });
+    // A line without a new price is left blank rather than "Ksh 0".
+    if (priced && it.price > 0) doc.text(ksh(it.price), colPrice, y, { align: 'right' });
     doc.text(String(it.qty), colQty, y, { align: 'right' });
-    doc.text(ksh(it.price * it.qty), colTotal, y, { align: 'right' });
+    if (priced && it.price > 0) doc.text(ksh(it.price * it.qty), colTotal, y, { align: 'right' });
     y += rowH;
     doc.setDrawColor(220);
     doc.line(left, y - 3.5, right, y - 3.5);
     doc.setDrawColor(0);
   });
 
-  if (y > pageH - 25) { doc.addPage(); y = 20; }
-  doc.setFont('helvetica', 'bold');
-  doc.text('Total', colQty, y + 2, { align: 'right' });
-  doc.text(ksh(order.total_amount), colTotal, y + 2, { align: 'right' });
+  if (priced) {
+    if (y > pageH - 25) { doc.addPage(); y = 20; }
+    doc.setFont('helvetica', 'bold');
+    doc.text('Total', colQty, y + 2, { align: 'right' });
+    doc.text(ksh(order.total_amount), colTotal, y + 2, { align: 'right' });
+  }
 
   return doc.output('blob');
 }

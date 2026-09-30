@@ -2,7 +2,7 @@
 // handing them to the user: download, or the device's share sheet
 // (WhatsApp, email, …) where the browser supports sharing files.
 
-import { buildOrderPdf, type SavedOrder } from './orderPdf';
+import { buildOrderPdf, lineName, showsPrices, type SavedOrder } from './orderPdf';
 import { buildXlsx, type Cell } from './xlsx';
 
 export type OrderFileKind = 'pdf' | 'xlsx';
@@ -20,22 +20,26 @@ export function orderFileName(order: SavedOrder, kind: OrderFileKind): string {
 function orderSheet(order: SavedOrder): Uint8Array {
   const date = new Date(`${order.order_date}T00:00:00`)
     .toLocaleDateString('en-KE', { day: '2-digit', month: 'short', year: 'numeric' });
+  // Same rules as the PDF: the supplier's name for each line, and prices
+  // only when at least one line has one.
+  const priced = showsPrices(order.items);
   const rows: Cell[][] = [
     ['Purchase Order'],
     [`Order no: ${order.order_no}`],
     [`Date: ${date}`],
     ...(order.supplier_name ? [[`To: ${order.supplier_name}`]] : []),
     [],
-    ['#', 'Product', 'Price', 'Qty', 'Amount'],
-    ...order.items.map((l, i) => [i + 1, l.product_name, l.price, l.qty, l.price * l.qty]),
-    [],
-    ['', '', '', 'Total', Number(order.total_amount)],
+    priced ? ['#', 'Product', 'Price', 'Qty', 'Amount'] : ['#', 'Product', 'Qty'],
+    ...order.items.map((l, i) => priced
+      ? [i + 1, lineName(l), l.price > 0 ? l.price : '', l.qty, l.price > 0 ? l.price * l.qty : '']
+      : [i + 1, lineName(l), l.qty]),
+    ...(priced ? [[], ['', '', '', 'Total', Number(order.total_amount)]] : []),
   ];
   const header = rows.findIndex(r => r[0] === '#');
   return buildXlsx(rows, {
     sheetName: order.order_no,
-    boldRows:  [0, header, rows.length - 1],
-    colWidths: [5, 46, 12, 8, 14],
+    boldRows:  priced ? [0, header, rows.length - 1] : [0, header],
+    colWidths: priced ? [5, 46, 12, 8, 14] : [5, 60, 10],
   });
 }
 

@@ -8,7 +8,7 @@ import { SESSION_KEY, USER_KEY, ROLE_KEY, type Supplier, type Product } from '@/
 import AdminNavbar from '../components/AdminNavbar';
 import CompanyLetterhead from '../components/CompanyLetterhead';
 import { downloadXlsx } from '@/lib/xlsx';
-import { openOrderPdf, type OrderLine, type SavedOrder } from '@/lib/orderPdf';
+import { openOrderPdf, lineName, showsPrices, type OrderLine, type SavedOrder } from '@/lib/orderPdf';
 import { buildOrderFile, downloadFile } from '@/lib/orderExport';
 import PlaceOrderWizard from '../components/PlaceOrderWizard';
 import { ORDER_ONLY_TYPE } from '@/lib/orderOnly';
@@ -32,7 +32,9 @@ function isPageAdded(p: Product): boolean {
 }
 
 // What the user types for an order line. Blank = 0 in the PDF.
-interface OrderInput { price: string; qty: string }
+// supName: the supplier's name for the product as typed; undefined means
+// not edited, so the saved name (supplier_product_names) shows instead.
+interface OrderInput { price: string; qty: string; supName?: string }
 
 function fmtKsh(n: number) {
   return 'Ksh ' + n.toLocaleString('en-KE');
@@ -181,6 +183,59 @@ function StatsDashboard() {
     return () => { cancelled = true; };
   }, []);
 
+  // ── What each supplier calls our products (supplier_product_names) ──
+  type SupNameRow = { supplier_id: number; product_id: number; supplier_product_name: string; updated_at: string };
+  const [supNameRows, setSupNameRows] = useState<SupNameRow[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const PAGE = 1000;
+      const rows: SupNameRow[] = [];
+      for (let from = 0; ; from += PAGE) {
+        const { data, error } = await supabase.from('supplier_product_names')
+          .select('supplier_id, product_id, supplier_product_name, updated_at')
+          .order('supplier_id').order('product_id').range(from, from + PAGE - 1);
+        if (error || cancelled) return;
+        rows.push(...((data ?? []) as SupNameRow[]));
+        if ((data ?? []).length < PAGE) break;
+      }
+      if (!cancelled) setSupNameRows(rows);
+    })();
+    return () => { cancelled = true; };
+  }, []);
+  const { supNameByKey, supNameLatest } = useMemo(() => {
+    const byKey = new Map<string, string>();
+    const latest = new Map<number, SupNameRow>();
+    for (const r of supNameRows) {
+      byKey.set(`${r.supplier_id}:${r.product_id}`, r.supplier_product_name);
+      const cur = latest.get(r.product_id);
+      if (!cur || r.updated_at > cur.updated_at) latest.set(r.product_id, r);
+    }
+    return { supNameByKey: byKey, supNameLatest: latest };
+  }, [supNameRows]);
+
+  // Saved name for this supplier; with no supplier, the most recent one
+  // used with any supplier.
+  function savedSupName(pid: number, sid: number | null): string | undefined {
+    return sid != null ? supNameByKey.get(`${sid}:${pid}`) : supNameLatest.get(pid)?.supplier_product_name;
+  }
+
+  // Save (or clear) what supplier `sid` calls product `pid`.
+  async function persistSupName(sid: number, pid: number, value: string) {
+    const v = value.trim().replace(/\s+/g, ' ');
+    if (v === (supNameByKey.get(`${sid}:${pid}`) ?? '')) return;
+    const now = new Date().toISOString();
+    const { error } = v
+      ? await supabase.from('supplier_product_names')
+          .upsert({ supplier_id: sid, product_id: pid, supplier_product_name: v, updated_at: now }, { onConflict: 'supplier_id,product_id' })
+      : await supabase.from('supplier_product_names').delete().eq('supplier_id', sid).eq('product_id', pid);
+    if (error) { setNotice({ text: `Couldn't save the supplier's product name: ${error.message}`, error: true }); return; }
+    setSupNameRows(prev => {
+      const rest = prev.filter(r => !(r.supplier_id === sid && r.product_id === pid));
+      return v ? [...rest, { supplier_id: sid, product_id: pid, supplier_product_name: v, updated_at: now }] : rest;
+    });
+  }
+
   // product_id → (supplierKey → latest record), plus latest from anyone.
   const { lastBySupplier, lastAny } = useMemo(() => {
     const pageAdded = new Map(products.filter(isPageAdded).map(p => [p.product_id, p]));
@@ -290,6 +345,28 @@ function StatsDashboard() {
     });
   }
 
+  // The supplier's product name shown in a row: what was typed, else the
+  // saved one for the picked supplier (or the latest used, with none).
+  function shownSupName(pid: number): string {
+    return orderInputs[pid]?.supName ?? savedSupName(pid, supplierActive ? Number(supplierId) : null) ?? '';
+  }
+
+  // Order lines for `items` going to supplier `sid`: an edited supplier
+  // name wins, then that supplier's saved one, then what the row shows.
+  function linesFor(items: Product[], sid: number | null): OrderLine[] {
+    return items.map(p => {
+      const inp = orderInputs[p.product_id];
+      const name = (inp?.supName ?? (sid != null ? savedSupName(p.product_id, sid) : undefined) ?? shownSupName(p.product_id)).trim();
+      return {
+        product_id:   p.product_id,
+        product_name: p.product_name,
+        supplier_product_name: name || null,
+        price:        toNum(inp?.price),
+        qty:          toNum(inp?.qty),
+      };
+    });
+  }
+
   // What an export contains: the checked rows, or the whole list if none.
   function orderItems(): Product[] {
     return activeItems
@@ -305,23 +382,22 @@ function StatsDashboard() {
     const items = orderItems();
     const today = new Date();
     const dateLabel = today.toLocaleDateString('en-KE', { day: '2-digit', month: 'short', year: 'numeric' });
+    const lines = linesFor(items, supplierActive ? Number(supplierId) : null);
+    const priced = showsPrices(lines);
     const rows: (string | number)[][] = [
       ['Purchase Order'],
       [`Date: ${dateLabel}`],
       ...(selSupplierName ? [[`To: ${selSupplierName}`]] : []),
       [],
-      ['Product', 'Price', 'Quantity'],
-      ...items.map(p => {
-        const inp = orderInputs[p.product_id];
-        return [p.product_name, toNum(inp?.price), toNum(inp?.qty)];
-      }),
+      priced ? ['Product', 'Price', 'Quantity'] : ['Product', 'Quantity'],
+      ...lines.map(l => priced ? [lineName(l), l.price > 0 ? l.price : '', l.qty] : [lineName(l), l.qty]),
     ];
     const headerRow = rows.findIndex(r => r[0] === 'Product');
     const safe = (selSupplierName ?? 'All suppliers').replace(/[^\w\- ]+/g, '').trim().replace(/\s+/g, '-');
     downloadXlsx(`Purchase-Order-${safe}-${today.toISOString().slice(0, 10)}`, rows, {
       sheetName: 'Purchase Order',
       boldRows:  [0, headerRow],
-      colWidths: [50, 14, 12],
+      colWidths: priced ? [50, 14, 12] : [60, 12],
     });
   }
 
@@ -428,27 +504,20 @@ function StatsDashboard() {
 
   // Place Order opens the step-by-step pop-up (PlaceOrderWizard): pick
   // or add the supplier, review, confirm, then share/download the file.
-  const [wizard, setWizard] = useState<{ items: Product[]; lines: OrderLine[] } | null>(null);
+  const [wizard, setWizard] = useState<{ items: Product[] } | null>(null);
 
   function placeOrder() {
     const items = activeItems
       .filter(p => activeSelected.has(p.product_id))
       .sort((a, b) => a.product_name.localeCompare(b.product_name));
     if (items.length === 0) { setNotice({ text: 'Tick the products to order first.', error: true }); return; }
-    setWizard({
-      items,
-      lines: items.map(p => ({
-        product_id:   p.product_id,
-        product_name: p.product_name,
-        price:        toNum(orderInputs[p.product_id]?.price),
-        qty:          toNum(orderInputs[p.product_id]?.qty),
-      })),
-    });
+    setWizard({ items });
   }
 
   async function submitOrder(supplier: { id: number; name: string } | null): Promise<SavedOrder | string> {
     if (!wizard) return 'Nothing to order';
-    const { items, lines } = wizard;
+    const { items } = wizard;
+    const lines = linesFor(items, supplier?.id ?? null);
     setPlacing(true);
     const { data, error } = await supabase.from('purchase_orders').insert({
       supplier_id:   supplier?.id ?? null,
@@ -462,6 +531,12 @@ function StatsDashboard() {
     const order = data as SavedOrder;
     setOrders(prev => prev ? [order, ...prev] : prev);
     setOrderHistory(prev => [order, ...prev]);
+    // Remember the supplier's names used on this order for next time.
+    if (supplier) {
+      for (const l of lines) {
+        if (l.product_id != null && l.supplier_product_name) await persistSupName(supplier.id, l.product_id, l.supplier_product_name);
+      }
+    }
     // Page-added products are also pinned to the supplier on the product
     // itself, so they stay listed there even without this order.
     const unlinked = items.filter(p => isPageAdded(p) && p.order_supplier_id == null).map(p => p.product_id);
@@ -730,11 +805,12 @@ function StatsDashboard() {
                   {query ? 'No products match your search.' : supplierActive ? 'Nothing from this supplier is in this list.' : 'Nothing here.'}
                 </p>
               ) : (
-                <table className="w-full min-w-[560px] text-sm">
+                <table className="w-full min-w-[760px] text-sm">
                   <thead className="sticky top-0 z-10 bg-surface">
                     <tr className="text-left text-[10px] font-bold uppercase tracking-wide text-muted border-b border-white/8">
                       <th className="w-10 px-3 py-2"></th>
-                      <th className="px-2 py-2">Product</th>
+                      <th className="px-2 py-2">Product name</th>
+                      <th className="px-2 py-2 whitespace-nowrap">Supplier product name</th>
                       <th className="px-2 py-2 text-right whitespace-nowrap">Last purchase price</th>
                       <th className="px-2 py-2 text-right whitespace-nowrap">New purchase price</th>
                       <th className="px-3 py-2 text-right">Quantity</th>
@@ -743,7 +819,7 @@ function StatsDashboard() {
                   {activeGroups.map(({ type, items }) => (
                     <tbody key={type}>
                       <tr>
-                        <td colSpan={5} className={`px-3 py-1.5 text-[10px] font-bold uppercase tracking-wide ${type === NEW_PRODUCT_TYPE ? 'bg-orange-500/10 text-orange-500' : 'bg-surface2 text-muted'}`}>
+                        <td colSpan={6} className={`px-3 py-1.5 text-[10px] font-bold uppercase tracking-wide ${type === NEW_PRODUCT_TYPE ? 'bg-orange-500/10 text-orange-500' : 'bg-surface2 text-muted'}`}>
                           {type === NEW_PRODUCT_TYPE ? '🆕 Added here' : type} ({items.length})
                         </td>
                       </tr>
@@ -773,6 +849,20 @@ function StatsDashboard() {
                                 In stock: {stock}
                                 {activeList === 'out_of_stock' && lastChanged(p) && <> · Last changed: {lastChanged(p)}</>}
                               </span>
+                            </td>
+                            <td className="px-2 py-2">
+                              <input
+                                type="text"
+                                value={shownSupName(p.product_id)}
+                                onChange={e => setInput(p.product_id, 'supName', e.target.value)}
+                                // Saved per supplier as soon as you leave the box; with
+                                // no supplier picked it's saved when the order is placed.
+                                onBlur={e => { if (supplierActive) persistSupName(Number(supplierId), p.product_id, e.target.value); }}
+                                placeholder="Same as ours"
+                                aria-label={`Supplier's name for ${p.product_name}`}
+                                title={supplierActive ? `Saved for ${selSupplierName}` : 'Saved for the supplier you place the order with'}
+                                className="w-full min-w-40 px-2 py-1.5 rounded-lg bg-surface2 border border-white/10 text-sm text-slate-100 placeholder:text-muted/50 outline-none focus:border-teal/40"
+                              />
                             </td>
                             <td className="px-2 py-2 text-right tabular-nums whitespace-nowrap">
                               {last?.price != null ? (
@@ -812,6 +902,7 @@ function StatsDashboard() {
                   <tfoot className="sticky bottom-0 z-10 bg-surface">
                     <tr className="border-t-2 border-white/15 text-sm font-bold">
                       <td className="px-3 py-2.5"></td>
+                      <td className="px-2 py-2.5"></td>
                       <td className="px-2 py-2.5 text-slate-100">
                         Total
                         <span className="block text-[10px] font-normal text-muted">
@@ -892,7 +983,7 @@ function StatsDashboard() {
 
     {wizard && (
       <PlaceOrderWizard
-        lines={wizard.lines}
+        linesFor={sup => linesFor(wizard.items, sup?.id ?? null)}
         suppliers={suppliers}
         initialSupplierId={supplierId}
         onPlace={submitOrder}
@@ -1077,29 +1168,32 @@ function StatsDashboard() {
           {printItems.length === 0 ? (
             <p className="text-sm text-gray-500">No products match.</p>
           ) : (
-            <table className="w-full text-sm border-collapse">
-              <thead>
-                <tr className="text-left border-b border-gray-400">
-                  <th className="py-1.5 pr-2 font-semibold w-8">#</th>
-                  <th className="py-1.5 pr-2 font-semibold">Product</th>
-                  <th className="py-1.5 pr-2 font-semibold text-right">Price</th>
-                  <th className="py-1.5 font-semibold text-right">Quantity</th>
-                </tr>
-              </thead>
-              <tbody>
-                {printItems.map((p, i) => {
-                  const inp = orderInputs[p.product_id];
-                  return (
-                    <tr key={p.product_id} className="border-b border-gray-200">
-                      <td className="py-1.5 pr-2 text-gray-500">{i + 1}</td>
-                      <td className="py-1.5 pr-2">{p.product_name}</td>
-                      <td className="py-1.5 pr-2 text-right tabular-nums">{fmtKsh(toNum(inp?.price))}</td>
-                      <td className="py-1.5 text-right tabular-nums">{toNum(inp?.qty)}</td>
+            (() => {
+              const lines = linesFor(printItems, supplierActive ? Number(supplierId) : null);
+              const priced = showsPrices(lines);
+              return (
+                <table className="w-full text-sm border-collapse">
+                  <thead>
+                    <tr className="text-left border-b border-gray-400">
+                      <th className="py-1.5 pr-2 font-semibold w-8">#</th>
+                      <th className="py-1.5 pr-2 font-semibold">Product</th>
+                      {priced && <th className="py-1.5 pr-2 font-semibold text-right">Price</th>}
+                      <th className="py-1.5 font-semibold text-right">Quantity</th>
                     </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+                  </thead>
+                  <tbody>
+                    {lines.map((l, i) => (
+                      <tr key={l.product_id ?? i} className="border-b border-gray-200">
+                        <td className="py-1.5 pr-2 text-gray-500">{i + 1}</td>
+                        <td className="py-1.5 pr-2">{lineName(l)}</td>
+                        {priced && <td className="py-1.5 pr-2 text-right tabular-nums">{l.price > 0 ? fmtKsh(l.price) : ''}</td>}
+                        <td className="py-1.5 text-right tabular-nums">{l.qty}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              );
+            })()
           )}
         </div>
       </div>

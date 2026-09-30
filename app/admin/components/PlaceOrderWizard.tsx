@@ -4,13 +4,15 @@ import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import type { Supplier } from '@/lib/types';
 import type { OrderLine, SavedOrder } from '@/lib/orderPdf';
-import { openOrderPdf } from '@/lib/orderPdf';
+import { lineName, openOrderPdf } from '@/lib/orderPdf';
 import { buildOrderFile, canShareFile, downloadFile, shareFile, type OrderFileKind } from '@/lib/orderExport';
 
 type ChosenSupplier = { id: number; name: string } | null;
 
 interface Props {
-  lines:             OrderLine[];
+  // Order lines for a supplier — the supplier's product names depend on
+  // who the order goes to.
+  linesFor:          (supplier: ChosenSupplier) => OrderLine[];
   suppliers:         Supplier[];
   initialSupplierId: number | '';
   // Saves the order; returns it, or an error message.
@@ -24,7 +26,7 @@ function ksh(n: number) { return 'Ksh ' + n.toLocaleString('en-KE'); }
 // Place Order, step by step: pick (or add) the supplier → review and
 // confirm (this saves the order) → get the order as PDF or Excel, to
 // share or download.
-export default function PlaceOrderWizard({ lines, suppliers, initialSupplierId, onPlace, onSupplierAdded, onClose }: Props) {
+export default function PlaceOrderWizard({ linesFor, suppliers, initialSupplierId, onPlace, onSupplierAdded, onClose }: Props) {
   const [step, setStep] = useState<'supplier' | 'review' | 'done'>('supplier');
   const [picked, setPicked] = useState<number | 'none' | ''>(initialSupplierId === '' ? '' : initialSupplierId);
   const [search, setSearch] = useState('');
@@ -36,10 +38,11 @@ export default function PlaceOrderWizard({ lines, suppliers, initialSupplierId, 
   const [files,  setFiles]  = useState<Partial<Record<OrderFileKind, File>>>({});
   const [info,   setInfo]   = useState<string | null>(null);
 
-  const total = lines.reduce((s, l) => s + l.price * l.qty, 0);
   const chosen: ChosenSupplier = typeof picked === 'number'
     ? { id: picked, name: suppliers.find(s => s.supplier_id === picked)?.supplier_name ?? `Supplier #${picked}` }
     : null;
+  const lines = order?.items ?? linesFor(chosen);
+  const total = lines.reduce((s, l) => s + l.price * l.qty, 0);
 
   const q = search.trim().toLowerCase();
   const list = useMemo(
@@ -185,7 +188,10 @@ export default function PlaceOrderWizard({ lines, suppliers, initialSupplierId, 
               <ul className="mt-3 rounded-2xl border border-white/8 divide-y divide-white/5 text-sm">
                 {lines.map((l, i) => (
                   <li key={`${l.product_id}-${i}`} className="px-3 py-2 flex items-start gap-3">
-                    <span className="flex-1 min-w-0 text-slate-200 break-words">{l.product_name}</span>
+                    <span className="flex-1 min-w-0 break-words">
+                      <span className="block text-slate-200">{lineName(l)}</span>
+                      {lineName(l) !== l.product_name && <span className="block text-[10px] text-muted">ours: {l.product_name}</span>}
+                    </span>
                     <span className="shrink-0 text-right text-[11px] text-muted tabular-nums">
                       {l.qty} × {ksh(l.price)}
                       <span className="block text-slate-100 font-semibold text-xs">{ksh(l.price * l.qty)}</span>
