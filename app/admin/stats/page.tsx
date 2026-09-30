@@ -9,6 +9,8 @@ import AdminNavbar from '../components/AdminNavbar';
 import CompanyLetterhead from '../components/CompanyLetterhead';
 import { downloadXlsx } from '@/lib/xlsx';
 import { openOrderPdf, type OrderLine, type SavedOrder } from '@/lib/orderPdf';
+import { buildOrderFile, downloadFile } from '@/lib/orderExport';
+import PlaceOrderWizard from '../components/PlaceOrderWizard';
 import { ORDER_ONLY_TYPE } from '@/lib/orderOnly';
 
 // One purchase_items row flattened with its purchase's supplier/date.
@@ -167,8 +169,10 @@ function StatsDashboard() {
     return () => { cancelled = true; };
   }, []);
 
-  // Placed orders. Products added on this page never appear on a purchase
-  // bill, so their "last price" and supplier come from these instead.
+  // Placed orders count as buying history too: every product in an order
+  // to a supplier is listed under that supplier afterwards, with the
+  // ordered price (newest of bill or order wins). Products added on this
+  // page never appear on a bill, so orders are their only history.
   const [orderHistory, setOrderHistory] = useState<SavedOrder[]>([]);
   useEffect(() => {
     let cancelled = false;
@@ -184,7 +188,7 @@ function StatsDashboard() {
     const fromOrders: PurchaseRecord[] = [];
     for (const o of orderHistory) {
       for (const line of o.items ?? []) {
-        if (line.product_id == null || !pageAdded.has(line.product_id)) continue;
+        if (line.product_id == null) continue;
         fromOrders.push({
           productId:    line.product_id,
           supplierKey:  o.supplier_id != null ? `id:${o.supplier_id}` : 'none',
@@ -422,52 +426,61 @@ function StatsDashboard() {
   // ── Place order: save it, then show its PDF ──
   const [placing, setPlacing] = useState(false);
 
-  async function placeOrder() {
+  // Place Order opens the step-by-step pop-up (PlaceOrderWizard): pick
+  // or add the supplier, review, confirm, then share/download the file.
+  const [wizard, setWizard] = useState<{ items: Product[]; lines: OrderLine[] } | null>(null);
+
+  function placeOrder() {
     const items = activeItems
       .filter(p => activeSelected.has(p.product_id))
       .sort((a, b) => a.product_name.localeCompare(b.product_name));
     if (items.length === 0) { setNotice({ text: 'Tick the products to order first.', error: true }); return; }
-    const lines: OrderLine[] = items.map(p => ({
-      product_id:   p.product_id,
-      product_name: p.product_name,
-      price:        toNum(orderInputs[p.product_id]?.price),
-      qty:          toNum(orderInputs[p.product_id]?.qty),
-    }));
-    const total = lines.reduce((s, l) => s + l.price * l.qty, 0);
-    const pdfWin = window.open('', '_blank');
+    setWizard({
+      items,
+      lines: items.map(p => ({
+        product_id:   p.product_id,
+        product_name: p.product_name,
+        price:        toNum(orderInputs[p.product_id]?.price),
+        qty:          toNum(orderInputs[p.product_id]?.qty),
+      })),
+    });
+  }
+
+  async function submitOrder(supplier: { id: number; name: string } | null): Promise<SavedOrder | string> {
+    if (!wizard) return 'Nothing to order';
+    const { items, lines } = wizard;
     setPlacing(true);
     const { data, error } = await supabase.from('purchase_orders').insert({
-      supplier_id:   supplierActive ? supplierId : null,
-      supplier_name: selSupplierName,
+      supplier_id:   supplier?.id ?? null,
+      supplier_name: supplier?.name ?? null,
       created_by:    localStorage.getItem(USER_KEY),
       items:         lines,
-      total_amount:  total,
+      total_amount:  lines.reduce((s, l) => s + l.price * l.qty, 0),
     }).select('*').single();
     setPlacing(false);
-    if (error || !data) {
-      pdfWin?.close();
-      setNotice({ text: `Couldn't save the order: ${error?.message ?? 'no row returned'}`, error: true });
-      return;
-    }
+    if (error || !data) return `Couldn't save the order: ${error?.message ?? 'no row returned'}`;
     const order = data as SavedOrder;
     setOrders(prev => prev ? [order, ...prev] : prev);
     setOrderHistory(prev => [order, ...prev]);
-    // Page-added products ordered from a supplier are kept under it, so
-    // they're listed there next time with this order's price.
+    // Page-added products are also pinned to the supplier on the product
+    // itself, so they stay listed there even without this order.
     const unlinked = items.filter(p => isPageAdded(p) && p.order_supplier_id == null).map(p => p.product_id);
-    if (supplierActive && unlinked.length > 0) {
-      await supabase.from('products').update({ order_supplier_id: supplierId })
+    if (supplier && unlinked.length > 0) {
+      await supabase.from('products').update({ order_supplier_id: supplier.id })
         .in('product_id', unlinked).is('order_supplier_id', null);
       refresh();
     }
-    setActiveSelected(new Set());
+    const ids = new Set(items.map(p => p.product_id));
+    const unTick = (prev: Set<number>) => new Set([...prev].filter(id => !ids.has(id)));
+    setSelectedOut(unTick);
+    setSelectedIn(unTick);
     setOrderInputs(prev => {
       const next = { ...prev };
-      for (const p of items) delete next[p.product_id];
+      for (const id of ids) delete next[id];
       return next;
     });
     setNotice({ text: `Order ${order.order_no} saved.` });
-    await openOrderPdf(order, pdfWin);
+    return order;
   }
 
   // ── Previous orders ──
@@ -877,6 +890,17 @@ function StatsDashboard() {
       </main>
     </div>
 
+    {wizard && (
+      <PlaceOrderWizard
+        lines={wizard.lines}
+        suppliers={suppliers}
+        initialSupplierId={supplierId}
+        onPlace={submitOrder}
+        onSupplierAdded={s => setSuppliers(prev => [...prev, s].sort((a, b) => a.supplier_name.localeCompare(b.supplier_name)))}
+        onClose={() => setWizard(null)}
+      />
+    )}
+
     {addDialog && (
       <div
         className="print-hide fixed inset-0 z-150 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4"
@@ -997,7 +1021,7 @@ function StatsDashboard() {
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-bold text-slate-100 tabular-nums">{o.order_no}</p>
                       <p className="text-[11px] text-muted truncate">
-                        {o.order_date} · {o.supplier_name ?? 'All suppliers'} · {o.items.length} item{o.items.length === 1 ? '' : 's'}
+                        {o.order_date} · {o.supplier_name ?? 'No supplier'} · {o.items.length} item{o.items.length === 1 ? '' : 's'}
                       </p>
                     </div>
                     <span className="text-xs font-semibold text-gold tabular-nums whitespace-nowrap">{fmtKsh(Number(o.total_amount))}</span>
@@ -1005,6 +1029,10 @@ function StatsDashboard() {
                       onClick={() => openOrderPdf(o)}
                       className="px-3 py-1.5 rounded-lg bg-teal/15 border border-teal/30 text-teal text-[11px] font-bold hover:bg-teal/25 transition-all"
                     >📄 PDF</button>
+                    <button
+                      onClick={async () => downloadFile(await buildOrderFile(o, 'xlsx'))}
+                      className="px-3 py-1.5 rounded-lg bg-success/10 border border-success/30 text-success text-[11px] font-bold hover:bg-success/20 transition-all"
+                    >📊 Excel</button>
                   </li>
                 ))}
               </ul>
