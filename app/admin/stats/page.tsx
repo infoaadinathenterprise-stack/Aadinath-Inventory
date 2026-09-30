@@ -289,9 +289,7 @@ function StatsDashboard() {
   }
 
   // ── Lists + checklist ──
-  const [activeList,  setActiveList]  = useState<'out_of_stock' | 'in_stock'>('out_of_stock');
-  const [selectedOut, setSelectedOut] = useState<Set<number>>(new Set());
-  const [selectedIn,  setSelectedIn]  = useState<Set<number>>(new Set());
+  const [selected,    setSelected]    = useState<Set<number>>(new Set());
   const [orderInputs, setOrderInputs] = useState<Record<number, OrderInput>>({});
   const [printItems,  setPrintItems]  = useState<Product[] | null>(null);
 
@@ -307,8 +305,6 @@ function StatsDashboard() {
     setOrderInputs(prev => ({ ...prev, [pid]: { ...(prev[pid] ?? { price: '', qty: '' }), [field]: value } }));
   }
 
-  const inStockAll    = products.filter(p => totalForProduct(p.product_id, p.pieces_per_box ?? 0) > 0);
-  const outOfStockAll = products.filter(p => totalForProduct(p.product_id, p.pieces_per_box ?? 0) === 0);
 
   // Products typed in on this page have no purchase history yet, so they
   // stay visible whichever supplier is picked.
@@ -317,12 +313,22 @@ function StatsDashboard() {
     ? list.filter(p => addedIds.has(p.product_id) || lastBySupplier.get(p.product_id)?.has(selKey))
     : list;
 
-  const inStockList    = bySupplier(inStockAll).filter(p => !lowOnly || totalForProduct(p.product_id, p.pieces_per_box ?? 0) <= (p.reorder_level ?? 0));
-  const outOfStockList = bySupplier(outOfStockAll);
+  // One list of every product, in stock or not; each row is marked green
+  // (in stock) or red (out of stock) and shows its stock on hover.
+  const activeItems = bySupplier(products)
+    .filter(p => !lowOnly || totalForProduct(p.product_id, p.pieces_per_box ?? 0) <= (p.reorder_level ?? 0));
+  const inStockCount  = activeItems.filter(p => totalForProduct(p.product_id, p.pieces_per_box ?? 0) > 0).length;
+  const activeSelected    = selected;
+  const setActiveSelected = setSelected;
 
-  const activeItems       = activeList === 'in_stock' ? inStockList  : outOfStockList;
-  const activeSelected    = activeList === 'in_stock' ? selectedIn   : selectedOut;
-  const setActiveSelected = activeList === 'in_stock' ? setSelectedIn : setSelectedOut;
+  // Stock per location, for the hover card.
+  function stockByLocation(p: Product): { name: string; qty: number }[] {
+    const ppb = p.pieces_per_box ?? 0;
+    return locations.map(l => ({
+      name: l.location_name,
+      qty:  ((stockByLoc[l.location_id] ?? {})[p.product_id] ?? 0) + ((boxByLoc[l.location_id] ?? {})[p.product_id] ?? 0) * ppb,
+    }));
+  }
 
   // ── Search / add box ──
   // Typing filters the table. Only when nothing matches anywhere does it
@@ -332,8 +338,6 @@ function StatsDashboard() {
   const query        = newName.trim().replace(/\s+/g, ' ').toLowerCase();
   const shownItems   = query ? activeItems.filter(p => matchesQuery(p, query)) : activeItems;
   const activeGroups = groupByType(shownItems);
-  const otherList    = activeList === 'in_stock' ? outOfStockList : inStockList;
-  const otherMatches = query ? otherList.filter(p => matchesQuery(p, query)).length : 0;
   const anyMatch     = query !== '' && products.some(p => matchesQuery(p, query));
   const exactMatch   = query !== '' && products.some(p => p.product_name.trim().replace(/\s+/g, ' ').toLowerCase() === query);
 
@@ -434,9 +438,7 @@ function StatsDashboard() {
     if (!name) return;
     const existing = products.find(p => p.product_name.trim().toLowerCase() === name.toLowerCase());
     if (existing) {
-      const inStock = totalForProduct(existing.product_id, existing.pieces_per_box ?? 0) > 0;
-      setActiveList(inStock ? 'in_stock' : 'out_of_stock');
-      (inStock ? setSelectedIn : setSelectedOut)(prev => new Set(prev).add(existing.product_id));
+      setSelected(prev => new Set(prev).add(existing.product_id));
       setAddedIds(prev => new Set(prev).add(existing.product_id));
       setNewName('');
       setNotice({ text: `"${existing.product_name}" is already on file — ticked it for you.` });
@@ -454,8 +456,7 @@ function StatsDashboard() {
     const pid = (data as { product_id: number }).product_id;
     if (qty) setInput(pid, 'qty', String(qty));
     setAddedIds(prev => new Set(prev).add(pid));
-    setSelectedOut(prev => new Set(prev).add(pid));
-    setActiveList('out_of_stock');
+    setSelected(prev => new Set(prev).add(pid));
     setNewName('');
     refresh();
     setNotice({ text: `Added "${name}"${qty ? ` × ${qty}` : ''} to the order list.` });
@@ -491,7 +492,7 @@ function StatsDashboard() {
     if (error) { setNotice({ text: `Couldn't delete: ${error.message}`, error: true }); return; }
     const gone = new Set((data ?? []).map(r => (r as { product_id: number }).product_id));
     const drop = <T,>(s: Set<T>) => { const n = new Set(s); for (const id of gone) n.delete(id as T); return n; };
-    setSelectedOut(drop); setSelectedIn(drop); setAddedIds(drop);
+    setSelected(drop); setAddedIds(drop);
     setOrderInputs(prev => { const n = { ...prev }; for (const id of gone) delete n[id]; return n; });
     refresh();
     setNotice(gone.size === ids.length
@@ -547,8 +548,7 @@ function StatsDashboard() {
     }
     const ids = new Set(items.map(p => p.product_id));
     const unTick = (prev: Set<number>) => new Set([...prev].filter(id => !ids.has(id)));
-    setSelectedOut(unTick);
-    setSelectedIn(unTick);
+    setSelected(unTick);
     setOrderInputs(prev => {
       const next = { ...prev };
       for (const id of ids) delete next[id];
@@ -695,7 +695,7 @@ function StatsDashboard() {
           </select>
           <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer select-none">
             <input type="checkbox" checked={lowOnly} onChange={e => setLowOnly(e.target.checked)} className="accent-danger w-4 h-4" />
-            Low stock only (in-stock tab)
+            Low stock only
           </label>
         </div>
 
@@ -709,15 +709,11 @@ function StatsDashboard() {
           </div>
         ) : (
           <>
-            <div className="flex gap-1 p-1 rounded-2xl card-lux mb-3 w-fit">
-              <button
-                onClick={() => setActiveList('out_of_stock')}
-                className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${activeList === 'out_of_stock' ? 'btn-primary' : 'text-muted hover:text-slate-100'}`}
-              >Out of Stock ({outOfStockList.length})</button>
-              <button
-                onClick={() => setActiveList('in_stock')}
-                className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${activeList === 'in_stock' ? 'btn-primary' : 'text-muted hover:text-slate-100'}`}
-              >In Stock ({inStockList.length})</button>
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mb-3 text-[11px] text-slate-300">
+              <span className="font-semibold text-slate-100">{activeItems.length} products</span>
+              <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-success" /> In stock ({inStockCount})</span>
+              <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-danger" /> Out of stock ({activeItems.length - inStockCount})</span>
+              <span className="text-muted">Hover a product to see its stock.</span>
             </div>
 
             <form
@@ -753,14 +749,8 @@ function StatsDashboard() {
             )}
             {query && anyMatch && shownItems.length === 0 && (
               <div className="mb-3 px-4 py-3 rounded-2xl border border-white/10 bg-surface2 text-xs text-slate-300 flex flex-wrap items-center gap-2">
-                <span>No match in {activeList === 'in_stock' ? 'In Stock' : 'Out of Stock'}{supplierActive ? ` for ${selSupplierName}` : ''}.</span>
-                {otherMatches > 0 && (
-                  <button onClick={() => setActiveList(activeList === 'in_stock' ? 'out_of_stock' : 'in_stock')}
-                    className="px-2.5 py-1 rounded-lg bg-teal/15 border border-teal/30 text-teal font-bold">
-                    {otherMatches} in {activeList === 'in_stock' ? 'Out of Stock' : 'In Stock'} →
-                  </button>
-                )}
-                {otherMatches === 0 && (supplierActive || lowOnly) && (
+                <span>No match{supplierActive ? ` for ${selSupplierName}` : ''}.</span>
+                {(supplierActive || lowOnly) && (
                   <span className="text-muted">It&apos;s hidden by the {supplierActive ? 'supplier' : 'low-stock'} filter.</span>
                 )}
               </div>
@@ -828,8 +818,8 @@ function StatsDashboard() {
                         const last  = lastRecord(p.product_id);
                         const inp   = orderInputs[p.product_id];
                         return (
-                          <tr key={p.product_id} className="border-t border-white/5 hover:bg-white/[0.02]">
-                            <td className="px-3 py-2">
+                          <tr key={p.product_id} className={`group border-t border-white/5 hover:bg-white/[0.02] ${stock > 0 ? 'bg-success/[0.03]' : 'bg-danger/[0.04]'}`}>
+                            <td className={`px-3 py-2 border-l-4 ${stock > 0 ? 'border-l-success' : 'border-l-danger'}`}>
                               <input
                                 type="checkbox"
                                 checked={activeSelected.has(p.product_id)}
@@ -838,16 +828,32 @@ function StatsDashboard() {
                                 className="accent-teal w-4 h-4 block"
                               />
                             </td>
-                            <td className="px-2 py-2 cursor-pointer" onClick={() => toggleSelect(p.product_id)}>
+                            <td className="relative px-2 py-2 cursor-pointer" onClick={() => toggleSelect(p.product_id)}>
                               <span className="block text-slate-200">
+                                <span
+                                  aria-hidden
+                                  title={stock > 0 ? `In stock: ${stock}` : 'Out of stock'}
+                                  className={`inline-block w-2 h-2 rounded-full mr-2 align-middle ${stock > 0 ? 'bg-success' : 'bg-danger'}`}
+                                />
                                 {p.product_name}
                                 {isPageAdded(p) && (
                                   <span className="ml-2 align-middle text-[9px] font-bold uppercase tracking-wide text-orange-500 bg-orange-500/10 border border-orange-500/30 rounded px-1.5 py-0.5">Added here</span>
                                 )}
                               </span>
-                              <span className="block text-[10px] text-muted">
-                                In stock: {stock}
-                                {activeList === 'out_of_stock' && lastChanged(p) && <> · Last changed: {lastChanged(p)}</>}
+                              {stock === 0 && lastChanged(p) && (
+                                <span className="block text-[10px] text-muted">Last changed: {lastChanged(p)}</span>
+                              )}
+                              {/* Stock right now, shown while the row is hovered */}
+                              <span role="tooltip"
+                                className="pointer-events-none absolute left-2 top-full z-30 mt-0.5 hidden group-hover:block min-w-48 px-3 py-2 rounded-xl bg-surface border border-white/15 shadow-2xl text-[11px]">
+                                <span className={`block font-bold ${stock > 0 ? 'text-success' : 'text-danger'}`}>
+                                  {stock > 0 ? `In stock: ${stock}` : 'Out of stock'}
+                                </span>
+                                {stockByLocation(p).map(l => (
+                                  <span key={l.name} className="flex justify-between gap-4 text-slate-300 tabular-nums">
+                                    <span>{l.name}</span><span>{l.qty}</span>
+                                  </span>
+                                ))}
                               </span>
                             </td>
                             <td className="px-2 py-2">
