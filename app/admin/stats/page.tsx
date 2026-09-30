@@ -20,6 +20,10 @@ interface PurchaseRecord {
   purchaseId:   number;
 }
 
+// Placeholder type for products typed in on this page (type is required).
+// Also how the page recognises them later, to allow deleting them.
+const NEW_PRODUCT_TYPE = 'New Product';
+
 // What the user types for an order line. Blank = 0 in the PDF.
 interface OrderInput { price: string; qty: string }
 
@@ -277,7 +281,7 @@ function StatsDashboard() {
     }
     setAdding(true);
     const { data, error } = await supabase.from('products')
-      .insert({ product_name: name, type: 'New Product', unit_of_measure: 'Piece', unit_type: 'piece', reorder_level: 0, active_status: true })
+      .insert({ product_name: name, type: NEW_PRODUCT_TYPE, unit_of_measure: 'Piece', unit_type: 'piece', reorder_level: 0, active_status: true })
       .select('product_id').single();
     setAdding(false);
     if (error || !data) { setNotice({ text: `Couldn't add "${name}": ${error?.message ?? 'no row returned'}`, error: true }); return; }
@@ -288,6 +292,45 @@ function StatsDashboard() {
     setNewName('');
     refresh();
     setNotice({ text: `Added "${name}". Fill in its details from the inventory tab later to give it a SKU.` });
+  }
+
+  // ── Delete products added on this page ──
+  // Only name-only products typed in here qualify: still the placeholder
+  // type, no SKU yet (so details haven't been filled in) and no stock.
+  // Everything already in the database stays untouchable from this page.
+  // Deleting hides the product (active_status = false), the same as the
+  // inventory tab's delete, so past orders and history keep their rows.
+  const isPageAdded = (p: Product) => p.type === NEW_PRODUCT_TYPE && !p.stock_keeping_unit?.trim();
+  const deletableSelected = activeItems.filter(p =>
+    activeSelected.has(p.product_id) && isPageAdded(p) && totalForProduct(p.product_id, p.pieces_per_box ?? 0) === 0);
+  const [deleting, setDeleting] = useState(false);
+
+  async function deleteSelectedProducts() {
+    if (deletableSelected.length === 0) return;
+    const names = deletableSelected.map(p => `• ${p.product_name}`).join('\n');
+    const skipped = activeSelected.size - deletableSelected.length;
+    if (!window.confirm(
+      `Delete ${deletableSelected.length} product${deletableSelected.length === 1 ? '' : 's'} added on this page?\n\n${names}`
+      + (skipped > 0 ? `\n\n${skipped} other checked product${skipped === 1 ? ' is' : 's are'} already in the database and won't be touched.` : ''),
+    )) return;
+    const ids = deletableSelected.map(p => p.product_id);
+    setDeleting(true);
+    const { data, error } = await supabase.from('products')
+      .update({ active_status: false })
+      .in('product_id', ids)
+      .eq('type', NEW_PRODUCT_TYPE)
+      .is('stock_keeping_unit', null)
+      .select('product_id');
+    setDeleting(false);
+    if (error) { setNotice({ text: `Couldn't delete: ${error.message}`, error: true }); return; }
+    const gone = new Set((data ?? []).map(r => (r as { product_id: number }).product_id));
+    const drop = <T,>(s: Set<T>) => { const n = new Set(s); for (const id of gone) n.delete(id as T); return n; };
+    setSelectedOut(drop); setSelectedIn(drop); setAddedIds(drop);
+    setOrderInputs(prev => { const n = { ...prev }; for (const id of gone) delete n[id]; return n; });
+    refresh();
+    setNotice(gone.size === ids.length
+      ? { text: `Deleted ${gone.size} product${gone.size === 1 ? '' : 's'}.` }
+      : { text: `Deleted ${gone.size} of ${ids.length} — the rest changed since you checked them.`, error: true });
   }
 
   // ── Place order: save it, then show its PDF ──
@@ -530,6 +573,12 @@ function StatsDashboard() {
                   disabled={activeSelected.size === 0}
                   className="px-3 py-1.5 rounded-lg bg-surface2 border border-white/10 text-slate-300 text-[11px] font-bold hover:border-white/25 transition-all disabled:opacity-40"
                 >Clear</button>
+                <button
+                  onClick={deleteSelectedProducts}
+                  disabled={deletableSelected.length === 0 || deleting}
+                  title="Deletes checked products that were added on this page (marked “Added here”). Products already in the database can't be deleted here."
+                  className="px-3 py-1.5 rounded-lg bg-danger/10 border border-danger/30 text-danger text-[11px] font-bold hover:bg-danger/20 transition-all disabled:opacity-40"
+                >{deleting ? 'Deleting…' : `🗑 Delete${deletableSelected.length > 0 ? ` (${deletableSelected.length})` : ''}`}</button>
               </div>
             </div>
 
@@ -570,7 +619,12 @@ function StatsDashboard() {
                               />
                             </td>
                             <td className="px-2 py-2 cursor-pointer" onClick={() => toggleSelect(p.product_id)}>
-                              <span className="block text-slate-200">{p.product_name}</span>
+                              <span className="block text-slate-200">
+                                {p.product_name}
+                                {isPageAdded(p) && (
+                                  <span className="ml-2 align-middle text-[9px] font-bold uppercase tracking-wide text-orange-500 bg-orange-500/10 border border-orange-500/30 rounded px-1.5 py-0.5">Added here</span>
+                                )}
+                              </span>
                               <span className="block text-[10px] text-muted">
                                 In stock: {stock}
                                 {activeList === 'out_of_stock' && lastChanged(p) && <> · Last changed: {lastChanged(p)}</>}
