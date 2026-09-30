@@ -54,9 +54,16 @@ function groupByType(list: Product[]) {
     if (!map.has(key)) map.set(key, []);
     map.get(key)!.push(p);
   }
+  // Products added on this page come first, newest on top; the rest are
+  // grouped by category A–Z.
   return Array.from(map.entries())
-    .sort((a, b) => a[0].localeCompare(b[0]))
-    .map(([type, items]) => ({ type, items: items.slice().sort((a, b) => a.product_name.localeCompare(b.product_name)) }));
+    .sort((a, b) => Number(b[0] === NEW_PRODUCT_TYPE) - Number(a[0] === NEW_PRODUCT_TYPE) || a[0].localeCompare(b[0]))
+    .map(([type, items]) => ({
+      type,
+      items: items.slice().sort(type === NEW_PRODUCT_TYPE
+        ? (a, b) => b.product_id - a.product_id
+        : (a, b) => a.product_name.localeCompare(b.product_name)),
+    }));
 }
 
 // Supabase caps a select at 1000 rows, so page through the whole table.
@@ -325,8 +332,24 @@ function StatsDashboard() {
   // Saved with just its name as an order-only product (lib/orderOnly.ts).
   // `type` is required, so it gets the placeholder type.
   const [adding,  setAdding]  = useState(false);
+  // The "how many?" pop-up shown before a new product is added.
+  const [addDialog, setAddDialog] = useState<{ name: string } | null>(null);
+  const [addQty,    setAddQty]    = useState('1');
 
-  async function addManualProduct() {
+  function openAddDialog() {
+    const name = newName.trim().replace(/\s+/g, ' ');
+    if (!name) return;
+    setAddQty('1');
+    setAddDialog({ name });
+  }
+
+  async function confirmAddDialog() {
+    const qty = Math.max(0, Math.floor(toNum(addQty)));
+    setAddDialog(null);
+    await addManualProduct(qty);
+  }
+
+  async function addManualProduct(qty?: number) {
     const name = newName.trim().replace(/\s+/g, ' ');
     if (!name) return;
     const existing = products.find(p => p.product_name.trim().toLowerCase() === name.toLowerCase());
@@ -349,12 +372,13 @@ function StatsDashboard() {
     setAdding(false);
     if (error || !data) { setNotice({ text: `Couldn't add "${name}": ${error?.message ?? 'no row returned'}`, error: true }); return; }
     const pid = (data as { product_id: number }).product_id;
+    if (qty) setInput(pid, 'qty', String(qty));
     setAddedIds(prev => new Set(prev).add(pid));
     setSelectedOut(prev => new Set(prev).add(pid));
     setActiveList('out_of_stock');
     setNewName('');
     refresh();
-    setNotice({ text: `Added "${name}". Fill in its details from the inventory tab later to give it a SKU.` });
+    setNotice({ text: `Added "${name}"${qty ? ` × ${qty}` : ''} to the order list.` });
   }
 
   // ── Delete products added on this page ──
@@ -611,7 +635,7 @@ function StatsDashboard() {
             <form
               // Enter on an exact name ticks that product; on a name that
               // matches nothing it adds it. Otherwise Enter just searches.
-              onSubmit={e => { e.preventDefault(); if (exactMatch || (query && !anyMatch)) addManualProduct(); }}
+              onSubmit={e => { e.preventDefault(); if (exactMatch) addManualProduct(); else if (query && !anyMatch) openAddDialog(); }}
               className="relative mb-3"
             >
               <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted text-sm">🔍</span>
@@ -633,7 +657,7 @@ function StatsDashboard() {
                 <p className="text-sm text-slate-200">
                   <span className="font-semibold">“{newName.trim()}”</span> isn&apos;t in your products. Add it as a new product{selSupplierName ? <> for <span className="font-semibold">{selSupplierName}</span></> : ''}?
                 </p>
-                <button onClick={addManualProduct} disabled={adding}
+                <button onClick={openAddDialog} disabled={adding}
                   className="px-4 py-2 rounded-xl btn-primary text-xs font-bold disabled:opacity-40">
                   {adding ? 'Adding…' : '➕ Add product'}
                 </button>
@@ -656,7 +680,7 @@ function StatsDashboard() {
             {query && anyMatch && !exactMatch && shownItems.length > 0 && (
               <p className="mb-2 text-[11px] text-muted">
                 Not what you&apos;re looking for?{' '}
-                <button onClick={addManualProduct} disabled={adding} className="font-semibold text-teal hover:underline disabled:opacity-40">
+                <button onClick={openAddDialog} disabled={adding} className="font-semibold text-teal hover:underline disabled:opacity-40">
                   Add “{newName.trim()}” as a new product
                 </button>
               </p>
@@ -706,7 +730,9 @@ function StatsDashboard() {
                   {activeGroups.map(({ type, items }) => (
                     <tbody key={type}>
                       <tr>
-                        <td colSpan={5} className="px-3 py-1.5 bg-surface2 text-[10px] font-bold uppercase tracking-wide text-muted">{type} ({items.length})</td>
+                        <td colSpan={5} className={`px-3 py-1.5 text-[10px] font-bold uppercase tracking-wide ${type === NEW_PRODUCT_TYPE ? 'bg-orange-500/10 text-orange-500' : 'bg-surface2 text-muted'}`}>
+                          {type === NEW_PRODUCT_TYPE ? '🆕 Added here' : type} ({items.length})
+                        </td>
                       </tr>
                       {items.map(p => {
                         const stock = totalForProduct(p.product_id, p.pieces_per_box ?? 0);
@@ -850,6 +876,63 @@ function StatsDashboard() {
         )}
       </main>
     </div>
+
+    {addDialog && (
+      <div
+        className="print-hide fixed inset-0 z-150 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4"
+        onClick={() => setAddDialog(null)}
+        onKeyDown={e => { if (e.key === 'Escape') setAddDialog(null); }}
+      >
+        <form
+          role="dialog"
+          aria-label="How many to order"
+          onClick={e => e.stopPropagation()}
+          onSubmit={e => { e.preventDefault(); confirmAddDialog(); }}
+          className="w-full max-w-xs p-5 rounded-3xl bg-surface border border-white/10 shadow-2xl"
+        >
+          <p className="text-[11px] text-muted">Add new product</p>
+          <p className="text-sm font-bold text-slate-100 mt-0.5 break-words">{addDialog.name}</p>
+          {selSupplierName && <p className="text-[11px] text-muted mt-0.5">for {selSupplierName}</p>}
+
+          <label className="block text-[11px] font-semibold text-muted mt-4 mb-1.5">Quantity</label>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setAddQty(q => String(Math.max(0, Math.floor(toNum(q)) - 1)))}
+              aria-label="Decrease quantity"
+              className="w-11 h-11 rounded-xl bg-danger/10 border border-danger/25 text-danger text-xl font-bold hover:bg-danger hover:text-white transition-all active:scale-90"
+            >−</button>
+            <input
+              autoFocus
+              type="number" inputMode="numeric" min="0"
+              value={addQty}
+              onChange={e => setAddQty(e.target.value)}
+              onFocus={e => e.currentTarget.select()}
+              onWheel={e => e.currentTarget.blur()}
+              aria-label="Quantity"
+              className="flex-1 min-w-0 h-11 px-3 rounded-xl bg-surface2 border border-white/10 text-lg font-bold text-slate-100 text-center tabular-nums outline-none focus:border-teal/40"
+            />
+            <button
+              type="button"
+              onClick={() => setAddQty(q => String(Math.floor(toNum(q)) + 1))}
+              aria-label="Increase quantity"
+              className="w-11 h-11 rounded-xl btn-primary text-xl font-bold active:scale-90"
+            >+</button>
+          </div>
+
+          <div className="flex gap-2 mt-5">
+            <button type="button" onClick={() => setAddDialog(null)}
+              className="flex-1 py-2.5 rounded-xl bg-surface2 border border-white/10 text-slate-300 text-xs font-bold hover:border-white/25">
+              Cancel
+            </button>
+            <button type="submit" disabled={adding}
+              className="flex-1 py-2.5 rounded-xl btn-primary text-xs font-bold disabled:opacity-40">
+              OK
+            </button>
+          </div>
+        </form>
+      </div>
+    )}
 
     {ordersOpen && (
       <div className="print-hide fixed inset-0 z-150 bg-black/70 backdrop-blur-sm flex items-end sm:items-center justify-center" onClick={() => setOrdersOpen(false)}>
