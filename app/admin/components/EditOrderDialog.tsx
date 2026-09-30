@@ -111,7 +111,6 @@ export default function EditOrderDialog({ order, suppliers, onSaved, onClose }: 
             </thead>
             <tbody>
               {drafts.map((d, i) => {
-                const q = num(d.qty);
                 return (
                   <tr key={`${d.line.product_id}-${i}`} className="border-t border-white/5">
                     <td className="py-2 pr-2 text-slate-200">{d.line.product_name}</td>
@@ -132,7 +131,7 @@ export default function EditOrderDialog({ order, suppliers, onSaved, onClose }: 
                     <td className="py-2 pr-2">
                       <select value={d.unit} onChange={e => update(i, { unit: e.target.value as OrderUnit })}
                         aria-label={`Unit for ${d.line.product_name}`} className={`${cell} w-24`}>
-                        {ORDER_UNITS.map(u => <option key={u} value={u}>{unitLabel(u, q)}</option>)}
+                        {ORDER_UNITS.map(u => <option key={u} value={u}>{unitLabel(u)}</option>)}
                       </select>
                     </td>
                     <td className="py-2 text-right">

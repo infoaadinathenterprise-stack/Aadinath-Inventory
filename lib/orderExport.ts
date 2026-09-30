@@ -31,8 +31,8 @@ function orderSheet(order: SavedOrder): Uint8Array {
     [],
     priced ? ['#', 'Product', 'Price', 'Qty', 'Unit', 'Amount'] : ['#', 'Product', 'Qty', 'Unit'],
     ...order.items.map((l, i) => priced
-      ? [i + 1, lineName(l), l.price > 0 ? l.price : '', l.qty, unitLabel(l.unit, l.qty), l.price > 0 ? l.price * l.qty : '']
-      : [i + 1, lineName(l), l.qty, unitLabel(l.unit, l.qty)]),
+      ? [i + 1, lineName(l), l.price > 0 ? l.price : '', l.qty, unitLabel(l.unit), l.price > 0 ? l.price * l.qty : '']
+      : [i + 1, lineName(l), l.qty, unitLabel(l.unit)]),
     ...(priced ? [[], ['', '', '', '', 'Total', Number(order.total_amount)]] : []),
   ];
   const header = rows.findIndex(r => r[0] === '#');

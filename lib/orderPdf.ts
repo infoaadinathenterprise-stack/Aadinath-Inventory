@@ -17,18 +17,17 @@ export interface OrderLine {
 export type OrderUnit = 'pc' | 'box' | 'roll';
 export const ORDER_UNITS: OrderUnit[] = ['pc', 'box', 'roll'];
 
-// "Pc" / "Pcs", "Box" / "Boxes", "Roll" / "Rolls" — singular only for 1.
-export function unitLabel(unit: OrderUnit | undefined, qty: number): string {
-  const one = qty === 1;
+// Always plural, whatever the quantity: "1 Pcs", "2 Boxes", "3 Rolls".
+export function unitLabel(unit: OrderUnit | undefined): string {
   switch (unit ?? 'pc') {
-    case 'box':  return one ? 'Box'  : 'Boxes';
-    case 'roll': return one ? 'Roll' : 'Rolls';
-    default:     return one ? 'Pc'   : 'Pcs';
+    case 'box':  return 'Boxes';
+    case 'roll': return 'Rolls';
+    default:     return 'Pcs';
   }
 }
 
 export function qtyWithUnit(l: OrderLine): string {
-  return `${l.qty} ${unitLabel(l.unit, l.qty)}`;
+  return `${l.qty} ${unitLabel(l.unit)}`;
 }
 
 // Name printed on the order: the supplier's, else ours.

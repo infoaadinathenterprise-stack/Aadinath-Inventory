@@ -398,8 +398,8 @@ function StatsDashboard() {
       [],
       priced ? ['Product', 'Price', 'Quantity', 'Unit'] : ['Product', 'Quantity', 'Unit'],
       ...lines.map(l => priced
-        ? [lineName(l), l.price > 0 ? l.price : '', l.qty, unitLabel(l.unit, l.qty)]
-        : [lineName(l), l.qty, unitLabel(l.unit, l.qty)]),
+        ? [lineName(l), l.price > 0 ? l.price : '', l.qty, unitLabel(l.unit)]
+        : [lineName(l), l.qty, unitLabel(l.unit)]),
     ];
     const headerRow = rows.findIndex(r => r[0] === 'Product');
     const safe = (selSupplierName ?? 'All suppliers').replace(/[^\w\- ]+/g, '').trim().replace(/\s+/g, '-');
@@ -916,14 +916,14 @@ function StatsDashboard() {
                               />
                             </td>
                             <td className="px-3 py-2">
-                              {/* Pc/Pcs, Box/Boxes, Roll/Rolls — the word follows the quantity */}
+                              {/* Pcs, Boxes or Rolls */}
                               <select
                                 value={inp?.unit ?? 'pc'}
                                 onChange={e => setOrderInputs(prev => ({ ...prev, [p.product_id]: { ...(prev[p.product_id] ?? { price: '', qty: '' }), unit: e.target.value as OrderUnit } }))}
                                 aria-label={`Unit for ${p.product_name}`}
                                 className="w-24 px-2 py-1.5 rounded-lg bg-surface2 border border-white/10 text-sm text-slate-100 outline-none focus:border-teal/40"
                               >
-                                {ORDER_UNITS.map(u => <option key={u} value={u}>{unitLabel(u, toNum(inp?.qty))}</option>)}
+                                {ORDER_UNITS.map(u => <option key={u} value={u}>{unitLabel(u)}</option>)}
                               </select>
                             </td>
                           </tr>
