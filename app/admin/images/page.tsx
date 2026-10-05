@@ -201,7 +201,8 @@ function ImagesDashboard() {
           {visible.slice(0, PREVIEW_LIMIT).map(p => {
             const isPending = !!pending[p.product_id];
             const isSaving  = savingId === p.product_id;
-            const src = pending[p.product_id] ?? productImageDataUrl(p);
+            // A picked-but-unsaved image, else the saved one, else the default.
+            const src = pending[p.product_id] ?? p.image_url ?? productImageDataUrl(p);
             return (
               <div key={p.product_id} className="rounded-xl overflow-hidden card-lux">
                 <div className="relative w-full aspect-square">

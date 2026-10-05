@@ -15,6 +15,7 @@ import AdjustStockModal from '@/app/admin/components/AdjustStockModal';
 import BarcodeScanner   from '@/app/admin/components/BarcodeScanner';
 import Toast, { type ToastState } from '@/app/admin/components/Toast';
 import type { Product, LocationInfo } from '@/lib/types';
+import ProductThumb from '@/app/components/ProductThumb';
 import { SESSION_KEY, ROLE_KEY, DEFAULT_COMPANY_ID } from '@/lib/types';
 
 // ── Auth guard ─────────────────────────────────────────────────────────────────
@@ -1469,8 +1470,10 @@ function PosProductCard({ product: p, index, locationId, locations, stockByLoc, 
       onClick={() => onAdjust(p, 'minus')}
       className="flex flex-col rounded-2xl card-lux hover:border-teal/30 cursor-pointer transition-colors duration-200 overflow-hidden active:bg-surface2/60"
     >
-      {/* Name block — full width so long names wrap instead of clipping */}
-      <div className="px-4 pt-3.5 pb-2">
+      {/* Picture + name block — long names wrap instead of clipping */}
+      <div className="px-4 pt-3.5 pb-2 flex items-start gap-3">
+        <ProductThumb product={p} className="w-16 h-16 shrink-0 rounded-xl border border-white/10" />
+        <div className="flex-1 min-w-0">
         <p className="text-[15px] font-semibold text-slate-100 leading-snug break-words line-clamp-2" style={{ fontFamily: 'var(--font-display)' }}>
           {p.product_name}
         </p>
@@ -1483,6 +1486,7 @@ function PosProductCard({ product: p, index, locationId, locations, stockByLoc, 
         {p.selling_price != null && (
           <p className="text-[12px] font-bold text-gold mt-1.5">Ksh {p.selling_price.toLocaleString('en-KE')}</p>
         )}
+        </div>
       </div>
 
       {/* Stock status + tap controls */}

@@ -2,6 +2,7 @@
 
 import { motion } from 'framer-motion';
 import { formatStock } from '@/lib/formatStock';
+import ProductThumb from '@/app/components/ProductThumb';
 import type { Product, StockByLoc, LocationInfo } from '@/lib/types';
 
 // Stock at this location over a chosen period, rebuilt from the movement
@@ -66,8 +67,9 @@ export default function AdminProductCard({
       className={`relative flex flex-col rounded-2xl card-lux ${tone.card} hover:border-teal/30 transition-colors duration-200 overflow-hidden`}
     >
       <span aria-hidden className={`absolute left-0 top-0 bottom-0 w-1 ${tone.bar}`} />
-      {/* ── Name block: full card width so long names wrap, never clip ── */}
-      <div className="px-4 pt-3.5 pb-2.5 flex items-start gap-2">
+      {/* ── Picture + name block: long names wrap, never clip ── */}
+      <div className="px-4 pt-3.5 pb-2.5 flex items-start gap-3">
+        <ProductThumb product={p} className="w-16 h-16 shrink-0 rounded-xl border border-white/10" />
         <div className="flex-1 min-w-0">
           <p className="text-[15px] font-semibold text-slate-100 leading-snug break-words line-clamp-2" style={{ fontFamily: 'var(--font-display)' }}>
             {p.product_name}
