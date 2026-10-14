@@ -202,7 +202,12 @@ function PurchasesDashboard() {
   const load = useCallback(async () => {
     if (firstLoad.current) setLoading(true);
     const [pr, sr, prd, lr, cr] = await Promise.all([
-      supabase.from('purchases').select('*').order('created_at', { ascending: false }),
+      // Everything but the bill photos: they're stored inline (several MB
+      // across all bills) and only the purchase detail shows them, which
+      // loads its own full row in openDetail().
+      supabase.from('purchases')
+        .select('purchase_id, supplier_id, supplier_name_raw, purchase_date, total_amount, notes, status, created_by, created_at')
+        .order('created_at', { ascending: false }),
       supabase.from('suppliers').select('*').eq('active_status', true).order('supplier_name'),
       supabase.from('products').select('*').eq('active_status', true).order('product_name'),
       supabase.from('locations').select('location_id, location_name, active_status').eq('active_status', true).order('location_id'),
@@ -212,7 +217,7 @@ function PurchasesDashboard() {
       const msg = (pr.error ?? sr.error ?? prd.error)!.message;
       setToast({ msg: 'Failed to load: ' + msg, type: 'error', id: ++toastId.current });
     } else {
-      setPurchases((pr.data ?? []) as Purchase[]);
+      setPurchases(((pr.data ?? []) as Omit<Purchase, 'bill_image_url'>[]).map(p => ({ ...p, bill_image_url: null })));
       setSuppliers((sr.data ?? []) as Supplier[]);
       setProducts((prd.data ?? []) as Product[]);
       // Fallback to the two original locations if the table read returns empty
