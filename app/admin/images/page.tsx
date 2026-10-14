@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import { useProducts } from '@/lib/hooks/useProducts';
 import { productImageDataUrl } from '@/lib/productImage';
+import { isInlinePhoto, uploadProductPhoto } from '@/lib/productImageStore';
 import { logout as apiLogout, isAuthenticated } from '@/lib/auth';
 import { ROLE_KEY } from '@/lib/types';
 import AdminNavbar from '../components/AdminNavbar';
@@ -32,6 +33,11 @@ function ImagesDashboard() {
   const [onlyMissing, setOnlyMissing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState(0);
+
+  // ── One-time move of photos saved inside product rows into Storage ──
+  // (supabase/15_product_image_storage.sql backs them up first). Each
+  // product is switched to the link only after its upload succeeds.
+  const [moving, setMoving] = useState<{ done: number; total: number; failed: number } | null>(null);
   const [toast, setToast] = useState<ToastState | null>(null);
   const toastId = useRef(0);
 
@@ -96,9 +102,13 @@ function ImagesDashboard() {
   }
 
   async function saveCardImage(productId: number) {
-    const url = pending[productId];
-    if (!url) return;
+    const picked = pending[productId];
+    if (!picked) return;
     setSavingId(productId);
+    // The photo goes to Storage; the product keeps only its link.
+    let url: string;
+    try { url = await uploadProductPhoto(picked); }
+    catch (err) { setSavingId(null); showToast(err instanceof Error ? err.message : 'Photo upload failed', 'error'); return; }
     const { error: e } = await supabase.from('products').update({ image_url: url }).eq('product_id', productId);
     setSavingId(null);
     if (e) { showToast('Failed to save image — check permissions/connection', 'error'); return; }
@@ -112,6 +122,31 @@ function ImagesDashboard() {
     () => (onlyMissing ? products.filter(p => !p.image_url) : products),
     [products, onlyMissing],
   );
+
+  const inlineCount = products.filter(p => isInlinePhoto(p.image_url)).length;
+
+  async function movePhotosToStorage() {
+    const todo = products.filter(p => isInlinePhoto(p.image_url));
+    if (todo.length === 0) return;
+    let done = 0, failed = 0;
+    setMoving({ done, total: todo.length, failed });
+    const CHUNK = 4;
+    for (let i = 0; i < todo.length; i += CHUNK) {
+      await Promise.all(todo.slice(i, i + CHUNK).map(async p => {
+        try {
+          const url = await uploadProductPhoto(p.image_url!);
+          const { error: e } = await supabase.from('products').update({ image_url: url }).eq('product_id', p.product_id);
+          if (e) throw e;
+        } catch { failed++; }
+        done++;
+      }));
+      setMoving({ done, total: todo.length, failed });
+    }
+    setMoving(null);
+    if (failed > 0) showToast(`Moved ${done - failed} photos, ${failed} failed — press again to retry those`, 'error');
+    else showToast(`Moved ${done} photos to storage ✓`, 'success');
+    refresh();
+  }
 
   async function generateAll() {
     if (targets.length === 0) { showToast('Nothing to generate', 'error'); return; }
@@ -154,6 +189,20 @@ function ImagesDashboard() {
         </div>
 
         {error && <div className="mb-3 px-3 py-2 rounded-xl bg-danger/10 border border-danger/30 text-danger text-xs">{error}</div>}
+
+        {(inlineCount > 0 || moving) && (
+          <div className="mb-3 px-3 py-2.5 rounded-xl bg-teal/5 border border-teal/25 text-[11px] text-slate-200 flex flex-wrap items-center gap-3">
+            <span className="flex-1 min-w-48">
+              {moving
+                ? `Moving photos to storage… ${moving.done} of ${moving.total}${moving.failed ? ` · ${moving.failed} failed` : ''}`
+                : <><b>{inlineCount}</b> photo{inlineCount === 1 ? ' is' : 's are'} saved inside the product list, which slows every page down. Move them to storage — they look the same, pages load much faster.</>}
+            </span>
+            <button onClick={movePhotosToStorage} disabled={!!moving}
+              className="px-3 py-1.5 rounded-lg btn-primary text-[11px] font-bold disabled:opacity-50">
+              {moving ? 'Moving…' : 'Move photos to storage'}
+            </button>
+          </div>
+        )}
 
         <div className="mb-3 px-3 py-2.5 rounded-xl bg-gold/5 border border-gold/20 text-[11px] text-gold/80 leading-relaxed">
           These are generated graphics (icon + name), always correct and consistent. They <b>replace</b> existing images

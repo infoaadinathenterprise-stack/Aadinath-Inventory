@@ -15,6 +15,7 @@ import AdminNavbar      from './components/AdminNavbar';
 import ProductList      from './components/ProductList';
 import AdjustStockModal from './components/AdjustStockModal';
 import Toast, { type ToastState } from './components/Toast';
+import { storableImageUrl } from '@/lib/productImageStore';
 
 interface ModalState {
   product:    Product;
@@ -439,6 +440,8 @@ function ProductModal({
     };
 
     try {
+      // A newly picked photo goes to Storage; the row keeps just its link.
+      payload.image_url = await storableImageUrl(imageUrl);
       let productId: number;
       if (editing) {
         const { error } = await supabase.from('products').update(payload).eq('product_id', editing.product_id);
