@@ -953,7 +953,9 @@ function EditPurchaseModal({
 
       // ── Handle brand-new rows: create product if needed, insert item,
       //    add stock, log PURCHASE_IN ─────────────────────────────────────
-      const validNew = newRows.filter(r => (r.productId || r.productName.trim()) && r.qty > 0);
+      // Shown newest-first; saved in the order they were added (rowId).
+      const validNew = newRows.filter(r => (r.productId || r.productName.trim()) && r.qty > 0)
+        .sort((x, y) => x.rowId - y.rowId);
       for (const row of validNew) {
         let productId = row.productId;
         if (!productId && row.productName.trim()) {
@@ -1098,7 +1100,8 @@ function EditPurchaseModal({
                 </button>
                 <button
                   type="button"
-                  onClick={() => setNewRows(r => [...r, blankNewRow()])}
+                  // New rows go on top so the one being typed is always in view.
+                  onClick={() => setNewRows(r => [blankNewRow(), ...r])}
                   className="text-[11px] font-bold text-teal px-3 py-1 rounded-lg bg-teal/10 border border-teal/20 hover:bg-teal/20 transition-colors"
                 >+ Add Item</button>
               </div>
@@ -1108,6 +1111,21 @@ function EditPurchaseModal({
             )}
 
             <div className="flex flex-col gap-2">
+              {/* New items — on top, newest first; full picker for any product + location */}
+              {newRows.map((row, idx) => (
+                <div key={row.rowId} className="relative">
+                  <span className="absolute -top-1.5 left-3 z-10 text-[8px] font-bold uppercase tracking-widest text-success bg-surface px-1.5 rounded">New item</span>
+                  <ItemRowEditor
+                    row={row}
+                    index={rows.filter(r => !r.removed).length + (newRows.length - 1 - idx)}
+                    products={products}
+                    locations={locations}
+                    onChange={patch => updateNewRow(row.rowId, patch)}
+                    onRemove={() => setNewRows(rs => rs.filter(r => r.rowId !== row.rowId))}
+                  />
+                </div>
+              ))}
+
               {rows.map((row, idx) => (
                 <div key={row.rowKey} className={`rounded-xl border p-3 transition-colors ${
                   row.removed ? 'border-danger/30 bg-danger/5 opacity-70' : 'border-white/8 bg-surface2'
@@ -1193,20 +1211,6 @@ function EditPurchaseModal({
                 </div>
               ))}
 
-              {/* New items — full picker so you can choose any product + location */}
-              {newRows.map((row, idx) => (
-                <div key={row.rowId} className="relative">
-                  <span className="absolute -top-1.5 left-3 z-10 text-[8px] font-bold uppercase tracking-widest text-success bg-surface px-1.5 rounded">New item</span>
-                  <ItemRowEditor
-                    row={row}
-                    index={rows.filter(r => !r.removed).length + idx}
-                    products={products}
-                    locations={locations}
-                    onChange={patch => updateNewRow(row.rowId, patch)}
-                    onRemove={() => setNewRows(rs => rs.filter(r => r.rowId !== row.rowId))}
-                  />
-                </div>
-              ))}
             </div>
           </div>
 
@@ -1596,7 +1600,10 @@ ${rawText}`;
   }
 
   async function save() {
-    const validRows = items.filter(r => (r.productId || r.productName.trim()) && r.qty > 0);
+    // Shown newest-first; saved in the order they were added (rowId), which
+    // for a scanned bill is the bill's own order.
+    const validRows = items.filter(r => (r.productId || r.productName.trim()) && r.qty > 0)
+      .sort((x, y) => x.rowId - y.rowId);
     if (validRows.length === 0) { onError('Add at least one item with quantity'); return; }
     setSaving(true);
     try {
@@ -1889,7 +1896,8 @@ ${rawText}`;
                 </button>
                 <button
                   type="button"
-                  onClick={() => setItems(r => [...r, blankRow()])}
+                  // New rows go on top so the one being typed is always in view.
+                  onClick={() => setItems(r => [blankRow(), ...r])}
                   className="text-[11px] font-bold text-teal px-3 py-1 rounded-lg bg-teal/10 border border-teal/20 hover:bg-teal/20 transition-colors"
                 >+ Add Item</button>
               </div>
@@ -1902,7 +1910,8 @@ ${rawText}`;
                 <ItemRowEditor
                   key={row.rowId}
                   row={row}
-                  index={idx}
+                  // Numbered in the order added (newest, on top, is highest).
+                  index={items.length - 1 - idx}
                   products={products}
                   locations={locations}
                   onChange={patch => updateRow(row.rowId, patch)}
