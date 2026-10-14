@@ -5,6 +5,7 @@ import { supabase } from '@/lib/supabase';
 import { formatStock } from '@/lib/formatStock';
 import type { Product } from '@/lib/types';
 import ProductGrid from '../components/ProductGrid';
+import { readPageCache, writePageCache } from '@/lib/pageCache';
 
 interface StockRow { quantity: number | null; box_quantity: number | null; }
 
@@ -14,6 +15,9 @@ export default function ProductsPage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    // Last visit's catalogue shows instantly; the fresh one replaces it.
+    const cached = readPageCache<{ products: Product[]; categories: string[] }>('storefront');
+    if (cached) { setProducts(cached.products); setCategories(cached.categories); setLoading(false); }
     async function load() {
       const { data, error } = await supabase
         .from('products')
@@ -37,6 +41,7 @@ export default function ProductsPage() {
       setProducts(mapped);
       setCategories(cats);
       setLoading(false);
+      writePageCache('storefront', { products: mapped, categories: cats });
     }
     load();
   }, []);

@@ -10,6 +10,7 @@ import { stockTxn, type StockOp } from '@/lib/stockActions';
 import AdminNavbar from '../components/AdminNavbar';
 import CompanyLetterhead from '../components/CompanyLetterhead';
 import Toast, { type ToastState } from '../components/Toast';
+import { readPageCache, writePageCache } from '@/lib/pageCache';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -132,6 +133,7 @@ function InventoryAuditDashboard() {
   const [locationId,  setLocationId]  = useState<number>(0);
   const [allProducts, setAllProducts] = useState<Product[]>([]);
   const [auditRows,   setAuditRows]   = useState<AuditRow[]>([]);
+  const [rowsStale, setRowsStale] = useState(false);   // showing last visit's saved counts
   const [checks,      setChecks]      = useState<Record<number, AuditCheck>>({});
   const [loading,     setLoading]     = useState(false);
   const [search,      setSearch]      = useState('');
@@ -166,7 +168,14 @@ function InventoryAuditDashboard() {
   }
 
   // ── Load locations + products once ───────────────────────────────────────
+  // (last visit's copy first, so the checklist can show straight away)
   useEffect(() => {
+    const base = readPageCache<{ products: Product[]; locations: LocationInfo[] }>('audit:base');
+    if (base) {
+      setAllProducts(base.products);
+      setLocations(base.locations);
+      if (base.locations.length > 0 && !locationId) setLocationId(base.locations[0].location_id);
+    }
     Promise.all([
       supabase.from('products').select('*').eq('active_status', true).order('product_name'),
       supabase.from('locations').select('location_id, location_name').eq('active_status', true).order('location_id'),
@@ -174,6 +183,7 @@ function InventoryAuditDashboard() {
       setAllProducts((prods ?? []) as Product[]);
       const locList = (locs ?? []) as LocationInfo[];
       setLocations(locList);
+      if (prods && locs) writePageCache('audit:base', { products: prods, locations: locList });
       if (locList.length > 0 && !locationId) setLocationId(locList[0].location_id);
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -182,11 +192,20 @@ function InventoryAuditDashboard() {
   // ── Load audit rows + checklist state whenever location or product list changes ──
   const loadAuditRows = useCallback(async () => {
     if (allProducts.length === 0) return;
-    setLoading(true);
     setSelected(null);
 
     const locId = locationId;
     if (!locId) return;
+
+    // Last visit's checklist for this location shows instantly. Corrections
+    // wait for the fresh counts (rowsStale) — they're worked out from them.
+    const cached = readPageCache<{ rows: AuditRow[]; checks: Record<number, AuditCheck> }>(`audit:rows:${locId}`);
+    if (cached) {
+      setAuditRows(cached.rows);
+      setChecks(cached.checks);
+      setRowsStale(true);
+      setLoading(false);
+    } else setLoading(true);
 
     try {
       // 1. All stock rows for this location (any qty, including 0), one row
@@ -260,6 +279,8 @@ function InventoryAuditDashboard() {
 
       setAuditRows(rows);
       setChecks(nextChecks);
+      setRowsStale(false);
+      writePageCache(`audit:rows:${locId}`, { rows, checks: nextChecks });
     } catch (e) {
       showToast('Failed to load audit data: ' + (e instanceof Error ? e.message : 'Unknown'), 'error');
     } finally {
@@ -341,6 +362,7 @@ function InventoryAuditDashboard() {
   // (admins only get a box at all — see the isEditing-free render below),
   // apply the correction if it changed, and mark the row checked either way.
   async function handleDone(row: AuditRow) {
+    if (rowsStale) { showToast('Loading the latest stock — try again in a moment', 'error'); return; }
     if (role !== 'admin') { await markChecked(row, false); return; }
 
     const pid = row.product.product_id;

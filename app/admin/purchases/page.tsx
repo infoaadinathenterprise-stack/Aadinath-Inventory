@@ -9,6 +9,7 @@ import { SESSION_KEY, ROLE_KEY, DEFAULT_COMPANY_ID } from '@/lib/types';
 import { stockTxn, type StockOp } from '@/lib/stockActions';
 import AdminNavbar from '../components/AdminNavbar';
 import Toast, { type ToastState } from '../components/Toast';
+import { readPageCache, writePageCache } from '@/lib/pageCache';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -199,8 +200,17 @@ function PurchasesDashboard() {
   // are silent so the list keeps its scroll/filter state.
   const firstLoad = useRef(true);
 
+  // Last visit's lists show instantly; fresh ones replace them on arrival.
+  type PurchasesCache = { purchases: Purchase[]; suppliers: Supplier[]; products: Product[]; locations: LocationInfo[]; companies: Company[] };
   const load = useCallback(async () => {
-    if (firstLoad.current) setLoading(true);
+    if (firstLoad.current) {
+      const c = readPageCache<PurchasesCache>('purchases');
+      if (c) {
+        setPurchases(c.purchases); setSuppliers(c.suppliers); setProducts(c.products);
+        setLocations(c.locations); setCompanies(c.companies);
+        setLoading(false);
+      } else setLoading(true);
+    }
     const [pr, sr, prd, lr, cr] = await Promise.all([
       // Everything but the bill photos: they're stored inline (several MB
       // across all bills) and only the purchase detail shows them, which
@@ -217,20 +227,26 @@ function PurchasesDashboard() {
       const msg = (pr.error ?? sr.error ?? prd.error)!.message;
       setToast({ msg: 'Failed to load: ' + msg, type: 'error', id: ++toastId.current });
     } else {
-      setPurchases(((pr.data ?? []) as Omit<Purchase, 'bill_image_url'>[]).map(p => ({ ...p, bill_image_url: null })));
-      setSuppliers((sr.data ?? []) as Supplier[]);
-      setProducts((prd.data ?? []) as Product[]);
-      // Fallback to the two original locations if the table read returns empty
-      const locs = (lr.data ?? []) as LocationInfo[];
-      setLocations(locs.length > 0 ? locs : [
-        { location_id: 1, location_name: 'Main Store',             active_status: true },
-        { location_id: 2, location_name: 'Back Godown',            active_status: true },
-        { location_id: 3, location_name: 'Main Store First Floor', active_status: true },
-      ]);
-      const comps = (cr.data ?? []) as Company[];
-      setCompanies(comps.length > 0 ? comps : [
-        { company_id: 2, company_name: 'Jay Aadinath Enterprise', active_status: true },
-      ]);
+      const fresh: PurchasesCache = {
+        purchases: ((pr.data ?? []) as Omit<Purchase, 'bill_image_url'>[]).map(p => ({ ...p, bill_image_url: null })),
+        suppliers: (sr.data ?? []) as Supplier[],
+        products:  (prd.data ?? []) as Product[],
+        // Fallback to the original locations if the table read returns empty
+        locations: (lr.data ?? []).length > 0 ? (lr.data as LocationInfo[]) : [
+          { location_id: 1, location_name: 'Main Store',             active_status: true },
+          { location_id: 2, location_name: 'Back Godown',            active_status: true },
+          { location_id: 3, location_name: 'Main Store First Floor', active_status: true },
+        ],
+        companies: (cr.data ?? []).length > 0 ? (cr.data as Company[]) : [
+          { company_id: 2, company_name: 'Jay Aadinath Enterprise', active_status: true },
+        ],
+      };
+      setPurchases(fresh.purchases);
+      setSuppliers(fresh.suppliers);
+      setProducts(fresh.products);
+      setLocations(fresh.locations);
+      setCompanies(fresh.companies);
+      writePageCache('purchases', fresh);
     }
     firstLoad.current = false;
     setLoading(false);

@@ -8,6 +8,7 @@ import type { Supplier } from '@/lib/types';
 import { SESSION_KEY, ROLE_KEY } from '@/lib/types';
 import AdminNavbar from '../components/AdminNavbar';
 import Toast, { type ToastState } from '../components/Toast';
+import { readPageCache, writePageCache } from '@/lib/pageCache';
 
 interface SupplierForm {
   supplier_name: string;
@@ -38,12 +39,16 @@ function SuppliersDashboard() {
 
   const firstLoad = useRef(true);
   const load = useCallback(async () => {
-    if (firstLoad.current) setLoading(true);
+    if (firstLoad.current) {
+      const c = readPageCache<Supplier[]>('suppliers');
+      if (c) { setSuppliers(c); setLoading(false); } else setLoading(true);
+    }
     const { data, error } = await supabase.from('suppliers').select('*').eq('active_status', true).order('supplier_name');
     if (error) {
       setToast({ msg: 'Failed to load suppliers: ' + error.message, type: 'error', id: ++toastId.current });
     } else {
       setSuppliers((data ?? []) as Supplier[]);
+      writePageCache('suppliers', data ?? []);
     }
     firstLoad.current = false;
     setLoading(false);

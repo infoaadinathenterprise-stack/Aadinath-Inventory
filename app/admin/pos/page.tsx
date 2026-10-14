@@ -117,7 +117,7 @@ interface ModalState {
 }
 
 function PosDashboard() {
-  const { products, locations, companies, stockByLoc, boxByLoc, stockByCompany, boxByCompany, loading, error, refresh } = useProducts();
+  const { products, locations, companies, stockByLoc, boxByLoc, stockByCompany, boxByCompany, loading, stale, error, refresh } = useProducts();
   const { map: componentMap, refresh: refreshComponents } = useProductComponents();
 
   // locationId: default to first location once loaded
@@ -333,6 +333,8 @@ function PosDashboard() {
   }
 
   function addToCart(product: Product) {
+    // Saved numbers from last visit are still showing — wait for fresh stock.
+    if (stale) { showToast('Loading the latest stock — try again in a moment', 'error'); return; }
     let blocked = false;
     let blockedMax = 0;
     let blockedUnit: CartUnit = 'piece';
@@ -404,6 +406,7 @@ function PosDashboard() {
   }
 
   function openModal(product: Product, direction: 'plus' | 'minus') {
+    if (stale) { showToast('Loading the latest stock — try again in a moment', 'error'); return; }
     // Manual selection (tapping a product card or the − button) used
     // to pop the AdjustStockModal here and commit a sale directly.
     // Route 'minus' to the cart instead so the cashier can still edit

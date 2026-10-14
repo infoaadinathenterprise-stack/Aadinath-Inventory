@@ -9,6 +9,7 @@ import { SESSION_KEY, ROLE_KEY } from '@/lib/types';
 import AdminNavbar from '../components/AdminNavbar';
 import Toast, { type ToastState } from '../components/Toast';
 import DayCountPicker, { ymd, fmtYmd } from '../components/DayCountPicker';
+import { readPageCache, writePageCache } from '@/lib/pageCache';
 
 const MOVEMENT_TYPES = ['ALL', 'SALE', 'TRANSFER', 'ADJUSTMENT_IN', 'ADJUSTMENT_OUT', 'PURCHASE_IN', 'AUTO_DEDUCT', 'DAMAGED'];
 
@@ -126,7 +127,7 @@ function HistoryDashboard() {
   const [toDate,   setToDate]   = useState(() => ymd(new Date()));
 
   // Movements per local day across all history, for the calendar badges.
-  const [dayCounts, setDayCounts] = useState<Record<string, number>>({});
+  const [dayCounts, setDayCounts] = useState<Record<string, number>>(() => readPageCache<Record<string, number>>('history:daycounts') ?? {});
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -144,6 +145,7 @@ function HistoryDashboard() {
         counts[k] = (counts[k] ?? 0) + 1;
       }
       setDayCounts(counts);
+      writePageCache('history:daycounts', counts);
     })();
     return () => { cancelled = true; };
   }, []);
@@ -154,8 +156,17 @@ function HistoryDashboard() {
     if (!ok || role !== 'admin') router.replace('/admin');
   }, [router]);
 
+  // Last visit's records for these dates show instantly; fresh ones replace them.
+  type HistoryCache = { movements: StockMovement[]; products: Product[]; locNames: Record<number, string> };
   const load = useCallback(async () => {
-    setLoading(true);
+    const cacheKey = `history:${fromDate}:${toDate}`;
+    const cached = readPageCache<HistoryCache>(cacheKey);
+    if (cached) {
+      Object.assign(LOC_NAME, cached.locNames);
+      setMovements(cached.movements);
+      setProducts(cached.products);
+      setLoading(false);
+    } else setLoading(true);
     setLoadError(null);
     const [start, end] = dayRange(fromDate, toDate);
     const [movRes, reqRes, prodRes, locRes] = await Promise.all([
@@ -171,8 +182,10 @@ function HistoryDashboard() {
       supabase.from('locations').select('location_id, location_name'),
     ]);
     // Update module-level LOC_NAME with DB values
+    const locNames: Record<number, string> = {};
     for (const loc of locRes.data ?? []) {
       LOC_NAME[loc.location_id as number] = loc.location_name as string;
+      locNames[loc.location_id as number] = loc.location_name as string;
     }
 
     // Map stock_movements columns (movement_id, movement_at) → StockMovement interface (id, created_at)
@@ -204,6 +217,9 @@ function HistoryDashboard() {
 
     setMovements(merged);
     setProducts((prodRes.data ?? []) as Product[]);
+    if (!movRes.error && !reqRes.error && !prodRes.error) {
+      writePageCache(cacheKey, { movements: merged, products: prodRes.data ?? [], locNames });
+    }
 
     // Surface error only if BOTH movement sources fail; an empty result
     // from one is fine (table may not exist in this deployment).

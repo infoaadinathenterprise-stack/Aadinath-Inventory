@@ -1014,7 +1014,7 @@ function FormField({ label, children }: { label: string; children: React.ReactNo
 // ── Dashboard ─────────────────────────────────────────────────────────────────
 
 function Dashboard({ role }: { role: UserRole }) {
-  const { products, locations, companies, stockByLoc, boxByLoc, stockByCompany, boxByCompany, loading, error, refresh } = useProducts();
+  const { products, locations, companies, stockByLoc, boxByLoc, stockByCompany, boxByCompany, loading, stale, error, refresh } = useProducts();
   const [companyFilter, setCompanyFilter] = useState<'all' | number>('all');
   const [modal,        setModal]        = useState<ModalState | null>(null);
   const [productModal, setProductModal] = useState<{ editing: Product | null } | null>(null);
@@ -1037,7 +1037,10 @@ function Dashboard({ role }: { role: UserRole }) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [error]);
 
+  // While the page shows last visit's saved numbers, stock changes wait:
+  // they're worked out from the numbers on screen.
   function handleAdjust(product: Product, direction: 'plus' | 'minus', locationId: number) {
+    if (stale) { showToast('Loading the latest stock — try again in a moment', 'error'); return; }
     setModal({ product, direction, locationId });
   }
 
@@ -1106,7 +1109,10 @@ function Dashboard({ role }: { role: UserRole }) {
             stockByLoc={effStock}
             boxByLoc={effBox}
             onAdjust={handleAdjust}
-            onEdit={isAdmin ? (product => setProductModal({ editing: product })) : undefined}
+            onEdit={isAdmin ? (product => {
+              if (stale) { showToast('Loading the latest stock — try again in a moment', 'error'); return; }
+              setProductModal({ editing: product });
+            }) : undefined}
           />
         </Suspense>
       </main>

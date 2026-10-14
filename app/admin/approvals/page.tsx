@@ -9,6 +9,7 @@ import { SESSION_KEY, ROLE_KEY } from '@/lib/types';
 import type { Product } from '@/lib/types';
 import AdminNavbar from '../components/AdminNavbar';
 import Toast, { type ToastState } from '../components/Toast';
+import { readPageCache, writePageCache } from '@/lib/pageCache';
 
 interface PendingRequest {
   request_id:    number;
@@ -46,8 +47,18 @@ export default function ApprovalsPage() {
   }
 
   const firstLoad = useRef(true);
+  // Last visit's list shows instantly. Approving from it is safe: the
+  // database refuses a request that was already approved or rejected.
+  type ApprovalsCache = { requests: PendingRequest[]; products: Product[]; locNames: Record<number, string> };
   const load = useCallback(async () => {
-    if (firstLoad.current) setLoading(true);
+    if (firstLoad.current) {
+      const c = readPageCache<ApprovalsCache>('approvals');
+      if (c) {
+        Object.assign(LOC_NAME, c.locNames);
+        setRequests(c.requests); setProducts(c.products);
+        setLoading(false);
+      } else setLoading(true);
+    }
     const [reqRes, prodRes, locRes] = await Promise.all([
       supabase
         .from('stock_requests')
@@ -57,11 +68,16 @@ export default function ApprovalsPage() {
       supabase.from('products').select('product_id, product_name, type, unit_of_measure, pieces_per_box'),
       supabase.from('locations').select('location_id, location_name'),
     ]);
+    const locNames: Record<number, string> = {};
     for (const loc of locRes.data ?? []) {
       LOC_NAME[loc.location_id as number] = loc.location_name as string;
+      locNames[loc.location_id as number] = loc.location_name as string;
     }
     setRequests((reqRes.data ?? []) as PendingRequest[]);
     setProducts((prodRes.data ?? []) as Product[]);
+    if (!reqRes.error && !prodRes.error) {
+      writePageCache('approvals', { requests: reqRes.data ?? [], products: prodRes.data ?? [], locNames });
+    }
     firstLoad.current = false;
     setLoading(false);
   }, []);

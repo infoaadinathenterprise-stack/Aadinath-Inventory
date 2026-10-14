@@ -9,6 +9,7 @@ import type { Sale, SaleItem, Withdrawal, Company } from '@/lib/types';
 import { SESSION_KEY, USER_KEY, ROLE_KEY, DEFAULT_COMPANY_ID } from '@/lib/types';
 import AdminNavbar from '../components/AdminNavbar';
 import Toast, { type ToastState } from '../components/Toast';
+import { readPageCache, writePageCache } from '@/lib/pageCache';
 
 // ── Auth gate ────────────────────────────────────────────────────────────────
 
@@ -89,9 +90,19 @@ function SalesDashboard() {
   // Spinner only while the page has nothing to show. Day switches and
   // post-save refreshes update in place without blanking the page.
   const firstLoad = useRef(true);
+  // Last visit's figures for this day show instantly; fresh ones replace them.
+  type SalesCache = { sales: Sale[]; withdrawals: Withdrawal[]; items: Record<number, SaleItem[]>; buyMap: Record<number, number>; companies: Company[]; locNames: Record<number, string> };
   const load = useCallback(async () => {
-    if (firstLoad.current) setLoading(true);
+    const cacheKey = `sales:${day}`;
+    const cached = readPageCache<SalesCache>(cacheKey);
+    if (cached) {
+      Object.assign(LOC_NAME, cached.locNames);
+      setSales(cached.sales); setWithdrawals(cached.withdrawals); setItems(cached.items);
+      setBuyMap(cached.buyMap); setCompanies(cached.companies);
+      setLoading(false);
+    } else if (firstLoad.current) setLoading(true);
     setError(null);
+    const snap: SalesCache = { sales: [], withdrawals: [], items: {}, buyMap: {}, companies: [], locNames: {} };
 
     const [salesRes, withdrawRes, locRes, compRes] = await Promise.all([
       supabase.from('sales').select('*').eq('sale_date', day).order('created_at', { ascending: false }),
@@ -101,10 +112,12 @@ function SalesDashboard() {
     ]);
     for (const loc of locRes.data ?? []) {
       LOC_NAME[loc.location_id as number] = loc.location_name as string;
+      snap.locNames[loc.location_id as number] = loc.location_name as string;
     }
-    setCompanies((compRes.data as Company[] | null)?.length
+    snap.companies = (compRes.data as Company[] | null)?.length
       ? (compRes.data as Company[])
-      : [{ company_id: 2, company_name: 'Jay Aadinath Enterprise', active_status: true }]);
+      : [{ company_id: 2, company_name: 'Jay Aadinath Enterprise', active_status: true }];
+    setCompanies(snap.companies);
 
     if (salesRes.error) {
       setError('Sales: ' + salesRes.error.message);
@@ -113,13 +126,11 @@ function SalesDashboard() {
     }
     // Withdrawals table may not exist yet — soft-fail so the sales
     // section still renders even before the user runs the SQL.
-    if (withdrawRes.error) {
-      setWithdrawals([]);
-    } else {
-      setWithdrawals((withdrawRes.data ?? []) as Withdrawal[]);
-    }
+    snap.withdrawals = withdrawRes.error ? [] : (withdrawRes.data ?? []) as Withdrawal[];
+    setWithdrawals(snap.withdrawals);
 
     const salesRows = (salesRes.data ?? []) as Sale[];
+    snap.sales = salesRows;
     setSales(salesRows);
 
     if (salesRows.length > 0) {
@@ -132,6 +143,7 @@ function SalesDashboard() {
       for (const it of (itemsData ?? []) as SaleItem[]) {
         (map[it.sale_id] ||= []).push(it);
       }
+      snap.items = map;
       setItems(map);
 
       // Fetch current buying prices for every product referenced by
@@ -151,6 +163,7 @@ function SalesDashboard() {
         for (const p of (prods ?? []) as { product_id: number; buying_price: number | null }[]) {
           if (p.buying_price != null) bm[p.product_id] = p.buying_price;
         }
+        snap.buyMap = bm;
         setBuyMap(bm);
       } else {
         setBuyMap({});
@@ -159,6 +172,7 @@ function SalesDashboard() {
       setItems({});
       setBuyMap({});
     }
+    writePageCache(`sales:${day}`, snap);
     firstLoad.current = false;
     setLoading(false);
   }, [day]);

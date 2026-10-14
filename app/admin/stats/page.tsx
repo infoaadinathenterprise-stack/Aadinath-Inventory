@@ -13,6 +13,7 @@ import EditOrderDialog from '../components/EditOrderDialog';
 import { buildOrderFile, downloadFile } from '@/lib/orderExport';
 import PlaceOrderWizard from '../components/PlaceOrderWizard';
 import { ORDER_ONLY_TYPE } from '@/lib/orderOnly';
+import { readPageCache, writePageCache } from '@/lib/pageCache';
 
 // One purchase_items row flattened with its purchase's supplier/date.
 interface PurchaseRecord {
@@ -144,10 +145,12 @@ function StatsDashboard() {
   }
 
   // ── Suppliers + full purchase history (last price per product/supplier) ──
-  const [suppliers,       setSuppliers]       = useState<Supplier[]>([]);
+  // Last visit's copies (lib/pageCache) show instantly while fresh ones load;
+  // this component only renders in the browser, after the login check.
+  const [suppliers,       setSuppliers]       = useState<Supplier[]>(() => readPageCache<{ suppliers: Supplier[] }>('order:records')?.suppliers ?? []);
   const [supplierId,      setSupplierId]      = useState<number | ''>('');
-  const [records,         setRecords]         = useState<PurchaseRecord[]>([]);
-  const [recordsLoading,  setRecordsLoading]  = useState(true);
+  const [records,         setRecords]         = useState<PurchaseRecord[]>(() => readPageCache<{ records: PurchaseRecord[] }>('order:records')?.records ?? []);
+  const [recordsLoading,  setRecordsLoading]  = useState(() => !readPageCache('order:records'));
   const [recordsError,    setRecordsError]    = useState<string | null>(null);
   const [lowOnly,         setLowOnly]         = useState(false);
 
@@ -163,7 +166,10 @@ function StatsDashboard() {
       setSuppliers(all.filter(s => s.active_status));
       try {
         const recs = await loadPurchaseRecords(new Map(all.map(s => [s.supplier_id, s.supplier_name])));
-        if (!cancelled) setRecords(recs);
+        if (!cancelled) {
+          setRecords(recs);
+          writePageCache('order:records', { suppliers: all.filter(s => s.active_status), records: recs });
+        }
       } catch (e) {
         if (!cancelled) setRecordsError(e instanceof Error ? e.message : String(e));
       } finally {
@@ -177,17 +183,21 @@ function StatsDashboard() {
   // to a supplier is listed under that supplier afterwards, with the
   // ordered price (newest of bill or order wins). Products added on this
   // page never appear on a bill, so orders are their only history.
-  const [orderHistory, setOrderHistory] = useState<SavedOrder[]>([]);
+  const [orderHistory, setOrderHistory] = useState<SavedOrder[]>(() => readPageCache<SavedOrder[]>('order:orders') ?? []);
   useEffect(() => {
     let cancelled = false;
     supabase.from('purchase_orders').select('*').order('order_id', { ascending: false }).limit(2000)
-      .then(({ data }) => { if (!cancelled) setOrderHistory((data ?? []) as SavedOrder[]); });
+      .then(({ data, error }) => {
+        if (cancelled || error) return;
+        setOrderHistory((data ?? []) as SavedOrder[]);
+        writePageCache('order:orders', data ?? []);
+      });
     return () => { cancelled = true; };
   }, []);
 
   // ── What each supplier calls our products (supplier_product_names) ──
   type SupNameRow = { supplier_id: number; product_id: number; supplier_product_name: string; updated_at: string };
-  const [supNameRows, setSupNameRows] = useState<SupNameRow[]>([]);
+  const [supNameRows, setSupNameRows] = useState<SupNameRow[]>(() => readPageCache<SupNameRow[]>('order:supnames') ?? []);
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -201,7 +211,7 @@ function StatsDashboard() {
         rows.push(...((data ?? []) as SupNameRow[]));
         if ((data ?? []).length < PAGE) break;
       }
-      if (!cancelled) setSupNameRows(rows);
+      if (!cancelled) { setSupNameRows(rows); writePageCache('order:supnames', rows); }
     })();
     return () => { cancelled = true; };
   }, []);
@@ -626,7 +636,8 @@ function StatsDashboard() {
   // its latest. stock_by_location.updated_at isn't usable: the company
   // merge (10_merge_companies.sql) re-stamped every row. Products with no
   // movements fall back to when they were created.
-  const [stockChangedAt, setStockChangedAt] = useState<Map<number, string>>(new Map());
+  const [stockChangedAt, setStockChangedAt] = useState<Map<number, string>>(
+    () => new Map(readPageCache<[number, string][]>('order:changed') ?? []));
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -644,7 +655,7 @@ function StatsDashboard() {
         }
         if ((data ?? []).length < PAGE) break;
       }
-      if (!cancelled) setStockChangedAt(latest);
+      if (!cancelled) { setStockChangedAt(latest); writePageCache('order:changed', [...latest]); }
     })();
     return () => { cancelled = true; };
   }, []);

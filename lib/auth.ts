@@ -8,6 +8,7 @@
 // can't be forged.
 
 import { SESSION_KEY, USER_KEY, ROLE_KEY, TOKEN_KEY, type UserRole } from '@/lib/types';
+import { clearPageCaches } from './pageCache';
 
 // Auth runs on a standalone Cloudflare Worker (Pages Functions don't
 // reliably materialize on this project — same reason Gemini uses a
@@ -55,6 +56,7 @@ export async function login(username: string, pin: string): Promise<LoginResult>
   }
 
   const role: UserRole = data.role === 'admin' ? 'admin' : 'staff';
+  clearPageCaches();   // never show the previous user's saved page data
   localStorage.setItem(TOKEN_KEY,   data.token);
   localStorage.setItem(SESSION_KEY, '1');
   localStorage.setItem(USER_KEY,    data.full_name || username);
@@ -63,6 +65,7 @@ export async function login(username: string, pin: string): Promise<LoginResult>
 }
 
 export function logout(): void {
+  clearPageCaches();
   localStorage.removeItem(TOKEN_KEY);
   localStorage.removeItem(SESSION_KEY);
   localStorage.removeItem(USER_KEY);
