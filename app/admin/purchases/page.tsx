@@ -201,17 +201,21 @@ function PurchasesDashboard() {
   const firstLoad = useRef(true);
 
   // Last visit's lists show instantly; fresh ones replace them on arrival.
-  type PurchasesCache = { purchases: Purchase[]; suppliers: Supplier[]; products: Product[]; locations: LocationInfo[]; companies: Company[] };
+  type PurchasesCache = { purchases: Purchase[]; suppliers: Supplier[]; products: Product[]; locations: LocationInfo[]; companies: Company[]; priceLines?: PriceLine[] };
+  // Every bill line's price, to flag purchases that paid more than usual.
+  const [priceLines, setPriceLines] = useState<PriceLine[]>([]);
+  const overpays = useMemo(() => findOverpays(priceLines), [priceLines]);
   const load = useCallback(async () => {
     if (firstLoad.current) {
       const c = readPageCache<PurchasesCache>('purchases');
       if (c) {
         setPurchases(c.purchases); setSuppliers(c.suppliers); setProducts(c.products);
         setLocations(c.locations); setCompanies(c.companies);
+        if (c.priceLines) setPriceLines(c.priceLines);
         setLoading(false);
       } else setLoading(true);
     }
-    const [pr, sr, prd, lr, cr] = await Promise.all([
+    const [pr, sr, prd, lr, cr, pl] = await Promise.all([
       // Everything but the bill photos: they're stored inline (several MB
       // across all bills) and only the purchase detail shows them, which
       // loads its own full row in openDetail().
@@ -222,6 +226,7 @@ function PurchasesDashboard() {
       supabase.from('products').select('*').eq('active_status', true).order('product_name'),
       supabase.from('locations').select('location_id, location_name, active_status').eq('active_status', true).order('location_id'),
       supabase.from('companies').select('company_id, company_name, active_status').order('company_id'),
+      loadPriceLines().catch(() => null),
     ]);
     if (pr.error || sr.error || prd.error) {
       const msg = (pr.error ?? sr.error ?? prd.error)!.message;
@@ -240,7 +245,9 @@ function PurchasesDashboard() {
         companies: (cr.data ?? []).length > 0 ? (cr.data as Company[]) : [
           { company_id: 2, company_name: 'Jay Aadinath Enterprise', active_status: true },
         ],
+        priceLines: pl ?? undefined,
       };
+      if (pl) setPriceLines(pl);
       setPurchases(fresh.purchases);
       setSuppliers(fresh.suppliers);
       setProducts(fresh.products);
@@ -494,12 +501,17 @@ function PurchasesDashboard() {
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2">
-            {visiblePurchases.map((p, i) => (
+            {visiblePurchases.map((p, i) => {
+              const over = overpays.get(p.purchase_id);
+              return (
               <motion.div
                 key={p.purchase_id}
                 initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.02 }}
                 onClick={() => openDetail(p.purchase_id)}
-                className="bg-surface border border-white/8 rounded-xl p-4 cursor-pointer hover:border-teal/20 transition-all"
+                // Orange when something on this bill cost more than usual.
+                className={`border rounded-xl p-4 cursor-pointer transition-all ${
+                  over ? 'bg-orange-500/[0.06] border-orange-500/50 hover:border-orange-500/80' : 'bg-surface border-white/8 hover:border-teal/20'
+                }`}
               >
                 <div className="flex items-center justify-between">
                   <div className="font-semibold text-sm text-slate-100">{supplierName(p.supplier_id)}</div>
@@ -525,8 +537,15 @@ function PurchasesDashboard() {
                     }`}>{p.status}</span>
                   </div>
                 </div>
+                {over && (
+                  <div className="mt-2 text-[11px] font-semibold text-orange-500">
+                    ▲ Paid more than usual on {over.length} item{over.length === 1 ? '' : 's'}
+                    {' '}(+{fmtKsh(over.reduce((s, o) => s + o.diff, 0))}{over.length === 1 ? ' per unit' : ' per unit, total'})
+                  </div>
+                )}
               </motion.div>
-            ))}
+              );
+            })}
           </div>
         )}
       </main>
@@ -550,6 +569,7 @@ function PurchasesDashboard() {
         {detail && (
           <DetailDrawer
             data={detail}
+            overpays={overpays.get(detail.purchase.purchase_id) ?? []}
             supplierName={supplierName}
             productName={productName}
             companies={companies}
@@ -585,10 +605,83 @@ function PurchasesDashboard() {
 
 // ─── Detail drawer ────────────────────────────────────────────────────────────
 
+// ── "Paid more than usual" check ─────────────────────────────────────────────
+// One bill line's price, for comparing what a product usually costs.
+type PriceLine = { item_id: number; purchase_id: number; product_id: number; quantity: number | null; unit_price: number | null; total_price: number | null };
+
+// A line on a bill that cost more per unit than the product's regular price.
+interface Overpay {
+  itemId:    number;
+  productId: number;
+  paid:      number;   // per unit, incl. tax and after discount
+  regular:   number;   // median per-unit price of the product's other purchases
+  diff:      number;
+}
+
+async function loadPriceLines(): Promise<PriceLine[]> {
+  const PAGE = 1000;
+  const out: PriceLine[] = [];
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await supabase.from('purchase_items')
+      .select('item_id, purchase_id, product_id, quantity, unit_price, total_price')
+      .not('product_id', 'is', null)
+      .order('item_id').range(from, from + PAGE - 1);
+    if (error) throw new Error(error.message);
+    out.push(...((data ?? []) as PriceLine[]));
+    if ((data ?? []).length < PAGE) break;
+  }
+  return out;
+}
+
+// What one unit really cost: line total / quantity (so tax-exclusive entry
+// and discounts compare fairly), else the typed unit price.
+function unitCost(l: PriceLine): number | null {
+  if (l.total_price != null && l.quantity) return Math.round(l.total_price / l.quantity);
+  return l.unit_price != null && l.unit_price > 0 ? Math.round(l.unit_price) : null;
+}
+
+// purchase_items' key column is item_id (the PurchaseItem type calls it id).
+function itemKey(it: PurchaseItem): number {
+  return (it as PurchaseItem & { item_id?: number }).item_id ?? it.id;
+}
+
+function median(xs: number[]): number {
+  const v = [...xs].sort((a, b) => a - b);
+  const m = Math.floor(v.length / 2);
+  return v.length % 2 ? v[m] : Math.round((v[m - 1] + v[m]) / 2);
+}
+
+// purchase_id → its lines that cost more than the product's regular price:
+// the median of what that product cost on every OTHER purchase. Needs at
+// least one other purchase of the product to compare with.
+function findOverpays(lines: PriceLine[]): Map<number, Overpay[]> {
+  const byProduct = new Map<number, { line: PriceLine; cost: number }[]>();
+  for (const l of lines) {
+    const cost = unitCost(l);
+    if (cost == null || cost <= 0) continue;
+    (byProduct.get(l.product_id) ?? byProduct.set(l.product_id, []).get(l.product_id)!).push({ line: l, cost });
+  }
+  const out = new Map<number, Overpay[]>();
+  for (const [productId, entries] of byProduct) {
+    for (const { line, cost } of entries) {
+      const others = entries.filter(e => e.line.purchase_id !== line.purchase_id).map(e => e.cost);
+      if (others.length === 0) continue;
+      const regular = median(others);
+      const diff = cost - regular;
+      if (diff >= 1) {
+        (out.get(line.purchase_id) ?? out.set(line.purchase_id, []).get(line.purchase_id)!)
+          .push({ itemId: line.item_id, productId, paid: cost, regular, diff });
+      }
+    }
+  }
+  return out;
+}
+
 function DetailDrawer({
-  data, supplierName, productName, companies, companyName, onConvert, onClose, onDelete, deleting, onEdit,
+  data, overpays, supplierName, productName, companies, companyName, onConvert, onClose, onDelete, deleting, onEdit,
 }: {
   data: { purchase: Purchase; items: PurchaseItem[] };
+  overpays:     Overpay[];
   supplierName: (id: number | null) => string;
   productName:  (id: number | null, raw: string | null) => string;
   companies:    Company[];
@@ -641,17 +734,23 @@ function DetailDrawer({
         )}
 
         <div className="text-[10px] font-bold text-muted uppercase tracking-widest mb-2">Items ({data.items.length})</div>
-        {data.items.map((item, i) => (
-          <div key={i} className="flex justify-between py-2.5 border-b border-white/5 text-sm">
+        {data.items.map((item, i) => {
+          const over = overpays.find(o => o.itemId === itemKey(item));
+          return (
+          <div key={i} className={`flex justify-between py-2.5 border-b text-sm ${over ? 'border-orange-500/30 bg-orange-500/[0.06] -mx-2 px-2 rounded-lg' : 'border-white/5'}`}>
             <div>
-              <div className="font-semibold text-slate-100">{productName(item.product_id, item.product_name_raw)}</div>
+              <div className="font-semibold text-slate-100">
+                {productName(item.product_id, item.product_name_raw)}
+                {over && <span className="ml-2 text-[10px] font-bold text-orange-500">▲ +{fmtKsh(over.diff)}</span>}
+              </div>
               <div className="text-xs text-muted">
                 Qty: {item.quantity}{item.unit_price ? ` · ${fmtKsh(item.unit_price)}/unit` : ''}
               </div>
             </div>
             {item.total_price && <div className="font-bold text-teal">{fmtKsh(item.total_price)}</div>}
           </div>
-        ))}
+          );
+        })}
 
         {data.purchase.total_amount != null && (() => {
           const total = data.purchase.total_amount!;
@@ -673,6 +772,23 @@ function DetailDrawer({
             </div>
           );
         })()}
+
+        {overpays.length > 0 && (
+          <div className="mt-3 rounded-xl border border-orange-500/40 bg-orange-500/10 px-4 py-3 text-xs text-slate-200 space-y-1.5">
+            <p className="font-bold text-orange-500">▲ Paid more than usual</p>
+            {overpays.map(o => {
+              const item = data.items.find(it => itemKey(it) === o.itemId);
+              return (
+                <p key={o.itemId}>
+                  <b>{productName(o.productId, item?.product_name_raw ?? null)}</b> was bought for{' '}
+                  <b className="text-orange-500">{fmtKsh(o.diff)} more</b> per unit than its regular price
+                  {' '}({fmtKsh(o.regular)}) — paid {fmtKsh(o.paid)}.
+                </p>
+              );
+            })}
+            <p className="text-[10px] text-muted">Regular price = the typical price paid for the product on your other purchases (incl. tax, after discount).</p>
+          </div>
+        )}
 
         {urls.length > 0 && (
           <div className="mt-4">
