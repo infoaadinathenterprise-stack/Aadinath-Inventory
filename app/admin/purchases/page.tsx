@@ -202,7 +202,12 @@ function PurchasesDashboard() {
   const firstLoad = useRef(true);
 
   // Last visit's lists show instantly; fresh ones replace them on arrival.
-  type PurchasesCache = { purchases: Purchase[]; suppliers: Supplier[]; products: Product[]; locations: LocationInfo[]; companies: Company[]; priceLines?: PriceLine[] };
+  type PurchasesCache = { purchases: Purchase[]; suppliers: Supplier[]; products: Product[]; locations: LocationInfo[]; companies: Company[]; priceLines?: PriceLine[]; allNames?: ProductName[] };
+  // Name, SKU, brand and model of every product, deleted ones included:
+  // older bills still point at products that were deleted since (e.g. one
+  // later re-created under a new id), and they should still show by name.
+  const [allNames, setAllNames] = useState<ProductName[]>([]);
+  const nameById = useMemo(() => new Map(allNames.map(n => [n.product_id, n])), [allNames]);
   // Every bill line's price, to flag purchases that paid more than usual.
   const [priceLines, setPriceLines] = useState<PriceLine[]>([]);
   const overpays = useMemo(() => findOverpays(priceLines), [priceLines]);
@@ -216,10 +221,11 @@ function PurchasesDashboard() {
         setPurchases(c.purchases); setSuppliers(c.suppliers); setProducts(c.products);
         setLocations(c.locations); setCompanies(c.companies);
         if (c.priceLines) setPriceLines(c.priceLines);
+        if (c.allNames) setAllNames(c.allNames);
         setLoading(false);
       } else setLoading(true);
     }
-    const [pr, sr, prd, lr, cr, pl] = await Promise.all([
+    const [pr, sr, prd, lr, cr, pl, an] = await Promise.all([
       // Everything but the bill photos: they're stored inline (several MB
       // across all bills) and only the purchase detail shows them, which
       // loads its own full row in openDetail().
@@ -231,6 +237,7 @@ function PurchasesDashboard() {
       supabase.from('locations').select('location_id, location_name, active_status').eq('active_status', true).order('location_id'),
       supabase.from('companies').select('company_id, company_name, active_status').order('company_id'),
       loadPriceLines().catch(() => null),
+      supabase.from('products').select('product_id, product_name, stock_keeping_unit, brand, model'),
     ]);
     if (pr.error || sr.error || prd.error) {
       const msg = (pr.error ?? sr.error ?? prd.error)!.message;
@@ -250,8 +257,10 @@ function PurchasesDashboard() {
           { company_id: 2, company_name: 'Jay Aadinath Enterprise', active_status: true },
         ],
         priceLines: pl ?? undefined,
+        allNames: an.error ? undefined : (an.data ?? []) as ProductName[],
       };
       if (pl) setPriceLines(pl);
+      if (fresh.allNames) setAllNames(fresh.allNames);
       setPurchases(fresh.purchases);
       setSuppliers(fresh.suppliers);
       setProducts(fresh.products);
@@ -318,7 +327,7 @@ function PurchasesDashboard() {
 
   function productName(id: number | null, raw: string | null) {
     if (!id) return raw ?? '—';
-    return products.find(p => p.product_id === id)?.product_name ?? raw ?? `#${id}`;
+    return products.find(p => p.product_id === id)?.product_name ?? nameById.get(id)?.product_name ?? raw ?? `#${id}`;
   }
 
   async function openDetail(id: number) {
@@ -514,7 +523,7 @@ function PurchasesDashboard() {
             query={productQuery}
             lines={priceLines}
             purchases={visiblePurchases}
-            products={products}
+            names={nameById}
             supplierName={supplierName}
             onOpen={openDetail}
           />
@@ -647,16 +656,18 @@ function PurchasesDashboard() {
 // ─── Detail drawer ────────────────────────────────────────────────────────────
 
 // ── Product search results: every bill a product was bought on ──────────────
-function ProductPurchaseResults({ query, lines, purchases, products, supplierName, onOpen }: {
+type ProductName = { product_id: number; product_name: string; stock_keeping_unit: string | null; brand: string | null; model: string | null };
+
+function ProductPurchaseResults({ query, lines, purchases, names, supplierName, onOpen }: {
   query:        string;
   lines:        PriceLine[];
   purchases:    Purchase[];
-  products:     Product[];
+  names:        Map<number, ProductName>;   // every product, deleted ones too
   supplierName: (id: number | null) => string;
   onOpen:       (purchaseId: number) => void;
 }) {
   const q = query.trim().toLowerCase();
-  const byId = new Map(products.map(p => [p.product_id, p]));
+  const byId = names;
   const bills = new Map(purchases.map(p => [p.purchase_id, p]));
   const rows = lines
     .map(l => {
