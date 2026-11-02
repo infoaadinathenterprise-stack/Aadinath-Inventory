@@ -84,6 +84,10 @@ export interface Purchase {
   status:            string;
   bill_image_url:    string | null;
   created_at:        string;
+  // Delivery cost for this bill and the path of its receipt photo in the
+  // private delivery-receipts bucket (supabase/16_purchase_delivery.sql).
+  delivery_charge?:       number | null;
+  delivery_receipt_path?: string | null;
 }
 
 export interface PurchaseItem {

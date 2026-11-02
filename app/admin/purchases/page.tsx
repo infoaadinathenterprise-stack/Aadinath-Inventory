@@ -10,6 +10,7 @@ import { stockTxn, type StockOp } from '@/lib/stockActions';
 import AdminNavbar from '../components/AdminNavbar';
 import Toast, { type ToastState } from '../components/Toast';
 import { readPageCache, writePageCache } from '@/lib/pageCache';
+import DeliveryCharge from '../components/DeliveryCharge';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -205,6 +206,9 @@ function PurchasesDashboard() {
   // Every bill line's price, to flag purchases that paid more than usual.
   const [priceLines, setPriceLines] = useState<PriceLine[]>([]);
   const overpays = useMemo(() => findOverpays(priceLines), [priceLines]);
+
+  // ── Product search: which bills a product was bought on ──
+  const [productQuery, setProductQuery] = useState('');
   const load = useCallback(async () => {
     if (firstLoad.current) {
       const c = readPageCache<PurchasesCache>('purchases');
@@ -220,7 +224,7 @@ function PurchasesDashboard() {
       // across all bills) and only the purchase detail shows them, which
       // loads its own full row in openDetail().
       supabase.from('purchases')
-        .select('purchase_id, supplier_id, supplier_name_raw, purchase_date, total_amount, notes, status, created_by, created_at')
+        .select('purchase_id, supplier_id, supplier_name_raw, purchase_date, total_amount, notes, status, created_by, created_at, delivery_charge, delivery_receipt_path')
         .order('created_at', { ascending: false }),
       supabase.from('suppliers').select('*').eq('active_status', true).order('supplier_name'),
       supabase.from('products').select('*').eq('active_status', true).order('product_name'),
@@ -474,6 +478,21 @@ function PurchasesDashboard() {
           </button>
         </div>
 
+        <div className="relative mb-3">
+          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted text-sm">🔍</span>
+          <input
+            value={productQuery}
+            onChange={e => setProductQuery(e.target.value)}
+            placeholder="Find a product — see every bill it was bought on, with quantity and price…"
+            aria-label="Search purchases by product"
+            className="w-full pl-9 pr-9 py-2.5 rounded-xl bg-surface border border-white/8 text-sm text-slate-100 placeholder:text-muted/60 outline-none focus:border-teal/40"
+          />
+          {productQuery && (
+            <button onClick={() => setProductQuery('')} aria-label="Clear search"
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-muted hover:text-slate-100 text-lg leading-none">×</button>
+          )}
+        </div>
+
         {companies.length > 1 && (
           <div className="flex gap-2 overflow-x-auto scrollbar-none pb-3">
             {[{ id: 'all' as 'all' | number, name: 'All companies' },
@@ -490,7 +509,16 @@ function PurchasesDashboard() {
           </div>
         )}
 
-        {loading ? (
+        {productQuery.trim() ? (
+          <ProductPurchaseResults
+            query={productQuery}
+            lines={priceLines}
+            purchases={visiblePurchases}
+            products={products}
+            supplierName={supplierName}
+            onOpen={openDetail}
+          />
+        ) : loading ? (
           <div className="flex justify-center py-20">
             <div className="w-8 h-8 rounded-full border-2 border-teal border-t-transparent animate-spin" />
           </div>
@@ -537,6 +565,12 @@ function PurchasesDashboard() {
                     }`}>{p.status}</span>
                   </div>
                 </div>
+                {p.delivery_charge != null && (
+                  <div className="mt-1.5 text-[11px] text-muted">
+                    🚚 Delivery <b className="text-slate-200 tabular-nums">{fmtKsh(p.delivery_charge)}</b>
+                    {p.delivery_receipt_path ? ' · receipt attached' : ''}
+                  </div>
+                )}
                 {over && (
                   <div className="mt-2 text-[11px] font-semibold text-orange-500">
                     ▲ Paid more than usual on {over.length} item{over.length === 1 ? '' : 's'}
@@ -570,6 +604,13 @@ function PurchasesDashboard() {
           <DetailDrawer
             data={detail}
             overpays={overpays.get(detail.purchase.purchase_id) ?? []}
+            onDeliverySaved={(charge, receiptPath) => {
+              const id = detail.purchase.purchase_id;
+              const patch = { delivery_charge: charge, delivery_receipt_path: receiptPath };
+              setDetail(d => (d && d.purchase.purchase_id === id ? { ...d, purchase: { ...d.purchase, ...patch } } : d));
+              setPurchases(list => list.map(x => (x.purchase_id === id ? { ...x, ...patch } : x)));
+              showToast(charge != null ? 'Delivery charge saved ✓' : 'Delivery details updated ✓', 'success');
+            }}
             supplierName={supplierName}
             productName={productName}
             companies={companies}
@@ -605,9 +646,87 @@ function PurchasesDashboard() {
 
 // ─── Detail drawer ────────────────────────────────────────────────────────────
 
+// ── Product search results: every bill a product was bought on ──────────────
+function ProductPurchaseResults({ query, lines, purchases, products, supplierName, onOpen }: {
+  query:        string;
+  lines:        PriceLine[];
+  purchases:    Purchase[];
+  products:     Product[];
+  supplierName: (id: number | null) => string;
+  onOpen:       (purchaseId: number) => void;
+}) {
+  const q = query.trim().toLowerCase();
+  const byId = new Map(products.map(p => [p.product_id, p]));
+  const bills = new Map(purchases.map(p => [p.purchase_id, p]));
+  const rows = lines
+    .map(l => {
+      const p = l.product_id != null ? byId.get(l.product_id) : undefined;
+      const name = p?.product_name ?? l.product_name_raw ?? '';
+      const hay = [name, l.product_name_raw, p?.stock_keeping_unit, p?.brand, p?.model].filter(Boolean).join(' ').toLowerCase();
+      const bill = bills.get(l.purchase_id);
+      return hay.includes(q) && bill ? { l, name, bill, cost: unitCost(l) } : null;
+    })
+    .filter((r): r is NonNullable<typeof r> => r !== null)
+    .sort((a, b) => (b.bill.purchase_date ?? '').localeCompare(a.bill.purchase_date ?? '') || b.bill.purchase_id - a.bill.purchase_id);
+
+  if (lines.length === 0) return <p className="text-center text-sm text-muted py-16">Loading purchase lines…</p>;
+  if (rows.length === 0) return <p className="text-center text-sm text-muted py-16">No purchase includes “{query.trim()}”.</p>;
+
+  const totalQty = rows.reduce((s, r) => s + (r.l.quantity ?? 0), 0);
+  const totalCost = rows.reduce((s, r) => s + (r.l.total_price ?? 0), 0);
+  const productsFound = new Set(rows.map(r => r.name)).size;
+
+  return (
+    <div className="rounded-2xl border border-white/8 overflow-x-auto">
+      <p className="px-3 py-2 text-[11px] text-muted border-b border-white/8">
+        {rows.length} line{rows.length === 1 ? '' : 's'} on {new Set(rows.map(r => r.bill.purchase_id)).size} bill(s)
+        {productsFound > 1 ? ` · ${productsFound} products match` : ''} — tap a row to open the bill
+      </p>
+      <table className="w-full min-w-[720px] text-sm">
+        <thead className="bg-surface">
+          <tr className="text-left text-[10px] font-bold uppercase tracking-wide text-muted border-b border-white/8">
+            <th className="px-3 py-2">Date</th>
+            <th className="px-2 py-2">Product</th>
+            <th className="px-2 py-2">Supplier · Bill</th>
+            <th className="px-2 py-2 text-right">Qty</th>
+            <th className="px-2 py-2 text-right whitespace-nowrap">Price / unit</th>
+            <th className="px-3 py-2 text-right">Line total</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map(({ l, name, bill, cost }) => (
+            <tr key={l.item_id} onClick={() => onOpen(bill.purchase_id)}
+              className="border-t border-white/5 hover:bg-white/[0.03] cursor-pointer">
+              <td className="px-3 py-2 whitespace-nowrap text-slate-300">{bill.purchase_date ? fmtDate(bill.purchase_date) : '—'}</td>
+              <td className="px-2 py-2 text-slate-100">{name}</td>
+              <td className="px-2 py-2 text-slate-300">
+                {supplierName(bill.supplier_id)}
+                <span className="block text-[10px] text-muted truncate max-w-64">#{bill.purchase_id}{bill.notes ? ` · ${bill.notes}` : ''}</span>
+              </td>
+              <td className="px-2 py-2 text-right tabular-nums text-slate-100">{l.quantity ?? '—'}</td>
+              <td className="px-2 py-2 text-right tabular-nums text-slate-100 whitespace-nowrap">{cost != null ? fmtKsh(cost) : '—'}</td>
+              <td className="px-3 py-2 text-right tabular-nums text-teal font-semibold whitespace-nowrap">{l.total_price != null ? fmtKsh(l.total_price) : '—'}</td>
+            </tr>
+          ))}
+        </tbody>
+        <tfoot className="bg-surface">
+          <tr className="border-t-2 border-white/15 font-bold">
+            <td className="px-3 py-2 text-slate-100" colSpan={3}>Total</td>
+            <td className="px-2 py-2 text-right tabular-nums text-slate-100">{totalQty}</td>
+            <td className="px-2 py-2 text-right tabular-nums text-muted text-xs whitespace-nowrap">
+              {totalQty > 0 ? `avg ${fmtKsh(Math.round(totalCost / totalQty))}` : ''}
+            </td>
+            <td className="px-3 py-2 text-right tabular-nums text-teal whitespace-nowrap">{fmtKsh(totalCost)}</td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+  );
+}
+
 // ── "Paid more than usual" check ─────────────────────────────────────────────
 // One bill line's price, for comparing what a product usually costs.
-type PriceLine = { item_id: number; purchase_id: number; product_id: number; quantity: number | null; unit_price: number | null; total_price: number | null };
+type PriceLine = { item_id: number; purchase_id: number; product_id: number | null; product_name_raw: string | null; quantity: number | null; unit_price: number | null; total_price: number | null };
 
 // A line on a bill that cost more per unit than the product's regular price.
 interface Overpay {
@@ -623,8 +742,7 @@ async function loadPriceLines(): Promise<PriceLine[]> {
   const out: PriceLine[] = [];
   for (let from = 0; ; from += PAGE) {
     const { data, error } = await supabase.from('purchase_items')
-      .select('item_id, purchase_id, product_id, quantity, unit_price, total_price')
-      .not('product_id', 'is', null)
+      .select('item_id, purchase_id, product_id, product_name_raw, quantity, unit_price, total_price')
       .order('item_id').range(from, from + PAGE - 1);
     if (error) throw new Error(error.message);
     out.push(...((data ?? []) as PriceLine[]));
@@ -657,9 +775,11 @@ function median(xs: number[]): number {
 function findOverpays(lines: PriceLine[]): Map<number, Overpay[]> {
   const byProduct = new Map<number, { line: PriceLine; cost: number }[]>();
   for (const l of lines) {
+    if (l.product_id == null) continue;   // typed-in name, no product to compare with
     const cost = unitCost(l);
     if (cost == null || cost <= 0) continue;
-    (byProduct.get(l.product_id) ?? byProduct.set(l.product_id, []).get(l.product_id)!).push({ line: l, cost });
+    const pid = l.product_id;
+    (byProduct.get(pid) ?? byProduct.set(pid, []).get(pid)!).push({ line: l, cost });
   }
   const out = new Map<number, Overpay[]>();
   for (const [productId, entries] of byProduct) {
@@ -678,10 +798,11 @@ function findOverpays(lines: PriceLine[]): Map<number, Overpay[]> {
 }
 
 function DetailDrawer({
-  data, overpays, supplierName, productName, companies, companyName, onConvert, onClose, onDelete, deleting, onEdit,
+  data, overpays, supplierName, productName, companies, companyName, onConvert, onClose, onDelete, deleting, onEdit, onDeliverySaved,
 }: {
   data: { purchase: Purchase; items: PurchaseItem[] };
   overpays:     Overpay[];
+  onDeliverySaved: (charge: number | null, receiptPath: string | null) => void;
   supplierName: (id: number | null) => string;
   productName:  (id: number | null, raw: string | null) => string;
   companies:    Company[];
@@ -772,6 +893,14 @@ function DetailDrawer({
             </div>
           );
         })()}
+
+        <DeliveryCharge
+          purchaseId={data.purchase.purchase_id}
+          charge={data.purchase.delivery_charge ?? null}
+          receiptPath={data.purchase.delivery_receipt_path ?? null}
+          billTotal={data.purchase.total_amount}
+          onSaved={onDeliverySaved}
+        />
 
         {overpays.length > 0 && (
           <div className="mt-3 rounded-xl border border-orange-500/40 bg-orange-500/10 px-4 py-3 text-xs text-slate-200 space-y-1.5">
