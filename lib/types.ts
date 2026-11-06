@@ -73,6 +73,16 @@ export interface Supplier {
   active_status: boolean;
 }
 
+// A transport company that delivers purchases (supabase/17_transporters.sql).
+export interface Transporter {
+  transporter_id:   number;
+  transporter_name: string;
+  phone:            string | null;
+  address:          string | null;
+  notes:            string | null;
+  active_status:    boolean;
+}
+
 export interface Purchase {
   purchase_id:       number;
   company_id?:       number;          // which company this purchase stocked into
@@ -88,6 +98,7 @@ export interface Purchase {
   // private delivery-receipts bucket (supabase/16_purchase_delivery.sql).
   delivery_charge?:       number | null;
   delivery_receipt_path?: string | null;
+  transporter_id?:        number | null;   // who delivered the goods
 }
 
 export interface PurchaseItem {

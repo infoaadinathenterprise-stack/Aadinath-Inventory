@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import { supabase } from '@/lib/supabase';
-import type { Purchase, PurchaseItem, Supplier, Product, LocationInfo, Company } from '@/lib/types';
+import type { Purchase, PurchaseItem, Supplier, Product, LocationInfo, Company, Transporter } from '@/lib/types';
 import { SESSION_KEY, ROLE_KEY, DEFAULT_COMPANY_ID } from '@/lib/types';
 import { stockTxn, type StockOp } from '@/lib/stockActions';
 import AdminNavbar from '../components/AdminNavbar';
@@ -202,7 +202,15 @@ function PurchasesDashboard() {
   const firstLoad = useRef(true);
 
   // Last visit's lists show instantly; fresh ones replace them on arrival.
-  type PurchasesCache = { purchases: Purchase[]; suppliers: Supplier[]; products: Product[]; locations: LocationInfo[]; companies: Company[]; priceLines?: PriceLine[]; allNames?: ProductName[] };
+  type PurchasesCache = { purchases: Purchase[]; suppliers: Supplier[]; products: Product[]; locations: LocationInfo[]; companies: Company[]; priceLines?: PriceLine[]; allNames?: ProductName[]; transporters?: Transporter[] };
+  // Every transporter (removed ones too, so old bills keep their name);
+  // the dropdowns offer only active ones.
+  const [transporters, setTransporters] = useState<Transporter[]>([]);
+  const activeTransporters = useMemo(() => transporters.filter(t => t.active_status), [transporters]);
+  function transporterName(id: number | null | undefined) {
+    if (id == null) return null;
+    return transporters.find(t => t.transporter_id === id)?.transporter_name ?? `Transporter #${id}`;
+  }
   // Name, SKU, brand and model of every product, deleted ones included:
   // older bills still point at products that were deleted since (e.g. one
   // later re-created under a new id), and they should still show by name.
@@ -222,15 +230,16 @@ function PurchasesDashboard() {
         setLocations(c.locations); setCompanies(c.companies);
         if (c.priceLines) setPriceLines(c.priceLines);
         if (c.allNames) setAllNames(c.allNames);
+        if (c.transporters) setTransporters(c.transporters);
         setLoading(false);
       } else setLoading(true);
     }
-    const [pr, sr, prd, lr, cr, pl, an] = await Promise.all([
+    const [pr, sr, prd, lr, cr, pl, an, tr] = await Promise.all([
       // Everything but the bill photos: they're stored inline (several MB
       // across all bills) and only the purchase detail shows them, which
       // loads its own full row in openDetail().
       supabase.from('purchases')
-        .select('purchase_id, supplier_id, supplier_name_raw, purchase_date, total_amount, notes, status, created_by, created_at, delivery_charge, delivery_receipt_path')
+        .select('purchase_id, supplier_id, supplier_name_raw, purchase_date, total_amount, notes, status, created_by, created_at, delivery_charge, delivery_receipt_path, transporter_id')
         .order('created_at', { ascending: false }),
       supabase.from('suppliers').select('*').eq('active_status', true).order('supplier_name'),
       supabase.from('products').select('*').eq('active_status', true).order('product_name'),
@@ -238,6 +247,7 @@ function PurchasesDashboard() {
       supabase.from('companies').select('company_id, company_name, active_status').order('company_id'),
       loadPriceLines().catch(() => null),
       supabase.from('products').select('product_id, product_name, stock_keeping_unit, brand, model'),
+      supabase.from('transporters').select('*').order('transporter_name'),
     ]);
     if (pr.error || sr.error || prd.error) {
       const msg = (pr.error ?? sr.error ?? prd.error)!.message;
@@ -258,7 +268,9 @@ function PurchasesDashboard() {
         ],
         priceLines: pl ?? undefined,
         allNames: an.error ? undefined : (an.data ?? []) as ProductName[],
+        transporters: tr.error ? undefined : (tr.data ?? []) as Transporter[],
       };
+      if (fresh.transporters) setTransporters(fresh.transporters);
       if (pl) setPriceLines(pl);
       if (fresh.allNames) setAllNames(fresh.allNames);
       setPurchases(fresh.purchases);
@@ -574,9 +586,10 @@ function PurchasesDashboard() {
                     }`}>{p.status}</span>
                   </div>
                 </div>
-                {p.delivery_charge != null && (
+                {(p.delivery_charge != null || p.transporter_id != null) && (
                   <div className="mt-1.5 text-[11px] text-muted">
-                    🚚 Delivery <b className="text-slate-200 tabular-nums">{fmtKsh(p.delivery_charge)}</b>
+                    🚚 {p.transporter_id != null && <>{transporterName(p.transporter_id)}{p.delivery_charge != null ? ' · ' : ''}</>}
+                    {p.delivery_charge != null && <>Delivery <b className="text-slate-200 tabular-nums">{fmtKsh(p.delivery_charge)}</b></>}
                     {p.delivery_receipt_path ? ' · receipt attached' : ''}
                   </div>
                 )}
@@ -597,6 +610,7 @@ function PurchasesDashboard() {
         {newOpen && (
           <NewPurchaseModal
             suppliers={suppliers}
+            transporters={activeTransporters}
             products={products}
             locations={locations}
             companies={companies}
@@ -612,6 +626,7 @@ function PurchasesDashboard() {
         {detail && (
           <DetailDrawer
             data={detail}
+            transporterName={transporterName(detail.purchase.transporter_id)}
             overpays={overpays.get(detail.purchase.purchase_id) ?? []}
             onDeliverySaved={(charge, receiptPath) => {
               const id = detail.purchase.purchase_id;
@@ -638,6 +653,8 @@ function PurchasesDashboard() {
           <EditPurchaseModal
             data={editTarget}
             suppliers={suppliers}
+            transporters={activeTransporters}
+            transporterName={transporterName}
             products={products}
             locations={locations}
             onRefreshProducts={refreshProducts}
@@ -809,9 +826,10 @@ function findOverpays(lines: PriceLine[]): Map<number, Overpay[]> {
 }
 
 function DetailDrawer({
-  data, overpays, supplierName, productName, companies, companyName, onConvert, onClose, onDelete, deleting, onEdit, onDeliverySaved,
+  data, transporterName, overpays, supplierName, productName, companies, companyName, onConvert, onClose, onDelete, deleting, onEdit, onDeliverySaved,
 }: {
   data: { purchase: Purchase; items: PurchaseItem[] };
+  transporterName: string | null;
   overpays:     Overpay[];
   onDeliverySaved: (charge: number | null, receiptPath: string | null) => void;
   supplierName: (id: number | null) => string;
@@ -838,6 +856,7 @@ function DetailDrawer({
         <div className="bg-surface2 rounded-xl p-4 mb-3">
           <div className="font-bold text-slate-100">{supplierName(data.purchase.supplier_id)}</div>
           <div className="text-xs text-muted mt-0.5">{data.purchase.purchase_date ? fmtDate(data.purchase.purchase_date) : '—'}</div>
+          {transporterName && <div className="text-xs text-slate-300 mt-1">🚚 Transporter: <b>{transporterName}</b></div>}
           {data.purchase.notes && <div className="text-xs text-muted/70 mt-1">{data.purchase.notes}</div>}
         </div>
 
@@ -989,10 +1008,12 @@ interface EditItemRow {
 }
 
 function EditPurchaseModal({
-  data, suppliers, products, locations, onRefreshProducts, onClose, onSaved, onError,
+  data, suppliers, transporters, transporterName, products, locations, onRefreshProducts, onClose, onSaved, onError,
 }: {
   data:      { purchase: Purchase; items: PurchaseItem[] };
   suppliers: Supplier[];
+  transporters: Transporter[];
+  transporterName: (id: number | null | undefined) => string | null;
   products:  Product[];
   locations: LocationInfo[];
   onRefreshProducts: () => Promise<number>;
@@ -1001,6 +1022,7 @@ function EditPurchaseModal({
   onError:   (msg: string) => void;
 }) {
   const [supplierId, setSupplierId] = useState(String(data.purchase.supplier_id ?? ''));
+  const [transporterId, setTransporterId] = useState(String(data.purchase.transporter_id ?? ''));
   const editCid = data.purchase.company_id ?? DEFAULT_COMPANY_ID;
   const [date,  setDate]  = useState(data.purchase.purchase_date ?? '');
   const [notes, setNotes] = useState(data.purchase.notes ?? '');
@@ -1126,6 +1148,7 @@ function EditPurchaseModal({
       // ── Update purchase header ─────────────────────────────────────────
       const { error: hErr } = await supabase.from('purchases').update({
         supplier_id:    supplierId ? parseInt(supplierId) : null,
+        transporter_id: transporterId ? parseInt(transporterId) : null,
         purchase_date:  date || null,
         notes:          notes.trim() || null,
         total_amount:   computedTotal > 0 ? computedTotal : null,
@@ -1294,6 +1317,20 @@ function EditPurchaseModal({
               className="w-full px-3 py-2.5 rounded-xl bg-surface2 border border-white/8 text-slate-100 text-sm outline-none focus:border-teal/40">
               <option value="">— Select supplier (optional) —</option>
               {suppliers.map(s => <option key={s.supplier_id} value={s.supplier_id}>{s.supplier_name}</option>)}
+            </select>
+          </div>
+
+          {/* Transporter */}
+          <div>
+            <label className="text-[10px] font-bold text-muted uppercase tracking-widest block mb-1">Transporter</label>
+            <select value={transporterId} onChange={e => setTransporterId(e.target.value)}
+              className="w-full px-3 py-2.5 rounded-xl bg-surface2 border border-white/8 text-slate-100 text-sm outline-none focus:border-teal/40">
+              <option value="">— Select transporter (optional) —</option>
+              {/* keep a since-removed transporter selectable on old bills */}
+              {data.purchase.transporter_id != null && !transporters.some(t => t.transporter_id === data.purchase.transporter_id) && (
+                <option value={data.purchase.transporter_id}>{transporterName(data.purchase.transporter_id)}</option>
+              )}
+              {transporters.map(t => <option key={t.transporter_id} value={t.transporter_id}>{t.transporter_name}</option>)}
             </select>
           </div>
 
@@ -1559,9 +1596,10 @@ const OCR_SPACE_KEY = 'K89615870288957';
 const GEMINI_PROXY_URL = 'https://aadinath-proxy.info-aadinathenterprise.workers.dev/api/gemini';
 
 function NewPurchaseModal({
-  suppliers, products, locations, companies, onRefreshProducts, onClose, onSaved, onError,
+  suppliers, transporters, products, locations, companies, onRefreshProducts, onClose, onSaved, onError,
 }: {
   suppliers: Supplier[];
+  transporters: Transporter[];
   products:  Product[];
   locations: LocationInfo[];
   companies: Company[];
@@ -1582,6 +1620,7 @@ function NewPurchaseModal({
   }
 
   const [supplierId, setSupplierId] = useState('');
+  const [transporterId, setTransporterId] = useState('');
   const [companyId,  setCompanyId]  = useState<number>(DEFAULT_COMPANY_ID);
   const [date,       setDate]       = useState(new Date().toISOString().split('T')[0]);
   const [notes,      setNotes]      = useState('');
@@ -1866,6 +1905,7 @@ ${rawText}`;
       const billField = images.length > 0 ? JSON.stringify(images.map(i => i.thumb)) : null;
       const { data: pArr, error: pErr } = await supabase.from('purchases').insert({
         supplier_id:    supplierId ? parseInt(supplierId) : null,
+        transporter_id: transporterId ? parseInt(transporterId) : null,
         company_id:     companyId,
         purchase_date:  date || null,
         total_amount:   computedTotal > 0 ? computedTotal : null,
@@ -2002,6 +2042,17 @@ ${rawText}`;
               <option value="">— Select supplier (optional) —</option>
               {suppliers.map(s => <option key={s.supplier_id} value={s.supplier_id}>{s.supplier_name}</option>)}
             </select>
+          </div>
+
+          {/* Transporter */}
+          <div>
+            <label className="text-[10px] font-bold text-muted uppercase tracking-widest block mb-1">Transporter</label>
+            <select value={transporterId} onChange={e => setTransporterId(e.target.value)}
+              className="w-full px-3 py-2.5 rounded-xl bg-surface2 border border-white/8 text-slate-100 text-sm outline-none focus:border-teal/40">
+              <option value="">— Select transporter (optional) —</option>
+              {transporters.map(t => <option key={t.transporter_id} value={t.transporter_id}>{t.transporter_name}</option>)}
+            </select>
+            {transporters.length === 0 && <p className="text-[10px] text-muted mt-1">Add transporters on the Suppliers / Transporters page.</p>}
           </div>
 
           {/* Company this purchase stocks into */}

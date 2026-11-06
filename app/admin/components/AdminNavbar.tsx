@@ -20,7 +20,7 @@ const ALL_LINKS = [
   { emoji: '🛒', label: 'Sales',     href: '/admin/sales',             roles: ['admin'] as UserRole[] },
   { emoji: '📋', label: 'History',   href: '/admin/history',           roles: ['admin'] as UserRole[] },
   { emoji: '🧾', label: 'Purchases', href: '/admin/purchases',         roles: ['admin'] as UserRole[] },
-  { emoji: '🏢', label: 'Suppliers', href: '/admin/suppliers',         roles: ['admin'] as UserRole[] },
+  { emoji: '🏢', label: 'Suppliers / Transporters', href: '/admin/suppliers',         roles: ['admin'] as UserRole[] },
   { emoji: '🏷️', label: 'Labels',    href: '/admin/labels',            roles: ['admin'] as UserRole[] },
   { emoji: '🏭', label: 'POS',       href: '/admin/pos',               roles: ['admin', 'staff'] as UserRole[] },
   { emoji: '🗂️', label: 'Audit',     href: '/admin/inventory-audit',   roles: ['admin', 'staff'] as UserRole[] },
