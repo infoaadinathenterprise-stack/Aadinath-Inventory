@@ -11,6 +11,8 @@ import AdminNavbar from '../components/AdminNavbar';
 import Toast, { type ToastState } from '../components/Toast';
 import { readPageCache, writePageCache } from '@/lib/pageCache';
 import DeliveryCharge from '../components/DeliveryCharge';
+import PhotoPicker from '../components/PhotoPicker';
+import { uploadReceipt } from '@/lib/deliveryReceipt';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -1056,13 +1058,18 @@ function EditPurchaseModal({
     return { rowId: newRowCounter.current++, productId: null, productName: '', qty: 1, unitPrice: null, locationId: locations[0]?.location_id ?? 2, taxInclusive: true, discountPct: 0 };
   }
   const [newRows, setNewRows] = useState<ItemRow[]>([]);
+  const [focusRowId, setFocusRowId] = useState<number | null>(null);
+  function addItem() {
+    const r = blankNewRow();
+    setNewRows(rs => [r, ...rs]);   // newest on top of the list
+    setFocusRowId(r.rowId);
+  }
   const [saving, setSaving] = useState(false);
   const [refreshingProducts, setRefreshingProducts] = useState(false);
   const [refreshHint, setRefreshHint] = useState<string | null>(null);
   // Bill photos — existing URLs/data-URLs plus any added during this edit.
   // Saved back to purchases.bill_image_url as a JSON array on save.
   const [billUrls, setBillUrls] = useState<string[]>(() => parseBillUrls(data.purchase.bill_image_url));
-  const editFileRef = useRef<HTMLInputElement>(null);
 
   async function addBillImage(file: File) {
     try {
@@ -1304,10 +1311,25 @@ function EditPurchaseModal({
         className="fixed inset-0 z-40 bg-black/70 backdrop-blur-sm" onClick={onClose} />
       <motion.div key="emd" initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }}
         transition={{ type: 'spring', damping: 28, stiffness: 220 }}
-        className="fixed bottom-0 inset-x-0 z-50 max-w-lg mx-auto card-lux rounded-t-3xl p-5 pb-8 max-h-[95vh] overflow-y-auto"
+        className="fixed bottom-0 inset-x-0 z-50 max-w-lg mx-auto card-lux rounded-t-3xl max-h-[95vh] flex flex-col"
       >
-        <div className="w-8 h-1 rounded-full bg-white/10 mx-auto mb-4" />
-        <h3 className="text-base font-bold text-slate-100 mb-4">✏️ Edit Purchase #{data.purchase.purchase_id}</h3>
+        <div className="shrink-0 px-5 pt-3 pb-3 border-b border-white/8">
+          <div className="w-8 h-1 rounded-full bg-white/10 mx-auto mb-3" />
+          <div className="flex items-center gap-2">
+            <h3 className="flex-1 min-w-0 truncate text-base font-bold text-slate-100">✏️ Edit Purchase #{data.purchase.purchase_id}</h3>
+            <button onClick={onClose} disabled={saving}
+              className="px-3 py-2 rounded-xl bg-surface2 border border-white/8 text-muted text-sm font-semibold hover:text-slate-100 disabled:opacity-50">
+              Cancel
+            </button>
+            <button onClick={save} disabled={saving}
+              className="px-4 py-2 rounded-xl btn-primary text-sm font-bold disabled:opacity-50 flex items-center gap-2">
+              {saving && <span className="w-3.5 h-3.5 rounded-full border-2 border-white border-t-transparent animate-spin" />}
+              {saving ? 'Saving…' : '✓ Save'}
+            </button>
+          </div>
+        </div>
+
+        <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-5 py-4">
 
         <div className="flex flex-col gap-3">
           {/* Supplier */}
@@ -1360,18 +1382,7 @@ function EditPurchaseModal({
                 ))}
               </div>
             )}
-            <div
-              onClick={() => editFileRef.current?.click()}
-              className="border-2 border-dashed border-white/15 rounded-xl p-4 text-center cursor-pointer hover:border-teal/30 hover:bg-teal/5 transition-all"
-            >
-              <div className="text-2xl mb-1">{billUrls.length > 0 ? '➕' : '📷'}</div>
-              <p className="text-xs text-muted">
-                {billUrls.length > 0 ? 'Add another photo' : 'Tap to attach a bill photo'}
-                <br /><b>Saved with the purchase · Max 10MB · JPG, PNG</b>
-              </p>
-            </div>
-            <input ref={editFileRef} type="file" accept="image/*" className="hidden"
-              onChange={e => { if (e.target.files?.[0]) addBillImage(e.target.files[0]); e.target.value = ''; }} />
+            <PhotoPicker multiple onPick={fs => fs.forEach(f => addBillImage(f))} />
           </div>
 
           {/* Existing items */}
@@ -1394,7 +1405,7 @@ function EditPurchaseModal({
                 <button
                   type="button"
                   // New rows go on top so the one being typed is always in view.
-                  onClick={() => setNewRows(r => [blankNewRow(), ...r])}
+                  onClick={addItem}
                   className="text-[11px] font-bold text-teal px-3 py-1 rounded-lg bg-teal/10 border border-teal/20 hover:bg-teal/20 transition-colors"
                 >+ Add Item</button>
               </div>
@@ -1415,6 +1426,8 @@ function EditPurchaseModal({
                     locations={locations}
                     onChange={patch => updateNewRow(row.rowId, patch)}
                     onRemove={() => setNewRows(rs => rs.filter(r => r.rowId !== row.rowId))}
+                    autoFocus={row.rowId === focusRowId}
+                    onEnter={addItem}
                   />
                 </div>
               ))}
@@ -1546,21 +1559,22 @@ function EditPurchaseModal({
             )}
           </div>
 
-          {/* Actions */}
-          <div className="flex gap-3 mt-2">
-            <button onClick={onClose} disabled={saving}
-              className="flex-1 py-2.5 rounded-xl bg-surface2 border border-white/8 text-muted text-sm font-semibold hover:text-slate-100 disabled:opacity-50">
-              Cancel
-            </button>
-            <button onClick={save} disabled={saving}
-              className="flex-1 py-2.5 rounded-xl btn-primary text-sm font-bold disabled:opacity-50 flex items-center justify-center gap-2">
-              {saving && <span className="w-3.5 h-3.5 rounded-full border-2 border-white border-t-transparent animate-spin" />}
-              ✓ Save Changes
-            </button>
-          </div>
           <p className="text-[10px] text-muted/70 text-center mt-1 leading-relaxed">
             Removing an item reverses its stock and logs it in History. Added items are recorded as new purchase entries.
           </p>
+        </div>
+        </div>
+
+        {/* Always visible: running total + add the next item */}
+        <div className="shrink-0 px-5 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] border-t border-white/8 flex items-center gap-3">
+          <div className="flex-1 min-w-0">
+            <div className="text-[10px] font-bold text-muted uppercase tracking-widest">Total · {activeRowCount} item{activeRowCount === 1 ? '' : 's'}</div>
+            <div className="text-base font-bold text-teal tabular-nums">{fmtKsh(computedTotal)}</div>
+          </div>
+          <button type="button" onClick={addItem}
+            className="px-5 py-2.5 rounded-xl bg-teal/15 border border-teal/40 text-teal text-sm font-bold hover:bg-teal/25 transition-colors">
+            + Add Item
+          </button>
         </div>
       </motion.div>
     </>
@@ -1613,7 +1627,6 @@ function NewPurchaseModal({
   // rowCounter.current. Otherwise we hit a TDZ ReferenceError on
   // mount and the whole page fails to load.
   const rowCounter = useRef(1);
-  const fileRef = useRef<HTMLInputElement>(null);
 
   function blankRow(): ItemRow {
     return { rowId: rowCounter.current++, productId: null, productName: '', qty: 1, unitPrice: null, locationId: 2, taxInclusive: true, discountPct: 0 };
@@ -1626,6 +1639,23 @@ function NewPurchaseModal({
   const [notes,      setNotes]      = useState('');
   const [images,     setImages]     = useState<BillImage[]>([]);
   const [items,      setItems]      = useState<ItemRow[]>(() => [blankRow()]);
+  const [focusRowId, setFocusRowId] = useState<number | null>(null);
+  function addItem() {
+    const r = blankRow();
+    setItems(rs => [r, ...rs]);     // newest on top of the list
+    setFocusRowId(r.rowId);
+  }
+  // Transport bill: what was paid to the transporter, and a photo of it.
+  const [deliveryAmount, setDeliveryAmount] = useState('');
+  const [receiptFile,    setReceiptFile]    = useState<File | null>(null);
+  const [receiptPreview, setReceiptPreview] = useState<string | null>(null);
+  useEffect(() => () => { if (receiptPreview) URL.revokeObjectURL(receiptPreview); }, [receiptPreview]);
+  function pickReceipt(f: File | undefined) {
+    if (!f) return;
+    if (!f.type.startsWith('image/')) { onError('Please pick an image file'); return; }
+    setReceiptFile(f);
+    setReceiptPreview(URL.createObjectURL(f));
+  }
   const [saving,     setSaving]     = useState(false);
   const [refreshingProducts, setRefreshingProducts] = useState(false);
   const [refreshHint, setRefreshHint] = useState<string | null>(null);
@@ -1900,6 +1930,8 @@ ${rawText}`;
     const validRows = items.filter(r => (r.productId || r.productName.trim()) && r.qty > 0)
       .sort((x, y) => x.rowId - y.rowId);
     if (validRows.length === 0) { onError('Add at least one item with quantity'); return; }
+    const deliveryCharge = deliveryAmount.trim() === '' ? null : Number(deliveryAmount);
+    if (deliveryCharge != null && (!Number.isFinite(deliveryCharge) || deliveryCharge < 0)) { onError('Enter a valid transport charge'); return; }
     setSaving(true);
     try {
       const billField = images.length > 0 ? JSON.stringify(images.map(i => i.thumb)) : null;
@@ -1912,6 +1944,7 @@ ${rawText}`;
         notes:          notes.trim() || null,
         status:         'CONFIRMED',
         bill_image_url: billField,
+        delivery_charge: deliveryCharge,
       }).select();
       if (pErr || !pArr?.[0]) throw new Error(pErr?.message ?? 'Failed to save purchase');
       const purchaseId = (pArr[0] as Purchase).purchase_id;
@@ -2009,12 +2042,25 @@ ${rawText}`;
         );
       }
 
+      // Transport bill photo goes to private storage once the bill exists.
+      let receiptError: string | null = null;
+      if (receiptFile) {
+        try {
+          const path = await uploadReceipt(purchaseId, receiptFile);
+          const { error: rErr } = await supabase.from('purchases').update({ delivery_receipt_path: path }).eq('purchase_id', purchaseId);
+          if (rErr) throw new Error(rErr.message);
+        } catch (e) {
+          receiptError = e instanceof Error ? e.message : 'upload failed';
+        }
+      }
+
       const summary =
         `Saved purchase #${purchaseId}` +
         (createdProducts > 0 ? ` · ${createdProducts} new product${createdProducts === 1 ? '' : 's'} created` : '') +
         ` · ${stockedRows} stock entry${stockedRows === 1 ? '' : 'ies'} updated`;
       console.log(summary);
       onSaved();
+      if (receiptError) onError(`Purchase saved, but the transport bill photo was not: ${receiptError}. Open the bill and add it under Delivery charges.`);
     } catch (e) {
       onError('Error: ' + (e instanceof Error ? e.message : 'Unknown'));
     } finally {
@@ -2028,10 +2074,25 @@ ${rawText}`;
         className="fixed inset-0 z-40 bg-black/70 backdrop-blur-sm" onClick={onClose} />
       <motion.div key="pmd" initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }}
         transition={{ type: 'spring', damping: 28, stiffness: 220 }}
-        className="fixed bottom-0 inset-x-0 z-50 max-w-lg mx-auto bg-surface border border-white/8 rounded-t-2xl p-5 pb-8 max-h-[95vh] overflow-y-auto"
+        className="fixed bottom-0 inset-x-0 z-50 max-w-lg mx-auto bg-surface border border-white/8 rounded-t-2xl max-h-[95vh] flex flex-col"
       >
-        <div className="w-8 h-1 rounded-full bg-white/10 mx-auto mb-4" />
-        <h3 className="text-base font-bold text-slate-100 mb-4">New Purchase</h3>
+        <div className="shrink-0 px-5 pt-3 pb-3 border-b border-white/8">
+          <div className="w-8 h-1 rounded-full bg-white/10 mx-auto mb-3" />
+          <div className="flex items-center gap-2">
+            <h3 className="flex-1 min-w-0 truncate text-base font-bold text-slate-100">New Purchase</h3>
+            <button onClick={onClose} disabled={saving}
+              className="px-3 py-2 rounded-xl bg-surface2 border border-white/8 text-muted text-sm font-semibold hover:text-slate-100 disabled:opacity-50">
+              Cancel
+            </button>
+            <button onClick={save} disabled={saving}
+              className="px-4 py-2 rounded-xl bg-teal/15 border border-teal/30 text-teal text-sm font-bold disabled:opacity-50 flex items-center gap-2">
+              {saving && <span className="w-3.5 h-3.5 rounded-full border-2 border-teal border-t-transparent animate-spin" />}
+              {saving ? 'Saving…' : '✓ Save Purchase'}
+            </button>
+          </div>
+        </div>
+
+        <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-5 py-4">
 
         <div className="flex flex-col gap-3">
           {/* Supplier */}
@@ -2053,6 +2114,28 @@ ${rawText}`;
               {transporters.map(t => <option key={t.transporter_id} value={t.transporter_id}>{t.transporter_name}</option>)}
             </select>
             {transporters.length === 0 && <p className="text-[10px] text-muted mt-1">Add transporters on the Suppliers / Transporters page.</p>}
+          </div>
+
+          {/* Transport bill */}
+          <div className="rounded-xl bg-surface2/60 border border-white/8 p-3">
+            <label className="text-[10px] font-bold text-muted uppercase tracking-widest block mb-1">🚚 Transport bill (optional)</label>
+            <input type="number" inputMode="decimal" min="0" value={deliveryAmount}
+              onChange={e => setDeliveryAmount(e.target.value)} onWheel={e => e.currentTarget.blur()}
+              placeholder="Transport charge (Ksh), e.g. 1500" aria-label="Transport charge"
+              className="w-full px-3 py-2.5 rounded-xl bg-surface2 border border-white/8 text-slate-100 text-sm tabular-nums outline-none focus:border-teal/40" />
+            <div className="mt-2">
+              {receiptPreview ? (
+                <div className="relative">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={receiptPreview} alt="Transport bill" className="w-full max-h-48 object-contain rounded-lg border border-white/8 bg-black/20" />
+                  <button type="button" onClick={() => { setReceiptFile(null); setReceiptPreview(null); }}
+                    aria-label="Remove transport bill photo"
+                    className="absolute top-1 right-1 w-7 h-7 rounded-full bg-black/70 text-white text-xs font-bold flex items-center justify-center hover:bg-danger">✕</button>
+                </div>
+              ) : (
+                <PhotoPicker size="sm" onPick={f => pickReceipt(f[0])} />
+              )}
+            </div>
           </div>
 
           {/* Company this purchase stocks into */}
@@ -2102,18 +2185,7 @@ ${rawText}`;
                 ))}
               </div>
             )}
-            <div
-              onClick={() => fileRef.current?.click()}
-              className="border-2 border-dashed border-white/15 rounded-xl p-4 text-center cursor-pointer hover:border-teal/30 hover:bg-teal/5 transition-all"
-            >
-              <div className="text-2xl mb-1">{images.length > 0 ? '➕' : '📷'}</div>
-              <p className="text-xs text-muted">
-                {images.length > 0 ? 'Add another photo' : 'Tap to attach a bill photo'}
-                <br /><b>Stored only · Max 10MB · JPG, PNG</b>
-              </p>
-            </div>
-            <input ref={fileRef} type="file" accept="image/*" className="hidden"
-              onChange={e => { if (e.target.files?.[0]) processImageFile(e.target.files[0]); e.target.value = ''; }} />
+            <PhotoPicker multiple onPick={fs => fs.forEach(f => processImageFile(f))} />
 
             <div className="mt-2 flex gap-2">
               {images.length > 0 && (
@@ -2204,7 +2276,7 @@ ${rawText}`;
                 <button
                   type="button"
                   // New rows go on top so the one being typed is always in view.
-                  onClick={() => setItems(r => [blankRow(), ...r])}
+                  onClick={addItem}
                   className="text-[11px] font-bold text-teal px-3 py-1 rounded-lg bg-teal/10 border border-teal/20 hover:bg-teal/20 transition-colors"
                 >+ Add Item</button>
               </div>
@@ -2223,6 +2295,8 @@ ${rawText}`;
                   locations={locations}
                   onChange={patch => updateRow(row.rowId, patch)}
                   onRemove={items.length > 1 ? () => setItems(rs => rs.filter(r => r.rowId !== row.rowId)) : undefined}
+                  autoFocus={row.rowId === focusRowId}
+                  onEnter={addItem}
                 />
               ))}
             </div>
@@ -2267,14 +2341,19 @@ ${rawText}`;
             )}
           </div>
 
-          {/* Actions */}
-          <div className="flex gap-3 mt-2">
-            <button onClick={onClose} className="flex-1 py-2.5 rounded-xl bg-surface2 border border-white/8 text-muted text-sm font-semibold hover:text-slate-100">Cancel</button>
-            <button onClick={save} disabled={saving}
-              className="flex-1 py-2.5 rounded-xl bg-teal/15 border border-teal/30 text-teal text-sm font-bold disabled:opacity-50">
-              {saving ? 'Saving…' : '✓ Save Purchase'}
-            </button>
+        </div>
+        </div>
+
+        {/* Always visible: running total + add the next item */}
+        <div className="shrink-0 px-5 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] border-t border-white/8 flex items-center gap-3">
+          <div className="flex-1 min-w-0">
+            <div className="text-[10px] font-bold text-muted uppercase tracking-widest">Total · {items.filter(r => r.productId || r.productName.trim()).length} item{items.filter(r => r.productId || r.productName.trim()).length === 1 ? '' : 's'}</div>
+            <div className="text-base font-bold text-teal tabular-nums">{fmtKsh(computedTotal)}</div>
           </div>
+          <button type="button" onClick={addItem}
+            className="px-5 py-2.5 rounded-xl bg-teal/15 border border-teal/40 text-teal text-sm font-bold hover:bg-teal/25 transition-colors">
+            + Add Item
+          </button>
         </div>
       </motion.div>
     </>
@@ -2284,8 +2363,10 @@ ${rawText}`;
 // ─── Item row editor ──────────────────────────────────────────────────────────
 
 function ItemRowEditor({
-  row, index, products, locations, onChange, onRemove,
+  row, index, products, locations, onChange, onRemove, autoFocus, onEnter,
 }: {
+  autoFocus?: boolean;          // a just-added row: scroll to it and focus its name box
+  onEnter?:   () => void;       // Enter in a number box adds the next row
   row:       ItemRow;
   index:     number;
   products:  Product[];
@@ -2295,6 +2376,16 @@ function ItemRowEditor({
 }) {
   const [search, setSearch] = useState(row.productName);
   const [open,   setOpen]   = useState(false);
+  const rootRef  = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (!autoFocus) return;
+    rootRef.current?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    inputRef.current?.focus({ preventScroll: true });
+  }, [autoFocus]);
+  const enterNext = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter' && onEnter) { e.preventDefault(); onEnter(); }
+  };
 
   // Keep local search box in sync if parent overwrites the row (e.g.
   // after picking a product elsewhere).
@@ -2313,7 +2404,7 @@ function ItemRowEditor({
   const matched = row.productId != null;
 
   return (
-    <div className={`rounded-xl border p-3 ${matched ? 'border-success/20 bg-success/5' : 'border-white/8 bg-surface2'}`}>
+    <div ref={rootRef} className={`rounded-xl border p-3 ${matched ? 'border-success/20 bg-success/5' : 'border-white/8 bg-surface2'}`}>
       <div className="flex items-center justify-between mb-2">
         <span className="text-[10px] font-bold text-muted uppercase tracking-widest">
           #{index + 1} {matched ? '· Matched' : (row.productName.trim() ? '· New product' : '')}
@@ -2326,6 +2417,7 @@ function ItemRowEditor({
       {/* Product autocomplete */}
       <div className="relative mb-2">
         <input
+          ref={inputRef}
           value={search}
           onChange={e => { setSearch(e.target.value); setOpen(true); onChange({ productId: null, productName: e.target.value }); }}
           onFocus={() => setOpen(true)}
@@ -2368,6 +2460,7 @@ function ItemRowEditor({
             onFocus={e => e.currentTarget.select()}
             onChange={e => onChange({ qty: Math.max(1, parseInt(e.target.value) || 1) })}
             onWheel={e => e.currentTarget.blur()}
+            onKeyDown={enterNext}
             className="w-full px-2 py-1.5 rounded-lg bg-surface border border-white/8 text-slate-100 text-xs outline-none focus:border-teal/40"
           />
         </div>
@@ -2379,6 +2472,7 @@ function ItemRowEditor({
             onFocus={e => e.currentTarget.select()}
             onChange={e => onChange({ unitPrice: e.target.value ? parseFloat(e.target.value) : null })}
             onWheel={e => e.currentTarget.blur()}
+            onKeyDown={enterNext}
             className="w-full px-2 py-1.5 rounded-lg bg-surface border border-white/8 text-slate-100 text-xs outline-none focus:border-teal/40"
           />
         </div>
@@ -2390,6 +2484,7 @@ function ItemRowEditor({
             onFocus={e => e.currentTarget.select()}
             onChange={e => onChange({ discountPct: Math.min(100, Math.max(0, parseFloat(e.target.value) || 0)) })}
             onWheel={e => e.currentTarget.blur()}
+            onKeyDown={enterNext}
             className="w-full px-2 py-1.5 rounded-lg bg-surface border border-white/8 text-slate-100 text-xs outline-none focus:border-gold/50"
           />
         </div>

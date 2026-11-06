@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
+import PhotoPicker from './PhotoPicker';
 import { supabase } from '@/lib/supabase';
 import { receiptLink, removeReceipt, uploadReceipt } from '@/lib/deliveryReceipt';
 
@@ -25,7 +26,7 @@ export default function DeliveryCharge({ purchaseId, charge, receiptPath, billTo
   const [link,    setLink]    = useState<string | null>(null);   // saved receipt
   const [saving,  setSaving]  = useState(false);
   const [error,   setError]   = useState<string | null>(null);
-  const fileRef = useRef<HTMLInputElement>(null);
+  const [replacing, setReplacing] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -38,7 +39,7 @@ export default function DeliveryCharge({ purchaseId, charge, receiptPath, billTo
 
   function startEdit() {
     setAmount(charge != null ? String(charge) : '');
-    setFile(null); setPreview(null); setDropReceipt(false); setError(null);
+    setFile(null); setPreview(null); setDropReceipt(false); setError(null); setReplacing(false);
     setEditing(true);
   }
 
@@ -47,6 +48,7 @@ export default function DeliveryCharge({ purchaseId, charge, receiptPath, billTo
     setFile(f);
     setPreview(URL.createObjectURL(f));
     setDropReceipt(false);
+    setReplacing(false);
   }
 
   async function save() {
@@ -112,22 +114,18 @@ export default function DeliveryCharge({ purchaseId, charge, receiptPath, billTo
               className="w-full px-3 py-2 rounded-lg bg-surface border border-white/10 text-sm text-slate-100 tabular-nums outline-none focus:border-teal/40" />
           </label>
 
-          <input ref={fileRef} type="file" accept="image/*" capture="environment" className="hidden"
-            onChange={e => { pick(e.target.files?.[0]); e.target.value = ''; }} />
           {preview || (receiptPath && !dropReceipt && link) ? (
             <div className="relative">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={preview ?? link!} alt="Delivery receipt" className="w-full max-h-64 object-contain rounded-lg border border-white/8 bg-black/20" />
               <div className="flex gap-2 mt-1.5">
-                <button type="button" onClick={() => fileRef.current?.click()} className="text-[11px] font-bold text-teal">Replace photo</button>
+                <button type="button" onClick={() => setReplacing(r => !r)} className="text-[11px] font-bold text-teal">Replace photo</button>
                 <button type="button" onClick={() => { setFile(null); setPreview(null); setDropReceipt(true); }} className="text-[11px] font-bold text-danger">Remove photo</button>
               </div>
+              {replacing && <div className="mt-2"><PhotoPicker size="sm" onPick={f => pick(f[0])} /></div>}
             </div>
           ) : (
-            <button type="button" onClick={() => fileRef.current?.click()}
-              className="w-full py-3 rounded-lg border border-dashed border-white/15 text-[11px] text-muted hover:border-teal/40 hover:text-teal">
-              📷 Attach receipt photo
-            </button>
+            <PhotoPicker size="sm" onPick={f => pick(f[0])} />
           )}
 
           {error && <p className="text-[11px] text-danger">{error}</p>}
