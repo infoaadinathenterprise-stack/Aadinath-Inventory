@@ -2380,8 +2380,10 @@ function ItemRowEditor({
   const inputRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
     if (!autoFocus) return;
-    rootRef.current?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    // Jump (not smooth — that gets cut short) so the new row sits at the
+    // top of the form with room below for its product suggestions.
     inputRef.current?.focus({ preventScroll: true });
+    requestAnimationFrame(() => rootRef.current?.scrollIntoView({ block: 'start' }));
   }, [autoFocus]);
   const enterNext = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter' && onEnter) { e.preventDefault(); onEnter(); }
@@ -2404,7 +2406,7 @@ function ItemRowEditor({
   const matched = row.productId != null;
 
   return (
-    <div ref={rootRef} className={`rounded-xl border p-3 ${matched ? 'border-success/20 bg-success/5' : 'border-white/8 bg-surface2'}`}>
+    <div ref={rootRef} className={`scroll-mt-3 rounded-xl border p-3 ${matched ? 'border-success/20 bg-success/5' : 'border-white/8 bg-surface2'}`}>
       <div className="flex items-center justify-between mb-2">
         <span className="text-[10px] font-bold text-muted uppercase tracking-widest">
           #{index + 1} {matched ? '· Matched' : (row.productName.trim() ? '· New product' : '')}
