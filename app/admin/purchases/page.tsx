@@ -12,7 +12,7 @@ import Toast, { type ToastState } from '../components/Toast';
 import { readPageCache, writePageCache } from '@/lib/pageCache';
 import DeliveryCharge from '../components/DeliveryCharge';
 import PhotoPicker from '../components/PhotoPicker';
-import { uploadReceipt } from '@/lib/deliveryReceipt';
+import { uploadReceipt, receiptLink, removeReceipt } from '@/lib/deliveryReceipt';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -1059,6 +1059,28 @@ function EditPurchaseModal({
   }
   const [newRows, setNewRows] = useState<ItemRow[]>([]);
   const [focusRowId, setFocusRowId] = useState<number | null>(null);
+  // Transport bill: the charge, and its photo (kept, replaced or removed).
+  const oldReceiptPath = data.purchase.delivery_receipt_path ?? null;
+  const [deliveryAmount, setDeliveryAmount] = useState(data.purchase.delivery_charge != null ? String(data.purchase.delivery_charge) : '');
+  const [receiptFile,    setReceiptFile]    = useState<File | null>(null);
+  const [receiptPreview, setReceiptPreview] = useState<string | null>(null);
+  const [dropReceipt,    setDropReceipt]    = useState(false);
+  const [receiptUrl,     setReceiptUrl]     = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    if (oldReceiptPath) receiptLink(oldReceiptPath).then(u => { if (!cancelled) setReceiptUrl(u ?? ''); });   // '' = could not load
+    return () => { cancelled = true; };
+  }, [oldReceiptPath]);
+  useEffect(() => () => { if (receiptPreview) URL.revokeObjectURL(receiptPreview); }, [receiptPreview]);
+  function pickReceipt(f: File | undefined) {
+    if (!f) return;
+    if (!f.type.startsWith('image/')) { onError('Please pick an image file'); return; }
+    setReceiptFile(f);
+    setReceiptPreview(URL.createObjectURL(f));
+    setDropReceipt(false);
+  }
+  const shownReceipt = receiptPreview ?? (oldReceiptPath && !dropReceipt ? receiptUrl : null);
+  const hasOldReceipt = !!oldReceiptPath && !dropReceipt && !receiptFile && receiptUrl === null;
   function addItem() {
     const r = blankNewRow();
     setNewRows(rs => [r, ...rs]);   // newest on top of the list
@@ -1141,9 +1163,16 @@ function EditPurchaseModal({
   }
 
   async function save() {
+    const deliveryCharge = deliveryAmount.trim() === '' ? null : Number(deliveryAmount);
+    if (deliveryCharge != null && (!Number.isFinite(deliveryCharge) || deliveryCharge < 0)) { onError('Enter a valid transport charge'); return; }
     setSaving(true);
     try {
       const purchaseId = data.purchase.purchase_id;
+
+      // Transport bill photo first: if the upload fails nothing else changes.
+      let receiptPath = oldReceiptPath;
+      if (receiptFile) receiptPath = await uploadReceipt(purchaseId, receiptFile);
+      else if (dropReceipt) receiptPath = null;
       let removedCount = 0, addedCount = 0, createdProducts = 0;
 
       // Bill reference for every history entry this edit writes.
@@ -1160,8 +1189,15 @@ function EditPurchaseModal({
         notes:          notes.trim() || null,
         total_amount:   computedTotal > 0 ? computedTotal : null,
         bill_image_url: billUrls.length > 0 ? JSON.stringify(billUrls) : null,
+        delivery_charge:       deliveryCharge,
+        delivery_receipt_path: receiptPath,
       }).eq('purchase_id', purchaseId);
-      if (hErr) throw new Error(hErr.message);
+      if (hErr) {
+        if (receiptFile && receiptPath) removeReceipt(receiptPath).catch(() => {});
+        throw new Error(hErr.message);
+      }
+      // The replaced / removed photo is no longer needed.
+      if (oldReceiptPath && receiptPath !== oldReceiptPath) removeReceipt(oldReceiptPath).catch(() => {});
 
       // ── Handle existing rows: remove, or update + qty delta ────────────
       for (const row of rows) {
@@ -1354,6 +1390,36 @@ function EditPurchaseModal({
               )}
               {transporters.map(t => <option key={t.transporter_id} value={t.transporter_id}>{t.transporter_name}</option>)}
             </select>
+          </div>
+
+          {/* Transport bill */}
+          <div className="rounded-xl bg-surface2/60 border border-white/8 p-3">
+            <label className="text-[10px] font-bold text-muted uppercase tracking-widest block mb-1">🚚 Transport bill (optional)</label>
+            <input type="number" inputMode="decimal" min="0" value={deliveryAmount}
+              onChange={e => setDeliveryAmount(e.target.value)} onWheel={e => e.currentTarget.blur()}
+              placeholder="Transport charge (Ksh), e.g. 1500" aria-label="Transport charge"
+              className="w-full px-3 py-2.5 rounded-xl bg-surface2 border border-white/8 text-slate-100 text-sm tabular-nums outline-none focus:border-teal/40" />
+            <div className="mt-2">
+              {shownReceipt ? (
+                <div className="relative">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={shownReceipt} alt="Transport bill" className="w-full max-h-48 object-contain rounded-lg border border-white/8 bg-black/20" />
+                  <button type="button" onClick={() => { setReceiptFile(null); setReceiptPreview(null); setDropReceipt(true); }}
+                    aria-label="Remove transport bill photo"
+                    className="absolute top-1 right-1 w-7 h-7 rounded-full bg-black/70 text-white text-xs font-bold flex items-center justify-center hover:bg-danger">✕</button>
+                </div>
+              ) : hasOldReceipt ? (
+                <p className="text-[11px] text-muted">Loading photo…</p>
+              ) : (
+                <PhotoPicker size="sm" onPick={f => pickReceipt(f[0])} />
+              )}
+              {dropReceipt && oldReceiptPath && (
+                <p className="text-[10px] text-danger mt-1">
+                  Photo will be removed when you save ·{' '}
+                  <button type="button" onClick={() => setDropReceipt(false)} className="font-bold text-teal">Undo</button>
+                </p>
+              )}
+            </div>
           </div>
 
           {/* Date */}
