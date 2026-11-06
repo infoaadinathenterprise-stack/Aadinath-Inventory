@@ -800,6 +800,20 @@ function StatsDashboard() {
                   onClick={() => setActiveSelected(prev => new Set([...(query ? prev : []), ...shownItems.map(i => i.product_id)]))}
                   className="px-3 py-1.5 rounded-lg bg-teal/15 border border-teal/30 text-teal text-[11px] font-bold hover:bg-teal/25 transition-all"
                 >Select all</button>
+                {(() => {
+                  // Only the red (out of stock) rows currently shown.
+                  const outIds = shownItems
+                    .filter(i => totalForProduct(i.product_id, i.pieces_per_box ?? 0) <= 0)
+                    .map(i => i.product_id);
+                  return (
+                    <button
+                      onClick={() => setActiveSelected(prev => new Set([...(query ? prev : []), ...outIds]))}
+                      disabled={outIds.length === 0}
+                      title="Check only the out-of-stock (red) products in the list"
+                      className="px-3 py-1.5 rounded-lg bg-danger/10 border border-danger/30 text-danger text-[11px] font-bold hover:bg-danger/20 transition-all disabled:opacity-40 flex items-center gap-1.5"
+                    ><span className="w-2 h-2 rounded-full bg-danger" />Select out of stock ({outIds.length})</button>
+                  );
+                })()}
                 <button
                   onClick={() => setActiveSelected(new Set())}
                   disabled={activeSelected.size === 0}
