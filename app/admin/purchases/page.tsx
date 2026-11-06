@@ -12,7 +12,7 @@ import Toast, { type ToastState } from '../components/Toast';
 import { readPageCache, writePageCache } from '@/lib/pageCache';
 import DeliveryCharge from '../components/DeliveryCharge';
 import PhotoPicker from '../components/PhotoPicker';
-import { uploadReceipt, receiptLink, removeReceipt } from '@/lib/deliveryReceipt';
+import { uploadReceipt, receiptLink, receiptLinks, removeReceipt } from '@/lib/deliveryReceipt';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -209,6 +209,20 @@ function PurchasesDashboard() {
   // the dropdowns offer only active ones.
   const [transporters, setTransporters] = useState<Transporter[]>([]);
   const activeTransporters = useMemo(() => transporters.filter(t => t.active_status), [transporters]);
+  // Viewing links for transport bill photos shown on the cards (private bucket).
+  const [receiptUrls, setReceiptUrls] = useState<Record<string, string>>({});
+  useEffect(() => {
+    const missing = Array.from(new Set(purchases.map(p => p.delivery_receipt_path).filter((x): x is string => !!x)))
+      .filter(path => !(path in receiptUrls));
+    if (missing.length === 0) return;
+    let cancelled = false;
+    receiptLinks(missing).then(links => {
+      if (cancelled) return;
+      // '' marks a photo whose link could not be made, so it isn't retried in a loop.
+      setReceiptUrls(prev => ({ ...prev, ...Object.fromEntries(missing.map(m => [m, links[m] ?? ''])) }));
+    });
+    return () => { cancelled = true; };
+  }, [purchases, receiptUrls]);
   function transporterName(id: number | null | undefined) {
     if (id == null) return null;
     return transporters.find(t => t.transporter_id === id)?.transporter_name ?? `Transporter #${id}`;
@@ -588,11 +602,26 @@ function PurchasesDashboard() {
                     }`}>{p.status}</span>
                   </div>
                 </div>
-                {(p.delivery_charge != null || p.transporter_id != null) && (
-                  <div className="mt-1.5 text-[11px] text-muted">
-                    🚚 {p.transporter_id != null && <>{transporterName(p.transporter_id)}{p.delivery_charge != null ? ' · ' : ''}</>}
-                    {p.delivery_charge != null && <>Delivery <b className="text-slate-200 tabular-nums">{fmtKsh(p.delivery_charge)}</b></>}
-                    {p.delivery_receipt_path ? ' · receipt attached' : ''}
+                {(p.delivery_charge != null || p.transporter_id != null || p.delivery_receipt_path) && (
+                  <div className="mt-1.5 flex items-center gap-2.5">
+                    <div className="flex-1 min-w-0 text-[11px] text-muted">
+                      🚚 {p.transporter_id != null && <>{transporterName(p.transporter_id)}{p.delivery_charge != null ? ' · ' : ''}</>}
+                      {p.delivery_charge != null && <>Delivery <b className="text-slate-200 tabular-nums">{fmtKsh(p.delivery_charge)}</b></>}
+                      {p.delivery_receipt_path && p.delivery_charge == null && p.transporter_id == null && 'Transport bill'}
+                    </div>
+                    {p.delivery_receipt_path && (receiptUrls[p.delivery_receipt_path] ? (
+                      <a href={receiptUrls[p.delivery_receipt_path]} target="_blank" rel="noreferrer"
+                        onClick={e => e.stopPropagation()}
+                        title="Transport bill — open full size"
+                        className="shrink-0 block w-14 h-14 rounded-lg overflow-hidden border border-white/10 bg-black/20 hover:border-teal/50 transition-colors">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={receiptUrls[p.delivery_receipt_path]} alt="Transport bill" loading="lazy" className="w-full h-full object-cover" />
+                      </a>
+                    ) : (
+                      <div className="shrink-0 w-14 h-14 rounded-lg border border-white/10 bg-surface2 flex items-center justify-center text-[9px] text-muted text-center leading-tight">
+                        {receiptUrls[p.delivery_receipt_path] === '' ? 'Photo' : '…'}
+                      </div>
+                    ))}
                   </div>
                 )}
                 {over && (

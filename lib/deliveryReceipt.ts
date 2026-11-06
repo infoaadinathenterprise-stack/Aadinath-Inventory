@@ -46,6 +46,16 @@ export async function receiptLink(path: string): Promise<string | null> {
   return error ? null : data.signedUrl;
 }
 
+// Links for many receipts in one request (for the purchase cards).
+export async function receiptLinks(paths: string[]): Promise<Record<string, string>> {
+  if (paths.length === 0) return {};
+  const { data, error } = await supabase.storage.from(BUCKET).createSignedUrls(paths, 3600);
+  if (error || !data) return {};
+  const out: Record<string, string> = {};
+  for (const d of data) if (d.path && d.signedUrl) out[d.path] = d.signedUrl;
+  return out;
+}
+
 export async function removeReceipt(path: string): Promise<void> {
   await supabase.storage.from(BUCKET).remove([path]);
 }
