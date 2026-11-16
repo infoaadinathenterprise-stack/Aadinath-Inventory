@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { motion, AnimatePresence } from 'framer-motion';
 import { logout as apiLogout } from '@/lib/auth';
 import AdminNavbar from '@/app/admin/components/AdminNavbar';
+import BluetoothPrinterTest from '@/app/admin/components/BluetoothPrinterTest';
 import { useProducts } from '@/lib/hooks/useProducts';
 import { stockTxn, type StockOp } from '@/lib/stockActions';
 import { supabase } from '@/lib/supabase';
@@ -874,6 +875,8 @@ function LabelsDashboard() {
                   />
                 </div>
               </div>
+
+              <BluetoothPrinterTest />
 
               <div className="flex gap-3">
                 <button
