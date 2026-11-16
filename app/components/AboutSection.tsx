@@ -14,7 +14,7 @@ const LOCATIONS = [
   {
     name:    'Main Store · First Floor',
     icon:    '🏬',
-    desc:    'Extended showroom floor — specialty parts and additional ready stock.',
+    desc:    'Extended showroom floor — specialty machinery, spares and additional ready stock.',
     hours:   'Mon – Sun: 9 AM – 7 PM',
     tagline: 'Showroom',
   },
@@ -51,11 +51,12 @@ export default function AboutSection() {
           <div className="text-center mb-14 sm:mb-16">
             <span className="text-[11px] sm:text-xs font-bold text-teal uppercase tracking-[0.2em]">About Us</span>
             <h2 className="text-3xl sm:text-4xl md:text-5xl font-extrabold text-slate-100 mt-4 mb-5 tracking-tight">
-              Built for the <span className="text-gradient">road ahead</span>
+              Built to keep you <span className="text-gradient">running</span>
             </h2>
             <p className="text-muted max-w-xl mx-auto text-sm sm:text-base leading-relaxed">
-              Jay Aadinath Enterprises LTD has been supplying quality auto parts and consumables to workshops,
-              retailers, and fleet operators. From engine oils to specialty bearings — we have it all.
+              Jay Aadinath Enterprises Ltd are wholesale dealers in diesel engines, complete posho mills
+              and spares, generators, water &amp; submersible pumps, power tools, bearings, batteries and
+              solar equipment — serving workshops, farms and businesses across Western Kenya.
             </p>
           </div>
         </FadeIn>
@@ -94,23 +95,23 @@ export default function AboutSection() {
             <div className="absolute inset-0 pointer-events-none" style={{ background: 'radial-gradient(600px 300px at 50% 0%, rgba(243,185,77,0.07), transparent 70%)' }} />
             <div className="relative">
               <h3 className="font-extrabold text-2xl sm:text-3xl text-slate-100 mb-2 tracking-tight">
-                Looking for a <span className="text-gradient-gold">specific part?</span>
+                Looking for a <span className="text-gradient-gold">specific machine or part?</span>
               </h3>
               <p className="text-muted text-sm mb-7 max-w-md mx-auto">
                 Reach out — we&apos;re happy to help source it for you.
               </p>
               <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
                 <a
-                  href="tel:+910000000000"
+                  href="tel:+254781747333"
                   className="w-full sm:w-auto flex items-center justify-center gap-2 px-7 py-3.5 rounded-2xl bg-gold/10 border border-gold/30 text-gold text-sm font-semibold hover:bg-gold/20 transition-all duration-200"
                 >
-                  📱 +91 00000 00000
+                  📱 +254 781 747333
                 </a>
                 <a
-                  href="mailto:contact@aadinath.com"
+                  href="mailto:contact@jayaadinathenterprises.com"
                   className="w-full sm:w-auto flex items-center justify-center gap-2 px-7 py-3.5 rounded-2xl btn-primary text-sm font-semibold"
                 >
-                  ✉️ contact@aadinath.com
+                  ✉️ contact@jayaadinathenterprises.com
                 </a>
               </div>
             </div>

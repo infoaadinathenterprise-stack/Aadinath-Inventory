@@ -16,12 +16,13 @@ export const SITE_URL = (process.env.NEXT_PUBLIC_SITE_URL
 // Display name (lib/company.ts keeps the ALL-CAPS letterhead version).
 export const SITE_NAME = 'Jay Aadinath Enterprises Ltd';
 
-export const SITE_TAGLINE = 'Auto Parts, Lubricants & Consumables — Kakamega, Kenya';
+export const SITE_TAGLINE = 'Diesel Engines, Posho Mills, Generators & Power Equipment — Kakamega, Kenya';
 
 export const SITE_DESCRIPTION =
-  'Jay Aadinath Enterprises Ltd is a trusted distributor of auto parts, '
-  + 'lubricants, batteries, bearings, filters and workshop consumables in '
-  + 'Kakamega, Kenya. Browse our catalogue and visit us or call to order.';
+  'Jay Aadinath Enterprises Ltd are wholesale dealers in diesel engines, '
+  + 'complete posho mills and spares, generators, water & submersible pumps, '
+  + 'power tools, bearings, batteries, solar equipment and V-belts in Kakamega, '
+  + 'Kenya. Visit our store or call to order.';
 
 // Structured company details — the source for the business JSON-LD and the
 // contact links. Kept here (not derived from the letterhead string) so the
@@ -30,9 +31,9 @@ export const BUSINESS = {
   name:        SITE_NAME,
   legalName:   'Jay Aadinath Enterprises Ltd',
   phone:       '+254781747333',
-  phoneHuman:  '0781 747333',
-  email:       'info.aadinathenterprise@gmail.com',
-  streetAddress: 'Next to G4S Securicor Office, Opposite Kakamega Primary School',
+  phoneHuman:  '+254 781 747333',
+  email:       'contact@jayaadinathenterprises.com',
+  streetAddress: 'Next to G4S Office, Opposite Kakamega Primary School',
   poBox:       'P.O. Box 108',
   locality:    'Kakamega',
   region:      'Kakamega County',
@@ -98,6 +99,7 @@ export function productImageAbsolute(p: Product): string {
 export function productDescription(p: Product): string {
   const bits = [p.brand, p.type, p.model].filter(Boolean).join(' ');
   const lead = bits ? `${p.product_name} (${bits})` : p.product_name;
-  return `Buy ${lead} from ${SITE_NAME} in Kakamega, Kenya. `
-    + `Genuine auto parts and consumables — visit our store or call ${BUSINESS.phoneHuman} to order.`;
+  return `Buy ${lead} from ${SITE_NAME}, wholesale dealers in diesel engines, `
+    + `posho mills, generators, pumps, power tools and spares in Kakamega, Kenya. `
+    + `Visit our store or call ${BUSINESS.phoneHuman} to order.`;
 }

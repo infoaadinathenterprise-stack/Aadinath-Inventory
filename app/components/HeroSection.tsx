@@ -3,7 +3,7 @@
 import { motion } from 'framer-motion';
 import Link from 'next/link';
 
-const CATEGORIES = ['Engine Oils', 'Batteries', 'Bearings', 'Filters', 'Consumables'];
+const CATEGORIES = ['Diesel Engines', 'Posho Mills', 'Generators', 'Water Pumps', 'Power Tools', 'Solar', 'Batteries', 'Bearings'];
 
 export default function HeroSection() {
   return (
@@ -38,7 +38,7 @@ export default function HeroSection() {
           className="inline-flex items-center gap-2.5 px-4 py-2 rounded-full glass border text-[11px] sm:text-xs font-semibold uppercase tracking-[0.18em] text-slate-300 mb-9"
         >
           <span className="w-1.5 h-1.5 rounded-full bg-gold shadow-[0_0_8px_rgba(243,185,77,0.8)]" />
-          Auto Parts &amp; Consumables Distributor
+          Wholesale Machinery &amp; Power Equipment
         </motion.div>
 
         <motion.h1
@@ -47,7 +47,7 @@ export default function HeroSection() {
           transition={{ delay: 0.12, duration: 0.65, ease: 'easeOut' as const }}
           className="text-[2.4rem] sm:text-5xl md:text-6xl font-extrabold leading-[1.06] tracking-tight mb-7 text-slate-100"
         >
-          Genuine parts.
+          Engines, mills &amp; generators.
           <br />
           <span className="text-gradient">Delivered with trust.</span>
         </motion.h1>
@@ -58,9 +58,10 @@ export default function HeroSection() {
           transition={{ delay: 0.32, duration: 0.5 }}
           className="text-base sm:text-lg text-muted mb-9 max-w-xl mx-auto leading-relaxed"
         >
-          Jay Aadinath Enterprises LTD supplies workshops, retailers and fleet
-          operators with premium automotive products — from engine oils to
-          specialty bearings.
+          Jay Aadinath Enterprises Ltd — wholesale dealers in diesel engines,
+          complete posho mills, generators, water pumps, power tools, bearings
+          and solar equipment, serving workshops, farms and businesses across
+          Western Kenya.
         </motion.p>
 
         <motion.div

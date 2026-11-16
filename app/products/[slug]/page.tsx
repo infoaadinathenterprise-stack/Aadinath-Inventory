@@ -79,7 +79,7 @@ export default async function ProductPage(
     name: p.product_name,
     image: [productImageAbsolute(p)],
     description: productDescription(p),
-    category: p.type || 'Auto Parts',
+    category: p.type || 'Machinery & Spares',
     sku: p.stock_keeping_unit || undefined,
     brand: p.brand ? { '@type': 'Brand', name: p.brand } : undefined,
     offers: {

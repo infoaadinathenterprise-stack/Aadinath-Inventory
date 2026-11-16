@@ -12,15 +12,16 @@ const manrope = Manrope({ subsets: ['latin'], variable: '--font-manrope', weight
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
   title: {
-    default: `${SITE_NAME} — Auto Parts, Lubricants & Consumables, Kakamega`,
+    default: `${SITE_NAME} — Diesel Engines, Posho Mills, Generators & Power Tools, Kakamega`,
     template: `%s — ${SITE_NAME}`,
   },
   description: SITE_DESCRIPTION,
   applicationName: SITE_NAME,
   keywords: [
-    'Jay Aadinath Enterprises', 'Jay Aadinath Enterprises Ltd', 'auto parts Kakamega',
-    'spare parts Kenya', 'lubricants', 'batteries', 'bearings', 'filters',
-    'generators', 'water pumps', 'workshop consumables Kakamega',
+    'Jay Aadinath Enterprises', 'Jay Aadinath Enterprises Ltd', 'posho mill Kenya',
+    'diesel engine Kakamega', 'generators Kenya', 'water pumps Kenya', 'submersible pumps',
+    'power tools Kenya', 'maize sheller', 'solar panels Kenya', 'inverter', 'bearings',
+    'V-belts', 'Honda engine', 'Kakamega wholesale machinery',
   ],
   alternates: { canonical: '/' },
   robots: {
@@ -30,14 +31,14 @@ export const metadata: Metadata = {
   openGraph: {
     type: 'website',
     siteName: SITE_NAME,
-    title: `${SITE_NAME} — Auto Parts, Lubricants & Consumables`,
+    title: `${SITE_NAME} — Diesel Engines, Posho Mills, Generators & Power Tools`,
     description: SITE_DESCRIPTION,
     url: SITE_URL,
     locale: 'en_KE',
   },
   twitter: {
     card: 'summary',
-    title: `${SITE_NAME} — Auto Parts & Consumables, Kakamega`,
+    title: `${SITE_NAME} — Diesel Engines, Posho Mills & Power Equipment, Kakamega`,
     description: SITE_DESCRIPTION,
   },
   // Paste the token from Google Search Console (or set NEXT_PUBLIC_GSC_VERIFICATION).

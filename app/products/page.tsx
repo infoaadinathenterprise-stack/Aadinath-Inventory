@@ -6,13 +6,13 @@ import ProductsBrowser from '../components/ProductsBrowser';
 export const metadata: Metadata = {
   title: 'Products',
   description:
-    `Browse the full catalogue of auto parts, lubricants, batteries, bearings, `
-    + `filters and workshop consumables stocked by ${SITE_NAME} in Kakamega, Kenya.`,
+    `Browse the full catalogue of diesel engines, posho mills and spares, generators, `
+    + `water pumps, power tools, bearings, batteries and solar equipment stocked by ${SITE_NAME} in Kakamega, Kenya.`,
   alternates: { canonical: '/products' },
   openGraph: {
     type: 'website',
     title: `Products — ${SITE_NAME}`,
-    description: `Our full range of auto parts and consumables, sourced from trusted manufacturers.`,
+    description: `Our full range of diesel engines, posho mills, generators, pumps, power tools and spares.`,
     url: `${SITE_URL}/products`,
     siteName: SITE_NAME,
   },
@@ -35,8 +35,8 @@ export default async function ProductsPage() {
             Our <span className="text-gradient">Products</span>
           </h1>
           <p className="text-muted max-w-lg mx-auto text-sm leading-relaxed px-2">
-            Browse our full range of auto parts, lubricants, and consumables —
-            all sourced from trusted manufacturers.
+            Browse our full range of diesel engines, posho mills, generators, pumps,
+            power tools and spares — in stock at our Kakamega store.
           </p>
         </div>
 

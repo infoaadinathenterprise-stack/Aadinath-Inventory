@@ -8,7 +8,7 @@ import { SITE_URL, SITE_NAME, SITE_DESCRIPTION, BUSINESS } from '@/lib/seo';
 export default function HomeJsonLd() {
   const org = {
     '@context': 'https://schema.org',
-    '@type': ['Organization', 'Store', 'AutoPartsStore'],
+    '@type': ['Organization', 'Store', 'HardwareStore'],
     '@id': `${SITE_URL}/#organization`,
     name: SITE_NAME,
     legalName: BUSINESS.legalName,
