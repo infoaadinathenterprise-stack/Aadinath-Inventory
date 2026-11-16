@@ -1,8 +1,10 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
 import { motion } from 'framer-motion';
 import type { Product } from '@/lib/types';
+import { productPath } from '@/lib/seo';
 
 interface Props {
   product: Product;
@@ -24,7 +26,11 @@ export default function ProductCard({ product: p, index }: Props) {
       animate={{ opacity: 1, y: 0 }}
       transition={{ delay: Math.min(index * 0.04, 0.4), duration: 0.4, ease: 'easeOut' as const }}
       layout
-      className="relative flex flex-col rounded-2xl card-lux overflow-hidden group
+      className="relative"
+    >
+    <Link
+      href={productPath(p)}
+      className="flex flex-col h-full rounded-2xl card-lux overflow-hidden group
                  transition-all duration-300 hover:-translate-y-1
                  hover:shadow-[0_20px_44px_-16px_rgba(0,0,0,0.65),0_0_0_1px_rgba(56,189,248,0.22)]"
     >
@@ -77,6 +83,7 @@ export default function ProductCard({ product: p, index }: Props) {
           )}
         </div>
       </div>
+    </Link>
     </motion.div>
   );
 }

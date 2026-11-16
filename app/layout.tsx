@@ -3,13 +3,46 @@ import { Inter, Plus_Jakarta_Sans } from 'next/font/google';
 import './globals.css';
 import NavbarConditional from './components/NavbarConditional';
 import PreconnectSupabase from './components/PreconnectSupabase';
+import { SITE_URL, SITE_NAME, SITE_DESCRIPTION } from '@/lib/seo';
 
 const inter   = Inter({ subsets: ['latin'], variable: '--font-inter' });
 const jakarta = Plus_Jakarta_Sans({ subsets: ['latin'], variable: '--font-jakarta', weight: ['500', '600', '700', '800'] });
 
 export const metadata: Metadata = {
-  title: 'Jay Aadinath Enterprises LTD — Auto Parts & Consumables',
-  description: 'Premium auto parts and consumables distributor. Oils, batteries, bearings and more.',
+  metadataBase: new URL(SITE_URL),
+  title: {
+    default: `${SITE_NAME} — Auto Parts, Lubricants & Consumables, Kakamega`,
+    template: `%s — ${SITE_NAME}`,
+  },
+  description: SITE_DESCRIPTION,
+  applicationName: SITE_NAME,
+  keywords: [
+    'Jay Aadinath Enterprises', 'Jay Aadinath Enterprises Ltd', 'auto parts Kakamega',
+    'spare parts Kenya', 'lubricants', 'batteries', 'bearings', 'filters',
+    'generators', 'water pumps', 'workshop consumables Kakamega',
+  ],
+  alternates: { canonical: '/' },
+  robots: {
+    index: true, follow: true,
+    googleBot: { index: true, follow: true, 'max-image-preview': 'large', 'max-snippet': -1 },
+  },
+  openGraph: {
+    type: 'website',
+    siteName: SITE_NAME,
+    title: `${SITE_NAME} — Auto Parts, Lubricants & Consumables`,
+    description: SITE_DESCRIPTION,
+    url: SITE_URL,
+    locale: 'en_KE',
+  },
+  twitter: {
+    card: 'summary',
+    title: `${SITE_NAME} — Auto Parts & Consumables, Kakamega`,
+    description: SITE_DESCRIPTION,
+  },
+  // Paste the token from Google Search Console (or set NEXT_PUBLIC_GSC_VERIFICATION).
+  verification: process.env.NEXT_PUBLIC_GSC_VERIFICATION
+    ? { google: process.env.NEXT_PUBLIC_GSC_VERIFICATION }
+    : undefined,
 };
 
 export const viewport: Viewport = {

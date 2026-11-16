@@ -1,50 +1,30 @@
-'use client';
+import type { Metadata } from 'next';
+import { getCatalog } from '@/lib/catalog';
+import { SITE_NAME, SITE_URL } from '@/lib/seo';
+import ProductsBrowser from '../components/ProductsBrowser';
 
-import { useState, useEffect } from 'react';
-import { supabase } from '@/lib/supabase';
-import { formatStock } from '@/lib/formatStock';
-import type { Product } from '@/lib/types';
-import ProductGrid from '../components/ProductGrid';
-import { readPageCache, writePageCache } from '@/lib/pageCache';
+export const metadata: Metadata = {
+  title: 'Products',
+  description:
+    `Browse the full catalogue of auto parts, lubricants, batteries, bearings, `
+    + `filters and workshop consumables stocked by ${SITE_NAME} in Kakamega, Kenya.`,
+  alternates: { canonical: '/products' },
+  openGraph: {
+    type: 'website',
+    title: `Products — ${SITE_NAME}`,
+    description: `Our full range of auto parts and consumables, sourced from trusted manufacturers.`,
+    url: `${SITE_URL}/products`,
+    siteName: SITE_NAME,
+  },
+};
 
-interface StockRow { quantity: number | null; box_quantity: number | null; }
-
-export default function ProductsPage() {
-  const [products, setProducts] = useState<Product[]>([]);
-  const [categories, setCategories] = useState<string[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    // Last visit's catalogue shows instantly; the fresh one replaces it.
-    const cached = readPageCache<{ products: Product[]; categories: string[] }>('storefront');
-    if (cached) { setProducts(cached.products); setCategories(cached.categories); setLoading(false); }
-    async function load() {
-      const { data, error } = await supabase
-        .from('products')
-        .select('*, stock_by_location(quantity, box_quantity)')
-        .eq('active_status', true)
-        .order('product_name');
-
-      if (error || !data) { setLoading(false); return; }
-
-      const mapped: Product[] = data
-        .map((row: Product & { stock_by_location?: StockRow[] }) => {
-          const total_stock = (row.stock_by_location || []).reduce((sum, s) =>
-            sum + (s.quantity || 0), 0
-          );
-          const { stock_by_location: _omit, ...rest } = row as Product & { stock_by_location?: StockRow[] };
-          return { ...rest, total_stock };
-        })
-        .filter(p => (p.total_stock ?? 0) > 0);
-
-      const cats = [...new Set(mapped.map(p => p.type).filter(Boolean) as string[])].sort();
-      setProducts(mapped);
-      setCategories(cats);
-      setLoading(false);
-      writePageCache('storefront', { products: mapped, categories: cats });
-    }
-    load();
-  }, []);
+// Server component: fetches the catalogue at build so the product list is in
+// the static HTML (indexable + crawlable), then hands it to the client browser
+// for search/filtering and live-stock refresh.
+export default async function ProductsPage() {
+  const all = await getCatalog();
+  const inStock = all.filter(p => (p.total_stock ?? 0) > 0);
+  const categories = [...new Set(inStock.map(p => p.type).filter(Boolean) as string[])].sort();
 
   return (
     <main className="min-h-screen pt-24 pb-20">
@@ -60,13 +40,7 @@ export default function ProductsPage() {
           </p>
         </div>
 
-        {loading ? (
-          <div className="flex justify-center py-20">
-            <div className="w-8 h-8 rounded-full border-2 border-teal border-t-transparent animate-spin" />
-          </div>
-        ) : (
-          <ProductGrid products={products} categories={categories} />
-        )}
+        <ProductsBrowser initialProducts={inStock} initialCategories={categories} />
       </div>
     </main>
   );
