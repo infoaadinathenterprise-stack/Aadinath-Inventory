@@ -45,7 +45,7 @@ export default function HeroSection() {
           initial={{ opacity: 0, y: 28 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.12, duration: 0.65, ease: 'easeOut' as const }}
-          className="text-[2.6rem] sm:text-6xl md:text-7xl font-extrabold leading-[1.05] tracking-tight mb-7 text-slate-100"
+          className="text-[2.4rem] sm:text-5xl md:text-6xl font-extrabold leading-[1.06] tracking-tight mb-7 text-slate-100"
         >
           Genuine parts.
           <br />

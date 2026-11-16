@@ -15,7 +15,7 @@
   --color-danger:   #f05252;
   --color-muted:    #8da3c5;
 
-  --font-display: var(--font-jakarta), var(--font-inter), system-ui, sans-serif;
+  --font-display: var(--font-manrope), var(--font-jakarta), system-ui, sans-serif;
 }
 
 html {
@@ -219,30 +219,37 @@ input[type="number"], .tabular-nums { font-variant-numeric: tabular-nums; }
 .theme-light {
   color-scheme: light;
 
-  --color-navy:     #f4f6fa;
-  --color-surface:  #ffffff;
-  --color-surface2: #f1f4f9;
-  --color-teal:     #0284c7;
-  --color-gold:     #b45309;
-  --color-success:  #059669;
+  /* ── Soft neumorphic light theme (inspired reference) ──────────────
+     Cool light-grey canvas, deep-navy ink + accent, panels that gently
+     extrude from the surface with a dual (light + shadow) finish. */
+  --color-navy:     #e6ebf2;   /* page canvas              */
+  --color-surface:  #eef2f8;   /* raised card              */
+  --color-surface2: #e1e7f1;   /* inset / inputs           */
+  --color-teal:     #2a3a6b;   /* primary action / links   */
+  --color-gold:     #b4703a;   /* warm secondary accent    */
+  --color-success:  #0f9d6b;
   --color-danger:   #dc2626;
-  --color-muted:    #5b6b85;
+  --color-muted:    #5a6a8a;
 
-  --color-slate-50:  #020617;
-  --color-slate-100: #0f172a;
-  --color-slate-200: #1e293b;
-  --color-slate-300: #334155;
-  --color-slate-400: #475569;
-  --color-slate-600: #94a3b8;
-  --color-slate-700: #cbd5e1;
-  --color-slate-800: #e2e8f0;
-  --color-slate-900: #f1f5f9;
+  --color-slate-50:  #0d1427;
+  --color-slate-100: #18223f;  /* primary ink (headings/body) */
+  --color-slate-200: #24335c;
+  --color-slate-300: #3c4d7a;
+  --color-slate-400: #566592;
+  --color-slate-600: #93a0bc;
+  --color-slate-700: #c5cde0;
+  --color-slate-800: #dbe2ee;
+  --color-slate-900: #eef2f8;
 
-  --color-blue-400:   #2563eb;
-  --color-yellow-400: #ca8a04;
+  --color-blue-400:   #2a3a6b;
+  --color-yellow-400: #b4703a;
 
   /* Drives border-white/*, bg-white/*, ring-white/* tints */
-  --color-white: #0f172a;
+  --color-white: #18223f;
+
+  /* Neumorphic shadow pair */
+  --neu-dark:  rgba(190, 199, 214, 0.60);
+  --neu-light: rgba(255, 255, 255, 0.92);
 }
 
 /* Solid white stays white (button text, print sheets) */
@@ -252,52 +259,61 @@ input[type="number"], .tabular-nums { font-variant-numeric: tabular-nums; }
 .theme-light .border-white            { border-color: #ffffff; }
 
 body:has(.theme-light) {
-  background: #f4f6fa;
+  background: #e6ebf2;
 }
-body:has(.theme-light) ::selection { background: rgba(2, 132, 199, 0.18); color: #0f172a; }
-body:has(.theme-light) ::-webkit-scrollbar-thumb       { background: #cbd5e1; }
-body:has(.theme-light) ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+body:has(.theme-light) ::selection { background: rgba(42, 58, 107, 0.16); color: #18223f; }
+body:has(.theme-light) ::-webkit-scrollbar-thumb       { background: #c3cad6; }
+body:has(.theme-light) ::-webkit-scrollbar-thumb:hover { background: #a7b1c4; }
 
+/* Raised panel that softly extrudes from the canvas (the signature look). */
 .theme-light .card-lux {
-  background: #ffffff;
-  border: 1px solid rgba(15, 23, 42, 0.08);
+  background: #eef2f8;
+  border: 1px solid rgba(24, 34, 63, 0.04);
   box-shadow:
-    0 1px 2px rgba(15, 23, 42, 0.04),
-    0 8px 24px -14px rgba(15, 23, 42, 0.18);
+    6px 6px 14px var(--neu-dark),
+    -6px -6px 14px var(--neu-light);
 }
 
 .theme-light .glass {
-  background: rgba(255, 255, 255, 0.86);
-  border-color: rgba(15, 23, 42, 0.08);
+  background: rgba(230, 235, 242, 0.80);
+  border-color: rgba(24, 34, 63, 0.06);
+  box-shadow: 0 6px 24px -10px rgba(42, 58, 107, 0.18);
 }
 
 .theme-light .text-gradient {
-  background: linear-gradient(100deg, #0284c7 0%, #2563eb 55%, #4f46e5 100%);
+  background: linear-gradient(100deg, #2a3a6b 0%, #3f5fae 100%);
   -webkit-background-clip: text;
   background-clip: text;
 }
 .theme-light .text-gradient-gold {
-  background: linear-gradient(100deg, #d97706 0%, #b45309 100%);
+  background: linear-gradient(100deg, #c07a3e 0%, #9c5a25 100%);
   -webkit-background-clip: text;
   background-clip: text;
 }
 
 .theme-light .btn-primary {
+  background: #2a3a6b;
+  color: #ffffff;
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.25),
-    0 6px 16px -8px rgba(37, 99, 235, 0.45);
+    inset 0 1px 0 rgba(255, 255, 255, 0.14),
+    0 8px 20px -8px rgba(42, 58, 107, 0.50);
 }
 
-.theme-light .shadow-\[0_8px_32px_rgba\(0\,0\,0\,0\.3\)\] {
-  box-shadow: 0 1px 0 rgba(15, 23, 42, 0.04), 0 6px 20px -12px rgba(15, 23, 42, 0.15);
+.theme-light .shadow-\[0_8px_32px_rgba\(0\,0\,0\,0\.3\)\],
+.theme-light .shadow-\[0_8px_32px_rgba\(0\,0\,0\,0\.35\)\] {
+  box-shadow: 0 6px 24px -12px rgba(42, 58, 107, 0.18);
 }
 
 .theme-light .label-page { box-shadow: 0 4px 20px rgba(15, 23, 42, 0.12); }
 
-/* Dark insets (inputs, card footers) become light gray; modal
+/* Dark insets (inputs, card footers) become a softly recessed neumorphic
+   well so form fields read clearly against the raised cards; modal
    backdrops soften to a slate scrim instead of near-black. */
-.theme-light .bg-black\/25 { background-color: #f1f4f9; }
-.theme-light .bg-black\/15 { background-color: #f8fafc; }
+.theme-light .bg-black\/25 {
+  background-color: #e3e9f1;
+  box-shadow: inset 2px 2px 5px rgba(190, 199, 214, 0.55), inset -2px -2px 4px rgba(255, 255, 255, 0.70);
+}
+.theme-light .bg-black\/15 { background-color: #edf1f7; }
 .theme-light .bg-black\/60,
 .theme-light .bg-black\/65,
 .theme-light .bg-black\/70 { background-color: rgba(15, 23, 42, 0.45); }

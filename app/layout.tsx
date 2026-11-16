@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from 'next';
-import { Inter, Plus_Jakarta_Sans } from 'next/font/google';
+import { Inter, Plus_Jakarta_Sans, Manrope } from 'next/font/google';
 import './globals.css';
 import NavbarConditional from './components/NavbarConditional';
 import PreconnectSupabase from './components/PreconnectSupabase';
@@ -7,6 +7,7 @@ import { SITE_URL, SITE_NAME, SITE_DESCRIPTION } from '@/lib/seo';
 
 const inter   = Inter({ subsets: ['latin'], variable: '--font-inter' });
 const jakarta = Plus_Jakarta_Sans({ subsets: ['latin'], variable: '--font-jakarta', weight: ['500', '600', '700', '800'] });
+const manrope = Manrope({ subsets: ['latin'], variable: '--font-manrope', weight: ['400', '500', '600', '700', '800'] });
 
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
@@ -53,11 +54,13 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={`${inter.variable} ${jakarta.variable}`}>
-      <body className="bg-navy text-slate-100 antialiased font-[var(--font-inter)]">
-        <PreconnectSupabase />
-        <NavbarConditional />
-        {children}
+    <html lang="en" className={`${inter.variable} ${jakarta.variable} ${manrope.variable}`}>
+      <body className="antialiased font-[var(--font-manrope)]">
+        <div className="theme-light min-h-screen bg-navy text-slate-100">
+          <PreconnectSupabase />
+          <NavbarConditional />
+          {children}
+        </div>
       </body>
     </html>
   );
