@@ -13,6 +13,7 @@ import { formatStock } from '@/lib/formatStock';
 import { stockTxn, type StockOp, type SalePayload } from '@/lib/stockActions';
 import AdjustStockModal from '@/app/admin/components/AdjustStockModal';
 import BarcodeScanner   from '@/app/admin/components/BarcodeScanner';
+import { parseScan }    from '@/lib/boxBarcode';
 import Toast, { type ToastState } from '@/app/admin/components/Toast';
 import type { Product, LocationInfo } from '@/lib/types';
 import ProductThumb from '@/app/components/ProductThumb';
@@ -46,6 +47,10 @@ interface CartItem {
   groupChoices:    Record<string, number>;
   companyId:       number;  // which company's stock this line sells from
   transferDestId?: number;  // selected destination for → Move action
+  // How many BOX barcodes were scanned into this (piece-unit) line. Each box
+  // adds its own piece count to qty and sells at the piece price, so the line
+  // total is pieces × piece price; this is just shown as "N box(es)".
+  boxCount?:       number;
 }
 
 // Does this product have a bulk unit (box/roll/etc.)? Gate on
@@ -332,36 +337,57 @@ function PosDashboard() {
     if (wrote) refresh();
   }
 
-  function addToCart(product: Product) {
+  function addToCart(product: Product, opts: { boxBundle?: number } = {}) {
     // Saved numbers from last visit are still showing — wait for fresh stock.
     if (stale) { showToast('Loading the latest stock — try again in a moment', 'error'); return; }
+
+    const boxBundle = opts.boxBundle && opts.boxBundle > 0 ? Math.floor(opts.boxBundle) : null;
+    const ppb = product.pieces_per_box ?? 0;
     let blocked = false;
     let blockedMax = 0;
-    let blockedUnit: CartUnit = 'piece';
     setCart(prev => {
       const existing = prev.find(c => c.product.product_id === product.product_id);
-      if (existing) {
-        // Use the existing row's unit + company when bumping the count.
-        const max = maxForProduct(product, existing.unit, existing.companyId);
-        if (existing.qty >= max) {
-          blocked = true; blockedMax = max; blockedUnit = existing.unit;
-          return prev;
+      const company0 = existing?.companyId ?? defaultCompanyFor(product);
+
+      // ── Scanned BOX barcode: fold `boxBundle` pieces into this product's one
+      //    line at the piece price (box = pcs × piece price). Boxes of the same
+      //    product may hold different counts; each adds its own pieces. ──
+      if (boxBundle) {
+        const maxPieces = maxForProduct(product, 'piece', company0);
+        const curPieces = existing ? (existing.unit === 'box' ? existing.qty * ppb : existing.qty) : 0;
+        if (curPieces + boxBundle > maxPieces) { blocked = true; blockedMax = Math.max(0, maxPieces - curPieces); return prev; }
+        if (existing) {
+          return prev.map(c => c.product.product_id !== product.product_id ? c : {
+            ...c,
+            unit: 'piece' as CartUnit,
+            qty: curPieces + boxBundle,
+            sellPrice: (c.sellPrice == null || c.sellPrice === defaultSellPrice(product, c.unit)) ? defaultSellPrice(product, 'piece') : c.sellPrice,
+            boxCount: (c.boxCount ?? 0) + 1,
+          });
         }
-        return prev.map(c =>
-          c.product.product_id === product.product_id ? { ...c, qty: c.qty + 1 } : c
-        );
+        return [...prev, { product, qty: boxBundle, unit: 'piece' as CartUnit, sellPrice: defaultSellPrice(product, 'piece'), groupChoices: {}, companyId: company0, boxCount: 1 }];
       }
-      // Default new rows to 'piece' and to the company that has stock.
-      const companyId = defaultCompanyFor(product);
-      const max = maxForProduct(product, 'piece', companyId);
-      if (max < 1) { blocked = true; blockedMax = 0; blockedUnit = 'piece'; return prev; }
-      return [...prev, { product, qty: 1, unit: 'piece', sellPrice: defaultSellPrice(product, 'piece'), groupChoices: {}, companyId }];
+
+      // ── Plain piece scan / tap ──
+      if (existing) {
+        const max = maxForProduct(product, existing.unit, existing.companyId);
+        if (existing.qty >= max) { blocked = true; blockedMax = max; return prev; }
+        return prev.map(c => c.product.product_id === product.product_id ? { ...c, qty: c.qty + 1 } : c);
+      }
+      const max = maxForProduct(product, 'piece', company0);
+      if (max < 1) { blocked = true; blockedMax = 0; return prev; }
+      return [...prev, { product, qty: 1, unit: 'piece' as CartUnit, sellPrice: defaultSellPrice(product, 'piece'), groupChoices: {}, companyId: company0 }];
     });
     barcodeRef.current?.focus();
     if (blocked) {
-      showToast(`Max ${blockedMax} ${unitLabel(product, blockedUnit).toLowerCase()}${blockedMax === 1 ? '' : 's'} available for ${product.product_name}`, 'error');
+      showToast(
+        boxBundle
+          ? `Only ${blockedMax} pcs left in ${locName} for a box of ${product.product_name}`
+          : `Max ${blockedMax} ${unitLabel(product, 'piece').toLowerCase()}${blockedMax === 1 ? '' : 's'} available for ${product.product_name}`,
+        'error',
+      );
     } else {
-      showToast(`Added: ${product.product_name}`, 'success');
+      showToast(boxBundle ? `Added box: ${product.product_name} · ${boxBundle} pcs` : `Added: ${product.product_name}`, 'success');
       setCartOpen(true);
     }
   }
@@ -396,13 +422,15 @@ function PosDashboard() {
     const code = e.currentTarget.value.trim();
     e.currentTarget.value = '';
     if (!code) return;
-    const match = resolveScan(code);
-    if (match) addToCart(match);
+    const { value, isBox, boxPcs } = parseScan(code);
+    const match = resolveScan(value);
+    if (match) addToCart(match, isBox && boxPcs ? { boxBundle: boxPcs } : {});
   }
 
   function handleScan(code: string) {
-    const match = resolveScan(code);
-    if (match) addToCart(match);
+    const { value, isBox, boxPcs } = parseScan(code);
+    const match = resolveScan(value);
+    if (match) addToCart(match, isBox && boxPcs ? { boxBundle: boxPcs } : {});
   }
 
   function openModal(product: Product, direction: 'plus' | 'minus') {
@@ -1035,10 +1063,17 @@ function PosDashboard() {
                       >×</button>
                     </div>
 
+                    {item.boxCount ? (
+                      <span className="inline-block text-[9px] font-bold px-2 py-0.5 rounded-full bg-gold/12 border border-gold/30 text-gold uppercase tracking-wider mb-2">
+                        📦 {item.boxCount} box{item.boxCount === 1 ? '' : 'es'} · {item.qty} pcs @ piece price
+                      </span>
+                    ) : null}
+
                     {/* Unit toggle — only shown when the product has a bulk
-                        unit configured (pieces_per_box > 0). Switching unit
-                        clamps qty to the new max in that unit. */}
-                    {hasBulk && (
+                        unit configured (pieces_per_box > 0) and this isn't a
+                        scanned-box line. Switching unit clamps qty to the new
+                        max in that unit. */}
+                    {hasBulk && !item.boxCount && (
                       <div className="flex gap-1 mb-2">
                         {(['piece', 'box'] as CartUnit[]).map(u => {
                           const isSel = item.unit === u;

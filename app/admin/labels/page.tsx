@@ -12,6 +12,7 @@ import { stockTxn, type StockOp } from '@/lib/stockActions';
 import { supabase } from '@/lib/supabase';
 import type { Product } from '@/lib/types';
 import { SESSION_KEY, ROLE_KEY, DEFAULT_COMPANY_ID } from '@/lib/types';
+import { boxBarcodeValue } from '@/lib/boxBarcode';
 
 const LABELS_PER_PAGE = 24;
 type SortBy = 'recent' | 'name';
@@ -145,7 +146,14 @@ function bytesToBase64(bytes: Uint8Array): string {
 // a TSPL BITMAP command — this keeps the printed output a pixel-for-pixel
 // match of what jsbarcode + canvas draw here, instead of re-deriving the
 // layout in printer-native font/barcode commands.
-async function renderLabelBitmap(product: Product, widthMm: number, heightMm: number): Promise<LabelBitmap> {
+async function renderLabelBitmap(
+  product: Product,
+  widthMm: number,
+  heightMm: number,
+  variant: 'piece' | 'box' = 'piece',
+  opts: { boxPcs?: number; note?: string } = {},
+): Promise<LabelBitmap> {
+  const boxPcs = Math.max(1, Math.round(opts.boxPcs ?? (product.pieces_per_box ?? 0) ?? 1));
   const bytesPerRow = Math.ceil(Math.round((widthMm / 25.4) * STICKER_DPI) / 8);
   const widthPx  = bytesPerRow * 8;
   const heightPx = Math.round((heightMm / 25.4) * STICKER_DPI);
@@ -162,14 +170,18 @@ async function renderLabelBitmap(product: Product, widthMm: number, heightMm: nu
   ctx.textAlign = 'center';
 
   if (product.stock_keeping_unit) {
+    const sku         = product.stock_keeping_unit;
+    const barcodeData = variant === 'box' ? boxBarcodeValue(sku, boxPcs) : sku;
+    const barcodeText = variant === 'box' ? `${sku}  ·  BOX` : sku;
     const barcodeCanvas = document.createElement('canvas');
     try {
       const JsBarcode = (await import('jsbarcode')).default;
-      JsBarcode(barcodeCanvas, product.stock_keeping_unit, {
+      JsBarcode(barcodeCanvas, barcodeData, {
         format:       'CODE128',
         width:        2,
         height:       Math.round(heightPx * 0.4),
         displayValue: true,
+        text:         barcodeText,
         fontSize:     Math.max(10, Math.round(heightPx * 0.09)),
         margin:       0,
         background:   '#ffffff',
@@ -201,8 +213,20 @@ async function renderLabelBitmap(product: Product, widthMm: number, heightMm: nu
     ctx.fillText(nameLines[1], widthPx / 2, heightPx * 0.75 + nameFontPx * 1.15);
   }
 
-  if (product.selling_price != null) {
-    const priceText = `Ksh ${product.selling_price}`;
+  // Small note between the barcode and name — box numbering ("Box 1/2 · 80 pcs")
+  // or the box content on a piece sticker ("80 pcs/box").
+  if (opts.note) {
+    const noteFont = Math.max(9, Math.round(heightPx * 0.095));
+    ctx.font = `700 ${noteFont}px sans-serif`;
+    ctx.fillText(opts.note, widthPx / 2, heightPx * 0.58);
+  }
+
+  // A box is priced as pcs-in-this-box × piece price (box of 5 @ 10 = 50).
+  const linePrice = variant === 'box'
+    ? (product.selling_price != null ? product.selling_price * boxPcs : null)
+    : product.selling_price;
+  if (linePrice != null) {
+    const priceText = variant === 'box' ? `Ksh ${linePrice} / box (${boxPcs} pcs)` : `Ksh ${linePrice}`;
     let priceFontPx = Math.round(heightPx * 0.14);
     ctx.font = `700 ${priceFontPx}px sans-serif`;
     while (priceFontPx > 8 && ctx.measureText(priceText).width > nameMaxWidth) {
@@ -268,14 +292,25 @@ function LabelsDashboard() {
   // WiFi sticker printer (XB330B via relay helper)
   const [stickerOpen,    setStickerOpen]    = useState(false);
   const [stickerSending, setStickerSending] = useState(false);
-  const [labelSize,      setLabelSize]      = useState<LabelPresetKey>(() => readLS('sticker.labelSize', '50x30') as LabelPresetKey);
-  const [customWidthMm,  setCustomWidthMm]  = useState<number>(() => Number(readLS('sticker.customWidthMm', '50')));
+  const [labelSize,      setLabelSize]      = useState<LabelPresetKey>(() => readLS('sticker.labelSize', '40x30') as LabelPresetKey);
+  const [customWidthMm,  setCustomWidthMm]  = useState<number>(() => Number(readLS('sticker.customWidthMm', '40')));
   const [customHeightMm, setCustomHeightMm] = useState<number>(() => Number(readLS('sticker.customHeightMm', '30')));
+  // Piece sticker (plain SKU), box sticker (scans as a box), or both.
+  const [stickerMode,    setStickerMode]    = useState<'piece' | 'box' | 'both'>(() => (readLS('sticker.mode', 'piece') as 'piece' | 'box' | 'both'));
+  // Per-product box sizes for box/both mode: comma-separated pcs per box, e.g.
+  // "80, 75" = two boxes of 80 and 75. Blank = `copies` boxes of pieces_per_box.
+  const [boxSizes,       setBoxSizes]       = useState<Record<number, string>>({});
+  // Products already printed this batch — persisted so it survives the form-POST
+  // navigation to the relay. Re-printing one asks for confirmation first.
+  const [printed,        setPrinted]        = useState<Record<number, boolean>>(() => {
+    try { return JSON.parse(readLS('sticker.printed', '{}')); } catch { return {}; }
+  });
   const [relayHost,      setRelayHost]      = useState<string>(() => readLS('sticker.relayHost', ''));
   const [printerIp,      setPrinterIp]      = useState<string>(() => readLS('sticker.printerIp', ''));
   const [printerPort,    setPrinterPort]    = useState<string>(() => readLS('sticker.printerPort', '9100'));
 
   useEffect(() => { localStorage.setItem('sticker.labelSize', labelSize); }, [labelSize]);
+  useEffect(() => { localStorage.setItem('sticker.mode', stickerMode); }, [stickerMode]);
   useEffect(() => { localStorage.setItem('sticker.customWidthMm', String(customWidthMm)); }, [customWidthMm]);
   useEffect(() => { localStorage.setItem('sticker.customHeightMm', String(customHeightMm)); }, [customHeightMm]);
   useEffect(() => { localStorage.setItem('sticker.relayHost', relayHost); }, [relayHost]);
@@ -339,7 +374,11 @@ function LabelsDashboard() {
     setSelected(next);
   }
 
-  function clearAll() { setSelected({}); }
+  function clearAll() {
+    setSelected({});
+    setPrinted({});
+    try { localStorage.removeItem('sticker.printed'); } catch { /* ignore */ }
+  }
 
   // Build label list respecting selection order
   const labelList: Product[] = [];
@@ -392,14 +431,53 @@ function LabelsDashboard() {
     const entries = Object.entries(selected).filter(([, copies]) => copies > 0);
     if (entries.length === 0) { showToast('Select products to print first', 'error'); return; }
 
+    // Guard against accidental double-printing: if any selected product was
+    // already printed this batch, ask before printing it again.
+    const already = entries.map(([pid]) => Number(pid)).filter(id => printed[id]);
+    if (already.length > 0) {
+      const names = already.map(id => products.find(p => p.product_id === id)?.product_name).filter(Boolean) as string[];
+      if (!window.confirm(`Already printed: ${names.slice(0, 5).join(', ')}${names.length > 5 ? '…' : ''}\n\nPrint these again?`)) return;
+    }
+
     setStickerSending(true);
     try {
       const jobs = [];
+      const needInfo: string[] = [];
       for (const [pid, copies] of entries) {
         const product = products.find(p => p.product_id === Number(pid));
         if (!product) continue;
-        const bitmap = await renderLabelBitmap(product, widthMm, heightMm);
-        jobs.push({ ...bitmap, widthMm, heightMm, copies });
+
+        if (stickerMode === 'piece') {
+          const bm = await renderLabelBitmap(product, widthMm, heightMm, 'piece');
+          jobs.push({ ...bm, widthMm, heightMm, copies });
+          continue;
+        }
+
+        // Box / Both: one box (and, for Both, one piece) sticker per physical
+        // box. Box counts come from the per-product sizes, else `copies` boxes
+        // of pieces_per_box.
+        const wantPiece = stickerMode === 'both';
+        const raw   = (boxSizes[product.product_id] ?? '').trim();
+        const sized = raw
+          ? raw.split(/[,\s]+/).map(s => parseInt(s, 10)).filter(n => Number.isFinite(n) && n > 0)
+          : [];
+        const ppb   = product.pieces_per_box ?? 0;
+        const boxes = sized.length ? sized : (ppb > 0 ? Array(Math.max(1, copies)).fill(ppb) : []);
+        if (boxes.length === 0) { needInfo.push(product.product_name); continue; }
+
+        const n = boxes.length;
+        for (let i = 0; i < n; i++) {
+          const pcs = boxes[i];
+          const bmBox = await renderLabelBitmap(product, widthMm, heightMm, 'box', { boxPcs: pcs, note: `Box ${i + 1}/${n} · ${pcs} pcs` });
+          jobs.push({ ...bmBox, widthMm, heightMm, copies: 1 });
+          if (wantPiece) {
+            const bmPcs = await renderLabelBitmap(product, widthMm, heightMm, 'piece', { note: `${pcs} pcs/box` });
+            jobs.push({ ...bmPcs, widthMm, heightMm, copies: 1 });
+          }
+        }
+      }
+      if (needInfo.length > 0) {
+        showToast(`Set pieces-per-box for: ${needInfo.slice(0, 3).join(', ')}${needInfo.length > 3 ? '…' : ''}`, 'error');
       }
       if (jobs.length === 0) { showToast('Nothing to print', 'error'); setStickerSending(false); return; }
 
@@ -416,6 +494,14 @@ function LabelsDashboard() {
       input.value = JSON.stringify({ printerIp: ip, printerPort: Number(printerPort) || 9100, jobs });
       form.appendChild(input);
       document.body.appendChild(form);
+
+      // Mark everything in this batch as printed (persisted so it survives the
+      // navigation to the relay and back), so a repeat needs confirmation.
+      const printedNext = { ...printed };
+      for (const [pid] of entries) printedNext[Number(pid)] = true;
+      try { localStorage.setItem('sticker.printed', JSON.stringify(printedNext)); } catch { /* ignore */ }
+      setPrinted(printedNext);
+
       form.submit();
     } catch (e) {
       showToast(e instanceof Error ? e.message : 'Failed to prepare the sticker print job', 'error');
@@ -521,15 +607,8 @@ function LabelsDashboard() {
         <button
           onClick={() => setStickerOpen(true)}
           disabled={totalLabels === 0}
-          className="flex items-center gap-2 px-3 py-2 rounded-xl bg-surface2 border border-white/8 text-slate-100 text-xs font-bold hover:border-teal/40 transition-colors disabled:opacity-30 disabled:cursor-not-allowed print-hide"
-          title="Print to WiFi sticker printer"
-        >
-          📶 Sticker
-        </button>
-        <button
-          onClick={handlePrint}
-          disabled={totalLabels === 0}
-          className="flex items-center gap-2 px-4 py-2 rounded-xl bg-teal text-navy text-xs font-bold shadow-[0_4px_14px_rgba(0,212,255,0.3)] hover:opacity-90 transition-opacity disabled:opacity-30 disabled:cursor-not-allowed"
+          className="flex items-center gap-2 px-4 py-2 rounded-xl bg-teal text-navy text-xs font-bold shadow-[0_4px_14px_rgba(0,212,255,0.3)] hover:opacity-90 transition-opacity disabled:opacity-30 disabled:cursor-not-allowed print-hide"
+          title="Choose size and print to the sticker printer"
         >
           🖨️ Print
         </button>
@@ -662,6 +741,9 @@ function LabelsDashboard() {
                         absurd names. */}
                     <p className="text-xs font-semibold text-slate-100 leading-snug line-clamp-2 break-words">{p.product_name}</p>
                     <p className="text-[10px] text-muted font-mono mt-0.5">{p.stock_keeping_unit || 'No SKU'}</p>
+                    {printed[p.product_id] && (
+                      <span className="inline-block mt-1 text-[8px] font-bold px-1.5 py-0.5 rounded-full bg-success/12 border border-success/30 text-success uppercase tracking-wider">✓ Printed</span>
+                    )}
                   </div>
 
                   {isSel ? (
@@ -801,8 +883,47 @@ function LabelsDashboard() {
               <div className="w-9 h-1 bg-white/15 rounded-full mx-auto mb-4" />
               <h3 className="text-base font-bold text-slate-100 text-center mb-1">📶 WiFi Sticker Printer</h3>
               <p className="text-xs text-muted text-center mb-4">
-                Sends {totalLabels} label{totalLabels !== 1 ? 's' : ''} to the XB330B over WiFi, via the relay helper running on a PC on your network.
+                Sends labels to the sticker printer via the relay helper running on your network.
               </p>
+
+              {/* Print as: pieces, boxes, or both (a box + a piece sticker per box) */}
+              <label className="text-[11px] font-semibold text-muted mb-1 block">Print as</label>
+              <div className="flex gap-1.5 mb-3">
+                {([['piece', 'Pieces'], ['box', 'Boxes'], ['both', 'Both']] as const).map(([k, lbl]) => (
+                  <button
+                    key={k}
+                    onClick={() => setStickerMode(k)}
+                    className={`flex-1 px-2.5 py-1.5 rounded-lg border text-[11px] font-semibold transition-all ${
+                      stickerMode === k ? 'border-teal bg-teal/10 text-teal' : 'border-white/8 bg-surface2 text-muted hover:border-white/20'
+                    }`}
+                  >
+                    {lbl}
+                  </button>
+                ))}
+              </div>
+
+              {stickerMode !== 'piece' && (
+                <div className="mb-3 rounded-lg border border-white/8 bg-surface2 p-2.5">
+                  <p className="text-[10px] text-muted mb-2 leading-relaxed">
+                    Pieces in each box, comma-separated — e.g. <b>80, 75</b> = two boxes.
+                    Leave blank to use the product&apos;s set pieces-per-box.
+                  </p>
+                  <div className="flex flex-col gap-1.5 max-h-40 overflow-y-auto">
+                    {selectedProducts.map(p => (
+                      <div key={p.product_id} className="flex items-center gap-2">
+                        <span className="text-[11px] text-slate-200 flex-1 truncate">{p.product_name}</span>
+                        <input
+                          type="text"
+                          value={boxSizes[p.product_id] ?? ''}
+                          onChange={e => setBoxSizes(s => ({ ...s, [p.product_id]: e.target.value }))}
+                          placeholder={p.pieces_per_box ? String(p.pieces_per_box) : 'pcs/box'}
+                          className="w-28 px-2 py-1 rounded-md bg-surface border border-white/10 text-xs text-slate-100 placeholder:text-muted/50 outline-none focus:border-teal/40 font-mono"
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               <label className="text-[11px] font-semibold text-muted mb-1 block">Label size</label>
               <div className="flex flex-wrap gap-1.5 mb-2">
