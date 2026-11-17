@@ -454,15 +454,17 @@ function LabelsDashboard() {
         }
 
         // Box / Both: one box (and, for Both, one piece) sticker per physical
-        // box. Box counts come from the per-product sizes, else `copies` boxes
-        // of pieces_per_box.
+        // box. The NUMBER OF BOXES comes only from the sizes typed for this
+        // product — never from the piece stock. Blank = a single box of the
+        // product's pieces_per_box. (So a 500-pc product prints ONE box label,
+        // not 500.)
         const wantPiece = stickerMode === 'both';
         const raw   = (boxSizes[product.product_id] ?? '').trim();
         const sized = raw
           ? raw.split(/[,\s]+/).map(s => parseInt(s, 10)).filter(n => Number.isFinite(n) && n > 0)
           : [];
         const ppb   = product.pieces_per_box ?? 0;
-        const boxes = sized.length ? sized : (ppb > 0 ? Array(Math.max(1, copies)).fill(ppb) : []);
+        const boxes = sized.length ? sized : (ppb > 0 ? [ppb] : []);
         if (boxes.length === 0) { needInfo.push(product.product_name); continue; }
 
         const n = boxes.length;
@@ -905,8 +907,9 @@ function LabelsDashboard() {
               {stickerMode !== 'piece' && (
                 <div className="mb-3 rounded-lg border border-white/8 bg-surface2 p-2.5">
                   <p className="text-[10px] text-muted mb-2 leading-relaxed">
-                    Pieces in each box, comma-separated — e.g. <b>80, 75</b> = two boxes.
-                    Leave blank to use the product&apos;s set pieces-per-box.
+                    <b>One number per box.</b> e.g. <b>80, 75</b> = two boxes (80 and 75 pcs);
+                    <b> 500</b> = one box of 500. Blank = a single box of the product&apos;s
+                    pcs/box. The stock count on the left is ignored in box mode.
                   </p>
                   <div className="flex flex-col gap-1.5 max-h-40 overflow-y-auto">
                     {selectedProducts.map(p => (
