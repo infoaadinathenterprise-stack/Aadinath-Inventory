@@ -22,6 +22,17 @@
 // relay address to localhost:8787 and the printer IP to "usb". Needs a print
 // queue named "XPrinter Label" (Generic / Text Only driver) on the printer's
 // USB port — override the name with USB_QUEUE=... if yours differs.
+//
+// ONLINE QUEUE (print from any device, phone included): the Labels page puts
+// the job in the Supabase table print_jobs; this helper checks it every two
+// seconds, prints what's waiting and marks it done. It proves itself with the
+// secret in relay-secret.txt (made on first run; register its hash once — see
+// supabase/18_print_queue.sql). Supabase URL + public key come from
+// ../.env.local (or SUPABASE_URL / SUPABASE_ANON_KEY).
+//
+// CENTERING: relay-config.json holds offsetXmm / offsetYmm, applied to every
+// single-label job. The XB-370B prints ~1.5 mm right of centre on a 40 mm
+// label, so offsetXmm is -1.5 (negative = left / up).
 
 const http = require('http');
 const net = require('net');
@@ -30,7 +41,35 @@ const fs = require('fs');
 const path = require('path');
 const { execFile } = require('child_process');
 
+const crypto = require('crypto');
+
 const PORT = Number(process.env.PORT) || 8787;
+
+// ── Print position correction ──
+const CONFIG_FILE = path.join(__dirname, 'relay-config.json');
+function readConfig() {
+  try { return JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8')); } catch { return {}; }
+}
+const DOTS_PER_MM = 8; // 203 dpi
+
+// Moves a 1-bit raster (1 = black, MSB first) by dx / dy dots; what slides
+// off the edge is dropped. Negative dx = left, negative dy = up.
+function shiftRaster(raster, bytesPerRow, heightPx, dx, dy) {
+  if (!dx && !dy) return raster;
+  const widthPx = bytesPerRow * 8;
+  const out = Buffer.alloc(raster.length);
+  for (let y = 0; y < heightPx; y++) {
+    const ny = y + dy;
+    if (ny < 0 || ny >= heightPx) continue;
+    for (let x = 0; x < widthPx; x++) {
+      if (!(raster[y * bytesPerRow + (x >> 3)] & (0x80 >> (x & 7)))) continue;
+      const nx = x + dx;
+      if (nx < 0 || nx >= widthPx) continue;
+      out[ny * bytesPerRow + (nx >> 3)] |= 0x80 >> (nx & 7);
+    }
+  }
+  return out;
+}
 const GAP_MM = 2; // gap between die-cut labels; use 0 for continuous/black-mark stock
 
 // USB mode: set the printer IP on the Label Printer page to "usb" and the job
@@ -79,6 +118,7 @@ function expandTwoUp(jobs) {
       copies: 1,
       gapMm: TWO_UP.gapMm,
       shiftDots: TWO_UP.shiftDots,
+      stitched: true, // positioned by TWO_UP already
     });
   }
   return out;
@@ -100,8 +140,15 @@ function buildTsplBuffer(job) {
   if (!widthMm || !heightMm || !bytesPerRow || !heightPx || !rasterBase64) {
     throw new Error('Malformed label job');
   }
+  let source = Buffer.from(rasterBase64, 'base64');
+  if (!job.stitched) {
+    const cfg = readConfig();
+    const dx = Math.round((Number(cfg.offsetXmm) || 0) * DOTS_PER_MM);
+    const dy = Math.round((Number(cfg.offsetYmm) || 0) * DOTS_PER_MM);
+    source = shiftRaster(source, bytesPerRow, heightPx, dx, dy);
+  }
   // The page sets bit 1 for black; TSPL BITMAP prints 0 bits as black.
-  const raster = Buffer.from(rasterBase64, 'base64').map((b) => ~b & 0xff);
+  const raster = source.map((b) => ~b & 0xff);
   const header = Buffer.from(
     `SIZE ${widthMm} mm,${heightMm} mm\r\n` +
     `GAP ${job.gapMm ?? GAP_MM} mm,0 mm\r\n` +
@@ -149,6 +196,91 @@ function sendToUsb(buffers) {
       else resolve(stdout.trim());
     });
   });
+}
+
+// Prints one payload ({ printerIp, printerPort, jobs }) and says where it went.
+async function printPayload(payload) {
+  const { printerIp, printerPort, jobs } = payload || {};
+  if (!Array.isArray(jobs) || jobs.length === 0) throw new Error('No label jobs');
+  const buffers = expandTwoUp(jobs).map(buildTsplBuffer);
+  const ip = String(printerIp || 'usb').trim();
+  const usb = ip.toLowerCase() === 'usb';
+  if (usb) await sendToUsb(buffers);
+  else await sendToPrinter(ip, Number(printerPort) || 9100, buffers);
+  return usb ? `USB printer "${USB_QUEUE}"` : `${ip}:${Number(printerPort) || 9100}`;
+}
+
+// ── Online queue ──
+function readEnvFile(file) {
+  const out = {};
+  try {
+    for (const line of fs.readFileSync(file, 'utf8').split(/\r?\n/)) {
+      const m = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*)\s*$/);
+      if (m) out[m[1]] = m[2].replace(/^['"]|['"]$/g, '');
+    }
+  } catch { /* no file */ }
+  return out;
+}
+const envLocal = readEnvFile(path.join(__dirname, '..', '.env.local'));
+const SUPABASE_URL = process.env.SUPABASE_URL || envLocal.NEXT_PUBLIC_SUPABASE_URL;
+const SUPABASE_KEY = process.env.SUPABASE_ANON_KEY || envLocal.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+const SECRET_FILE = path.join(__dirname, 'relay-secret.txt');
+
+function relaySecret() {
+  try {
+    const s = fs.readFileSync(SECRET_FILE, 'utf8').trim();
+    if (s) return s;
+  } catch { /* first run */ }
+  const s = crypto.randomBytes(32).toString('hex');
+  fs.writeFileSync(SECRET_FILE, s + '\n');
+  return s;
+}
+
+async function rpc(name, body) {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/rpc/${name}`, {
+    method: 'POST',
+    headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const text = await res.text();
+  if (!res.ok) throw new Error(`${name}: HTTP ${res.status} ${text.slice(0, 200)}`);
+  return text ? JSON.parse(text) : null;
+}
+
+function startQueue() {
+  if (!SUPABASE_URL || !SUPABASE_KEY) {
+    console.log('Online queue OFF: no Supabase URL/key (.env.local not found).');
+    return;
+  }
+  const secret = relaySecret();
+  const hash = crypto.createHash('sha256').update(secret, 'utf8').digest('hex');
+  console.log('Online queue ON. Helper id (sha256) for print_relays: ' + hash);
+  let busy = false;
+  let lastError = '';
+  setInterval(async () => {
+    if (busy) return;
+    busy = true;
+    try {
+      const jobs = await rpc('relay_claim_print_jobs', { p_secret: secret });
+      if (lastError) { console.log('Online queue reconnected.'); lastError = ''; }
+      for (const job of jobs || []) {
+        try {
+          const target = await printPayload(job.payload);
+          await rpc('relay_finish_print_job', { p_secret: secret, p_job_id: job.job_id, p_ok: true, p_message: `Printed on ${target}` });
+          console.log(`${new Date().toLocaleTimeString()}  job #${job.job_id}: ${job.label_count} label(s) printed`);
+        } catch (err) {
+          const msg = (err && err.message) || 'Unknown error';
+          console.log(`job #${job.job_id} failed: ${msg}`);
+          await rpc('relay_finish_print_job', { p_secret: secret, p_job_id: job.job_id, p_ok: false, p_message: msg }).catch(() => {});
+        }
+      }
+    } catch (err) {
+      const msg = (err && err.message) || String(err);
+      if (msg !== lastError) { console.log('Online queue: ' + msg); lastError = msg; }
+    } finally {
+      busy = false;
+    }
+  }, 2000);
 }
 
 function readBody(req) {
@@ -234,15 +366,8 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'POST' && req.url === '/print') {
       const rawBody = await readBody(req);
       const payload = parsePayload(req, rawBody);
-      const { printerIp, printerPort, jobs } = payload;
-      if (!printerIp || !Array.isArray(jobs) || jobs.length === 0) {
-        throw new Error('Missing printer IP or label jobs');
-      }
-      const buffers = expandTwoUp(jobs).map(buildTsplBuffer);
-      const usb = String(printerIp).trim().toLowerCase() === 'usb';
-      if (usb) await sendToUsb(buffers);
-      else await sendToPrinter(printerIp, Number(printerPort) || 9100, buffers);
-      const target = usb ? `USB printer "${USB_QUEUE}"` : `${printerIp}:${Number(printerPort) || 9100}`;
+      const { jobs } = payload;
+      const target = await printPayload(payload);
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
       res.end(resultPage(true, `${jobs.length} label${jobs.length === 1 ? '' : 's'} sent to ${target}.`));
       return;
@@ -263,4 +388,5 @@ server.listen(PORT, () => {
     console.log('  (no LAN address detected — connect this PC to WiFi/ethernet)');
   }
   for (const ip of addresses) console.log(`  -> http://${ip}:${PORT}`);
+  startQueue();
 });

@@ -39,3 +39,7 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# sticker printer helper secret (stays on the printer PC)
+sticker-relay/relay-secret.txt
+sticker-relay/*.log

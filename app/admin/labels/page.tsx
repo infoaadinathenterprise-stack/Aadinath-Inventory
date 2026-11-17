@@ -317,6 +317,28 @@ function LabelsDashboard() {
   useEffect(() => { localStorage.setItem('sticker.printerIp', printerIp); }, [printerIp]);
   useEffect(() => { localStorage.setItem('sticker.printerPort', printerPort); }, [printerPort]);
 
+  // How the job reaches the printer:
+  //  online = through the database to the helper on the printer PC (any device)
+  //  direct = the old form post straight to a helper address on this network
+  const [sendVia, setSendVia] = useState<'online' | 'direct'>(() => (readLS('sticker.sendVia', 'online') === 'direct' ? 'direct' : 'online'));
+  useEffect(() => { localStorage.setItem('sticker.sendVia', sendVia); }, [sendVia]);
+  // Printer PC online? (its helper checks in every 2 s while running)
+  const [relaySeen, setRelaySeen] = useState<{ checked: boolean; online: boolean; ago: number | null }>({ checked: false, online: false, ago: null });
+  useEffect(() => {
+    if (!stickerOpen || sendVia !== 'online') return;
+    let cancelled = false;
+    async function check() {
+      const { data, error } = await supabase.rpc('print_relay_status');
+      if (cancelled) return;
+      const last = !error && data && (data as { last_seen: string | null }).last_seen;
+      const ago  = last ? Math.max(0, Math.round((Date.now() - new Date(last).getTime()) / 1000)) : null;
+      setRelaySeen({ checked: true, online: ago != null && ago < 20, ago });
+    }
+    check();
+    const t = setInterval(check, 5000);
+    return () => { cancelled = true; clearInterval(t); };
+  }, [stickerOpen, sendVia]);
+
   // Set default location once loaded
   useEffect(() => {
     if (!locationId && locations.length > 0) setLocationId(locations[0].location_id);
@@ -419,9 +441,11 @@ function LabelsDashboard() {
 
   async function handlePrintWifi() {
     const relay = relayHost.trim();
-    const ip    = printerIp.trim();
-    if (!relay) { showToast('Enter the relay address (e.g. 192.168.1.50:8787)', 'error'); return; }
-    if (!ip)    { showToast("Enter the printer's IP address", 'error'); return; }
+    const ip    = sendVia === 'online' ? (printerIp.trim() || 'usb') : printerIp.trim();
+    if (sendVia === 'direct') {
+      if (!relay) { showToast('Enter the relay address (e.g. 192.168.1.50:8787)', 'error'); return; }
+      if (!ip)    { showToast("Enter the printer's IP address", 'error'); return; }
+    }
 
     const preset  = LABEL_PRESETS.find(p => p.key === labelSize);
     const widthMm  = labelSize === 'custom' ? customWidthMm  : preset?.widthMm  ?? 50;
@@ -482,6 +506,40 @@ function LabelsDashboard() {
         showToast(`Set pieces-per-box for: ${needInfo.slice(0, 3).join(', ')}${needInfo.length > 3 ? '…' : ''}`, 'error');
       }
       if (jobs.length === 0) { showToast('Nothing to print', 'error'); setStickerSending(false); return; }
+
+      if (sendVia === 'online') {
+        const labelCount = jobs.reduce((n, j) => n + (Number(j.copies) || 1), 0);
+        const { data: row, error: insErr } = await supabase.from('print_jobs')
+          .insert({ payload: { printerIp: ip, printerPort: Number(printerPort) || 9100, jobs }, label_count: labelCount })
+          .select('job_id').single();
+        if (insErr || !row) throw new Error(insErr?.message ?? 'Could not send the job');
+
+        const printedNext = { ...printed };
+        for (const [pid] of entries) printedNext[Number(pid)] = true;
+        try { localStorage.setItem('sticker.printed', JSON.stringify(printedNext)); } catch { /* ignore */ }
+        setPrinted(printedNext);
+        showToast(`Sent ${labelCount} label${labelCount === 1 ? '' : 's'} — waiting for the printer…`);
+
+        // Follow the job until the printer PC reports back (up to a minute).
+        const jobId = (row as { job_id: number }).job_id;
+        const started = Date.now();
+        let finalStatus: { status: string; message: string | null } | null = null;
+        while (Date.now() - started < 60_000) {
+          await new Promise(r => setTimeout(r, 1500));
+          const { data: st } = await supabase.from('print_jobs').select('status, message').eq('job_id', jobId).single();
+          if (st && (st.status === 'done' || st.status === 'failed')) { finalStatus = st as { status: string; message: string | null }; break; }
+        }
+        if (finalStatus?.status === 'done') {
+          showToast(`🖨️ Printed ${labelCount} label${labelCount === 1 ? '' : 's'}`);
+          setStickerOpen(false);
+        } else if (finalStatus?.status === 'failed') {
+          showToast(`Print failed: ${finalStatus.message ?? 'unknown error'}`, 'error');
+        } else {
+          showToast('No reply from the printer PC yet — is it on with the sticker helper running? The job waits 10 min.', 'error');
+        }
+        setStickerSending(false);
+        return;
+      }
 
       // Hand off via a real page navigation (form POST), not fetch — a
       // top-level navigation to an http:// relay from this https:// page is
@@ -883,10 +941,22 @@ function LabelsDashboard() {
               transition={{ type: 'spring', damping: 25, stiffness: 200 }}
             >
               <div className="w-9 h-1 bg-white/15 rounded-full mx-auto mb-4" />
-              <h3 className="text-base font-bold text-slate-100 text-center mb-1">📶 WiFi Sticker Printer</h3>
-              <p className="text-xs text-muted text-center mb-4">
-                Sends labels to the sticker printer via the relay helper running on your network.
+              <h3 className="text-base font-bold text-slate-100 text-center mb-1">🖨️ Sticker Printer</h3>
+              <p className="text-xs text-muted text-center mb-3">
+                Works from this PC or your phone — the labels go to the printer PC over the internet.
               </p>
+              {sendVia === 'online' && (
+                <div className={`mb-4 px-3 py-2 rounded-lg border text-[11px] font-semibold flex items-center gap-2 ${
+                  !relaySeen.checked ? 'border-white/10 bg-surface2 text-muted'
+                    : relaySeen.online ? 'border-success/30 bg-success/10 text-success'
+                    : 'border-danger/30 bg-danger/10 text-danger'
+                }`}>
+                  <span className={`w-2 h-2 rounded-full shrink-0 ${!relaySeen.checked ? 'bg-muted' : relaySeen.online ? 'bg-success' : 'bg-danger'}`} />
+                  {!relaySeen.checked ? 'Checking the printer PC…'
+                    : relaySeen.online ? 'Printer PC is online — ready to print'
+                    : 'Printer PC is offline — turn on the shop PC (the sticker helper starts with it). Jobs wait 10 minutes.'}
+                </div>
+              )}
 
               {/* Print as: pieces, boxes, or both (a box + a piece sticker per box) */}
               <label className="text-[11px] font-semibold text-muted mb-1 block">Print as</label>
@@ -975,6 +1045,13 @@ function LabelsDashboard() {
                 </div>
               )}
 
+              <details className="mb-3 rounded-lg border border-white/8 bg-surface2/50 px-3 py-2" open={sendVia === 'direct'}>
+              <summary className="text-[11px] font-semibold text-muted cursor-pointer">Advanced: printer connection</summary>
+              <div className="mt-2">
+              <label className="flex items-center gap-2 text-[11px] text-slate-200 mb-3">
+                <input type="checkbox" checked={sendVia === 'direct'} onChange={e => setSendVia(e.target.checked ? 'direct' : 'online')} />
+                Send straight to a helper address on this network (old way)
+              </label>
               <label className="text-[11px] font-semibold text-muted mb-1 block">Relay address (PC running the helper)</label>
               <input
                 type="text" value={relayHost} onChange={e => setRelayHost(e.target.value)}
@@ -1000,7 +1077,12 @@ function LabelsDashboard() {
                 </div>
               </div>
 
+              <p className="text-[10px] text-muted mb-3 leading-relaxed">
+                Printer IP: <b>usb</b> for the printer on the shop PC&apos;s cable (blank = usb), or a WiFi printer&apos;s IP.
+              </p>
               <BluetoothPrinterTest />
+              </div>
+              </details>
 
               <div className="flex gap-3">
                 <button
@@ -1013,7 +1095,7 @@ function LabelsDashboard() {
                   disabled={stickerSending}
                   className="flex-2 py-3 rounded-xl text-navy text-sm font-bold bg-linear-to-r from-teal to-teal/70 shadow-[0_4px_14px_rgba(0,212,255,0.3)] disabled:opacity-50"
                 >
-                  {stickerSending ? 'Sending…' : 'Send to Printer 📶'}
+                  {stickerSending ? 'Printing…' : 'Print stickers 🖨️'}
                 </button>
               </div>
             </motion.div>
