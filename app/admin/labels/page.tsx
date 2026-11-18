@@ -14,7 +14,6 @@ import type { Product } from '@/lib/types';
 import { SESSION_KEY, ROLE_KEY, DEFAULT_COMPANY_ID } from '@/lib/types';
 import { boxBarcodeValue } from '@/lib/boxBarcode';
 
-const LABELS_PER_PAGE = 24;
 type SortBy = 'recent' | 'name';
 
 // ── WiFi sticker printer (XB330B) ───────────────────────────────────────────────
@@ -281,7 +280,6 @@ function LabelsDashboard() {
   const [search,   setSearch]     = useState('');
   const [locationId, setLocationId] = useState<number>(0);
   const [sortBy,   setSortBy]     = useState<SortBy>('recent');
-  const [mobileTab, setMobileTab] = useState<'products' | 'preview'>('products');
   const [viewMode, setViewMode]   = useState<'all' | 'selected'>('all');
   const [toast,    setToast]      = useState<{ msg: string; type: string } | null>(null);
   const [stockModal, setStockModal] = useState<{ mode: 'add' | 'remove'; product: Product } | null>(null);
@@ -295,10 +293,11 @@ function LabelsDashboard() {
   const [labelSize,      setLabelSize]      = useState<LabelPresetKey>(() => readLS('sticker.labelSize', '40x30') as LabelPresetKey);
   const [customWidthMm,  setCustomWidthMm]  = useState<number>(() => Number(readLS('sticker.customWidthMm', '40')));
   const [customHeightMm, setCustomHeightMm] = useState<number>(() => Number(readLS('sticker.customHeightMm', '30')));
-  // Piece sticker (plain SKU), box sticker (scans as a box), or both.
-  const [stickerMode,    setStickerMode]    = useState<'piece' | 'box' | 'both'>(() => (readLS('sticker.mode', 'piece') as 'piece' | 'box' | 'both'));
-  // Per-product box sizes for box/both mode: comma-separated pcs per box, e.g.
-  // "80, 75" = two boxes of 80 and 75. Blank = `copies` boxes of pieces_per_box.
+  // Per product: print PIECE stickers (plain SKU, `copies` of them) or BOX
+  // stickers (one per physical box, scans as a box at the POS).
+  const [units,          setUnits]          = useState<Record<number, 'pcs' | 'box'>>({});
+  // Box mode: pcs in each box, comma-separated — "80, 75" = two boxes of 80
+  // and 75. Blank = one box of the product's pieces_per_box.
   const [boxSizes,       setBoxSizes]       = useState<Record<number, string>>({});
   // Products already printed this batch — persisted so it survives the form-POST
   // navigation to the relay. Re-printing one asks for confirmation first.
@@ -310,7 +309,6 @@ function LabelsDashboard() {
   const [printerPort,    setPrinterPort]    = useState<string>(() => readLS('sticker.printerPort', '9100'));
 
   useEffect(() => { localStorage.setItem('sticker.labelSize', labelSize); }, [labelSize]);
-  useEffect(() => { localStorage.setItem('sticker.mode', stickerMode); }, [stickerMode]);
   useEffect(() => { localStorage.setItem('sticker.customWidthMm', String(customWidthMm)); }, [customWidthMm]);
   useEffect(() => { localStorage.setItem('sticker.customHeightMm', String(customHeightMm)); }, [customHeightMm]);
   useEffect(() => { localStorage.setItem('sticker.relayHost', relayHost); }, [relayHost]);
@@ -336,7 +334,6 @@ function LabelsDashboard() {
       if (typeof s.labelSize === 'string' && LABEL_PRESETS.some(p => p.key === s.labelSize)) setLabelSize(s.labelSize as LabelPresetKey);
       if (Number(s.customWidthMm) > 0)  setCustomWidthMm(Number(s.customWidthMm));
       if (Number(s.customHeightMm) > 0) setCustomHeightMm(Number(s.customHeightMm));
-      if (s.stickerMode === 'piece' || s.stickerMode === 'box' || s.stickerMode === 'both') setStickerMode(s.stickerMode);
       if (s.sendVia === 'online' || s.sendVia === 'direct') setSendVia(s.sendVia);
       if (typeof s.printerIp === 'string')   setPrinterIp(s.printerIp);
       if (typeof s.printerPort === 'string') setPrinterPort(s.printerPort);
@@ -350,12 +347,12 @@ function LabelsDashboard() {
     const t = setTimeout(() => {
       supabase.from('print_settings').upsert({
         id: 1,
-        settings: { labelSize, customWidthMm, customHeightMm, stickerMode, sendVia, printerIp, printerPort, relayHost },
+        settings: { labelSize, customWidthMm, customHeightMm, sendVia, printerIp, printerPort, relayHost },
         updated_at: new Date().toISOString(),
       }).then(() => { /* best effort; next change retries */ });
     }, 800);
     return () => clearTimeout(t);
-  }, [labelSize, customWidthMm, customHeightMm, stickerMode, sendVia, printerIp, printerPort, relayHost]);
+  }, [labelSize, customWidthMm, customHeightMm, sendVia, printerIp, printerPort, relayHost]);
 
   // Printer laptop online? (its helper checks in every 2 s while running) and
   // is the sticker printer plugged into it? (reported every 15 s)
@@ -443,22 +440,10 @@ function LabelsDashboard() {
 
   function clearAll() {
     setSelected({});
+    setUnits({});
+    setBoxSizes({});
     setPrinted({});
     try { localStorage.removeItem('sticker.printed'); } catch { /* ignore */ }
-  }
-
-  // Build label list respecting selection order
-  const labelList: Product[] = [];
-  products.forEach(p => {
-    const copies = selected[p.product_id];
-    if (!copies) return;
-    for (let i = 0; i < copies; i++) labelList.push(p);
-  });
-
-  const totalLabels = labelList.length;
-  const pages: Product[][] = [];
-  for (let i = 0; i < labelList.length; i += LABELS_PER_PAGE) {
-    pages.push(labelList.slice(i, i + LABELS_PER_PAGE));
   }
 
   const selectedProducts = useMemo(
@@ -470,19 +455,23 @@ function LabelsDashboard() {
     [selectedProducts],
   );
 
-  function handlePrint() {
-    // We allow printing more than the on-hand count (the user can do this
-    // intentionally — pre-print spares). Just confirm via toast if any
-    // selection exceeds stock so it's not silent.
-    const overLimit = inLocStock
-      .map(p => ({ p, copies: selected[p.product_id] ?? 0, stock: stockMap[p.product_id] || 0 }))
-      .filter(({ copies, stock }) => copies > 0 && copies > stock);
-
-    if (overLimit.length > 0) {
-      showToast(`Printing ${overLimit.length} product(s) above ${locName} stock — extras will print anyway.`, 'success');
-    }
-    window.print();
+  // Box mode: the boxes to print for a product — one entry (its piece count)
+  // per physical box. Comes ONLY from the sizes typed for it, never from the
+  // piece stock; blank = a single box of pieces_per_box. Empty = can't tell.
+  function boxesFor(p: Product): number[] {
+    const raw = (boxSizes[p.product_id] ?? '').trim();
+    const sized = raw ? raw.split(/[,\s]+/).map(x => parseInt(x, 10)).filter(n => Number.isFinite(n) && n > 0) : [];
+    if (sized.length) return sized;
+    const ppb = p.pieces_per_box ?? 0;
+    return ppb > 0 ? [ppb] : [];
   }
+  const unitOf = (id: number) => units[id] ?? 'pcs';
+
+  // Stickers that will come out: piece copies, or one per box.
+  const totalLabels = selectedProducts.reduce(
+    (n, p) => n + (unitOf(p.product_id) === 'box' ? boxesFor(p).length : (selected[p.product_id] ?? 0)),
+    0,
+  );
 
   async function handlePrintWifi() {
     const relay = relayHost.trim();
@@ -516,35 +505,20 @@ function LabelsDashboard() {
         const product = products.find(p => p.product_id === Number(pid));
         if (!product) continue;
 
-        if (stickerMode === 'piece') {
+        if (unitOf(product.product_id) === 'pcs') {
           const bm = await renderLabelBitmap(product, widthMm, heightMm, 'piece');
           jobs.push({ ...bm, widthMm, heightMm, copies });
           continue;
         }
 
-        // Box / Both: one box (and, for Both, one piece) sticker per physical
-        // box. The NUMBER OF BOXES comes only from the sizes typed for this
-        // product — never from the piece stock. Blank = a single box of the
-        // product's pieces_per_box. (So a 500-pc product prints ONE box label,
-        // not 500.)
-        const wantPiece = stickerMode === 'both';
-        const raw   = (boxSizes[product.product_id] ?? '').trim();
-        const sized = raw
-          ? raw.split(/[,\s]+/).map(s => parseInt(s, 10)).filter(n => Number.isFinite(n) && n > 0)
-          : [];
-        const ppb   = product.pieces_per_box ?? 0;
-        const boxes = sized.length ? sized : (ppb > 0 ? [ppb] : []);
+        // Box: one box sticker per physical box ("Box 1/2 · 80 pcs").
+        const boxes = boxesFor(product);
         if (boxes.length === 0) { needInfo.push(product.product_name); continue; }
-
         const n = boxes.length;
         for (let i = 0; i < n; i++) {
           const pcs = boxes[i];
           const bmBox = await renderLabelBitmap(product, widthMm, heightMm, 'box', { boxPcs: pcs, note: `Box ${i + 1}/${n} · ${pcs} pcs` });
           jobs.push({ ...bmBox, widthMm, heightMm, copies: 1 });
-          if (wantPiece) {
-            const bmPcs = await renderLabelBitmap(product, widthMm, heightMm, 'piece', { note: `${pcs} pcs/box` });
-            jobs.push({ ...bmPcs, widthMm, heightMm, copies: 1 });
-          }
         }
       }
       if (needInfo.length > 0) {
@@ -723,26 +697,8 @@ function LabelsDashboard() {
         </button>
       </header>
 
-      <div className="sm:hidden print-hide shrink-0 flex bg-surface border-b border-white/8">
-        {(['products', 'preview'] as const).map(tab => (
-          <button
-            key={tab}
-            onClick={() => setMobileTab(tab)}
-            className={`flex-1 py-2.5 text-xs font-semibold transition-all border-b-2 ${
-              mobileTab === tab
-                ? 'text-teal border-teal'
-                : 'text-muted border-transparent'
-            }`}
-          >
-            {tab === 'products' ? '🛍️ Products' : (
-              <>🏷️ Preview {totalLabels > 0 && <span className="ml-1 bg-teal text-navy text-[10px] font-bold px-1.5 py-0.5 rounded-full">{totalLabels}</span>}</>
-            )}
-          </button>
-        ))}
-      </div>
-
       <div className="flex flex-1 overflow-hidden">
-        <aside className={`${mobileTab === 'preview' ? 'hidden' : 'flex'} sm:flex print-hide w-full sm:w-72 lg:w-80 shrink-0 bg-surface border-r border-white/8 flex-col`}>
+        <aside className="flex print-hide w-full max-w-3xl mx-auto bg-surface sm:border-x border-white/8 flex-col">
           <div className="p-3 border-b border-white/8 shrink-0 flex flex-col gap-2">
             <div className="flex gap-1.5 overflow-x-auto scrollbar-none">
               {locations.map(loc => (
@@ -829,6 +785,8 @@ function LabelsDashboard() {
               const stock    = stockMap[p.product_id] || 0;
               const isOver   = copies != null && copies > stock;
               const isSel    = copies != null;
+              const unit     = unitOf(p.product_id);
+              const boxes    = isSel && unit === 'box' ? boxesFor(p) : [];
               return (
                 <div
                   key={p.product_id}
@@ -853,9 +811,52 @@ function LabelsDashboard() {
                     {printed[p.product_id] && (
                       <span className="inline-block mt-1 text-[8px] font-bold px-1.5 py-0.5 rounded-full bg-success/12 border border-success/30 text-success uppercase tracking-wider">✓ Printed</span>
                     )}
+
+                    {/* Selected: print as pieces or boxes */}
+                    {isSel && (
+                      <div className="mt-1.5" onClick={e => e.stopPropagation()}>
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <div className="flex rounded-lg border border-white/10 overflow-hidden">
+                            {([['pcs', 'Pcs'], ['box', 'Box']] as const).map(([k, lbl]) => (
+                              <button
+                                key={k}
+                                onClick={() => setUnits(u => ({ ...u, [p.product_id]: k }))}
+                                className={`px-2.5 py-1 text-[10px] font-bold transition-all ${
+                                  unit === k ? 'bg-teal text-navy' : 'bg-surface2 text-muted hover:text-slate-100'
+                                }`}
+                              >
+                                {lbl}
+                              </button>
+                            ))}
+                          </div>
+                          {unit === 'box' && (
+                            <input
+                              type="text"
+                              inputMode="numeric"
+                              value={boxSizes[p.product_id] ?? ''}
+                              onChange={e => setBoxSizes(b => ({ ...b, [p.product_id]: e.target.value }))}
+                              placeholder={p.pieces_per_box ? `${p.pieces_per_box} pcs/box` : 'pcs per box'}
+                              className="w-28 px-2 py-1 rounded-lg bg-surface2 border border-white/10 text-[11px] text-slate-100 placeholder:text-muted/50 outline-none focus:border-teal/40 font-mono"
+                            />
+                          )}
+                        </div>
+                        {unit === 'box' && (
+                          <p className={`text-[9px] mt-1 ${boxes.length ? 'text-muted' : 'text-danger'}`}>
+                            {boxes.length
+                              ? `${boxes.length} box sticker${boxes.length === 1 ? '' : 's'}: ${boxes.join(' + ')} pcs`
+                              : 'Type the pcs in each box, e.g. 80, 75'}
+                          </p>
+                        )}
+                      </div>
+                    )}
                   </div>
 
-                  {isSel ? (
+                  {isSel && unit === 'box' ? (
+                    <div className="shrink-0 mt-0.5 flex flex-col items-center gap-0.5" onClick={e => e.stopPropagation()}>
+                      <span className="text-xs font-bold text-teal px-2 py-1 rounded-lg border border-teal/30 bg-teal/10">📦 {boxes.length}</span>
+                      <span className="text-[9px] font-mono text-muted">/{stock} pcs</span>
+                    </div>
+                  ) : isSel ? (
                     <div className="shrink-0 mt-0.5 flex flex-col items-center gap-0.5" onClick={e => e.stopPropagation()}>
                       <input
                         type="number"
@@ -892,24 +893,6 @@ function LabelsDashboard() {
           </div>
         </aside>
 
-        <main className={`${mobileTab === 'products' ? 'hidden' : 'flex'} sm:flex flex-1 overflow-y-auto p-5 bg-navy/60`}>
-          {pages.length === 0 ? (
-            <div className="flex flex-col items-center justify-center flex-1 text-center text-muted">
-              <p className="text-4xl mb-3">🏷️</p>
-              <p className="text-sm">Select products from the sidebar<br />to generate barcode labels.</p>
-            </div>
-          ) : (
-            <div className="flex flex-col items-center gap-5 w-full">
-              {pages.map((page, pi) => (
-                <div key={pi} className="label-page">
-                  {page.map((p, li) => (
-                    <BarcodeLabel key={`${pi}-${li}-${p.product_id}`} product={p} />
-                  ))}
-                </div>
-              ))}
-            </div>
-          )}
-        </main>
       </div>
 
       <AnimatePresence>
@@ -1020,46 +1003,6 @@ function LabelsDashboard() {
                   </div>
                 );
               })()}
-
-              {/* Print as: pieces, boxes, or both (a box + a piece sticker per box) */}
-              <label className="text-[11px] font-semibold text-muted mb-1 block">Print as</label>
-              <div className="flex gap-1.5 mb-3">
-                {([['piece', 'Pieces'], ['box', 'Boxes'], ['both', 'Both']] as const).map(([k, lbl]) => (
-                  <button
-                    key={k}
-                    onClick={() => setStickerMode(k)}
-                    className={`flex-1 px-2.5 py-1.5 rounded-lg border text-[11px] font-semibold transition-all ${
-                      stickerMode === k ? 'border-teal bg-teal/10 text-teal' : 'border-white/8 bg-surface2 text-muted hover:border-white/20'
-                    }`}
-                  >
-                    {lbl}
-                  </button>
-                ))}
-              </div>
-
-              {stickerMode !== 'piece' && (
-                <div className="mb-3 rounded-lg border border-white/8 bg-surface2 p-2.5">
-                  <p className="text-[10px] text-muted mb-2 leading-relaxed">
-                    <b>One number per box.</b> e.g. <b>80, 75</b> = two boxes (80 and 75 pcs);
-                    <b> 500</b> = one box of 500. Blank = a single box of the product&apos;s
-                    pcs/box. The stock count on the left is ignored in box mode.
-                  </p>
-                  <div className="flex flex-col gap-1.5 max-h-40 overflow-y-auto">
-                    {selectedProducts.map(p => (
-                      <div key={p.product_id} className="flex items-center gap-2">
-                        <span className="text-[11px] text-slate-200 flex-1 truncate">{p.product_name}</span>
-                        <input
-                          type="text"
-                          value={boxSizes[p.product_id] ?? ''}
-                          onChange={e => setBoxSizes(s => ({ ...s, [p.product_id]: e.target.value }))}
-                          placeholder={p.pieces_per_box ? String(p.pieces_per_box) : 'pcs/box'}
-                          className="w-28 px-2 py-1 rounded-md bg-surface border border-white/10 text-xs text-slate-100 placeholder:text-muted/50 outline-none focus:border-teal/40 font-mono"
-                        />
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
 
               <label className="text-[11px] font-semibold text-muted mb-1 block">Label size</label>
               <div className="flex flex-wrap gap-1.5 mb-2">
@@ -1182,52 +1125,6 @@ function LabelsDashboard() {
           </motion.div>
         )}
       </AnimatePresence>
-    </div>
-  );
-}
-
-// ── Barcode label component ────────────────────────────────────────────────────
-
-function BarcodeLabel({ product }: { product: Product }) {
-  const svgRef = useRef<SVGSVGElement>(null);
-
-  useEffect(() => {
-    if (!svgRef.current || !product.stock_keeping_unit) return;
-    import('jsbarcode').then(mod => {
-      const JsBarcode = mod.default;
-      try {
-        JsBarcode(svgRef.current!, product.stock_keeping_unit!, {
-          format:       'CODE128',
-          width:        1.2,
-          height:       32,
-          displayValue: true,
-          fontSize:     7,
-          margin:       2,
-          background:   '#ffffff',
-          lineColor:    '#000000',
-          textMargin:   2,
-        });
-      } catch (_) {
-        if (svgRef.current) {
-          svgRef.current.parentElement!.innerHTML = '<div class="label-nosku">BAD SKU</div>';
-        }
-      }
-    });
-  }, [product.stock_keeping_unit]);
-
-  return (
-    <div className="label">
-      {product.stock_keeping_unit ? (
-        <div style={{ maxWidth: '100%', overflow: 'hidden' }}>
-          <svg ref={svgRef} />
-        </div>
-      ) : (
-        <div className="label-nosku">{product.product_name.substring(0, 16)}</div>
-      )}
-      <div className="label-name">{product.product_name}</div>
-      {product.selling_price != null && (
-        <div className="label-price">Ksh {product.selling_price}</div>
-      )}
     </div>
   );
 }
