@@ -322,17 +322,62 @@ function LabelsDashboard() {
   //  direct = the old form post straight to a helper address on this network
   const [sendVia, setSendVia] = useState<'online' | 'direct'>(() => (readLS('sticker.sendVia', 'online') === 'direct' ? 'direct' : 'online'));
   useEffect(() => { localStorage.setItem('sticker.sendVia', sendVia); }, [sendVia]);
-  // Printer PC online? (its helper checks in every 2 s while running)
-  const [relaySeen, setRelaySeen] = useState<{ checked: boolean; online: boolean; ago: number | null }>({ checked: false, online: false, ago: null });
+
+  // Printer settings are shared: saved once in the database (print_settings)
+  // and filled in on every device, phone included. This browser's copy above
+  // only covers the moment before the shared settings arrive.
+  const settingsLoaded = useRef(false);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const { data, error } = await supabase.from('print_settings').select('settings').eq('id', 1).maybeSingle();
+      if (cancelled || error) return; // couldn't read: don't overwrite the shared copy either
+      const s = ((data as { settings?: Record<string, unknown> } | null)?.settings ?? {}) as Record<string, unknown>;
+      if (typeof s.labelSize === 'string' && LABEL_PRESETS.some(p => p.key === s.labelSize)) setLabelSize(s.labelSize as LabelPresetKey);
+      if (Number(s.customWidthMm) > 0)  setCustomWidthMm(Number(s.customWidthMm));
+      if (Number(s.customHeightMm) > 0) setCustomHeightMm(Number(s.customHeightMm));
+      if (s.stickerMode === 'piece' || s.stickerMode === 'box' || s.stickerMode === 'both') setStickerMode(s.stickerMode);
+      if (s.sendVia === 'online' || s.sendVia === 'direct') setSendVia(s.sendVia);
+      if (typeof s.printerIp === 'string')   setPrinterIp(s.printerIp);
+      if (typeof s.printerPort === 'string') setPrinterPort(s.printerPort);
+      if (typeof s.relayHost === 'string')   setRelayHost(s.relayHost);
+      settingsLoaded.current = true;
+    })();
+    return () => { cancelled = true; };
+  }, []);
+  useEffect(() => {
+    if (!settingsLoaded.current) return;
+    const t = setTimeout(() => {
+      supabase.from('print_settings').upsert({
+        id: 1,
+        settings: { labelSize, customWidthMm, customHeightMm, stickerMode, sendVia, printerIp, printerPort, relayHost },
+        updated_at: new Date().toISOString(),
+      }).then(() => { /* best effort; next change retries */ });
+    }, 800);
+    return () => clearTimeout(t);
+  }, [labelSize, customWidthMm, customHeightMm, stickerMode, sendVia, printerIp, printerPort, relayHost]);
+
+  // Printer laptop online? (its helper checks in every 2 s while running) and
+  // is the sticker printer plugged into it? (reported every 15 s)
+  const [relaySeen, setRelaySeen] = useState<{
+    checked: boolean; online: boolean; ago: number | null;
+    printerConnected: boolean | null; queueFound: boolean | null;
+  }>({ checked: false, online: false, ago: null, printerConnected: null, queueFound: null });
   useEffect(() => {
     if (!stickerOpen || sendVia !== 'online') return;
     let cancelled = false;
     async function check() {
       const { data, error } = await supabase.rpc('print_relay_status');
       if (cancelled) return;
-      const last = !error && data && (data as { last_seen: string | null }).last_seen;
+      const d    = (!error && data ? data : {}) as { last_seen?: string | null; info?: { printerConnected?: boolean; queueFound?: boolean } | null };
+      const last = d.last_seen;
       const ago  = last ? Math.max(0, Math.round((Date.now() - new Date(last).getTime()) / 1000)) : null;
-      setRelaySeen({ checked: true, online: ago != null && ago < 20, ago });
+      setRelaySeen({
+        checked: true, online: ago != null && ago < 20, ago,
+        // Older helpers don't report the printer: unknown, not "unplugged".
+        printerConnected: typeof d.info?.printerConnected === 'boolean' ? d.info.printerConnected : null,
+        queueFound:       typeof d.info?.queueFound === 'boolean' ? d.info.queueFound : null,
+      });
     }
     check();
     const t = setInterval(check, 5000);
@@ -949,18 +994,32 @@ function LabelsDashboard() {
               <p className="text-xs text-muted text-center mb-3">
                 Works from this PC or your phone — the labels go to the printer PC over the internet.
               </p>
-              {sendVia === 'online' && (
-                <div className={`mb-4 px-3 py-2 rounded-lg border text-[11px] font-semibold flex items-center gap-2 ${
-                  !relaySeen.checked ? 'border-white/10 bg-surface2 text-muted'
-                    : relaySeen.online ? 'border-success/30 bg-success/10 text-success'
-                    : 'border-danger/30 bg-danger/10 text-danger'
-                }`}>
-                  <span className={`w-2 h-2 rounded-full shrink-0 ${!relaySeen.checked ? 'bg-muted' : relaySeen.online ? 'bg-success' : 'bg-danger'}`} />
-                  {!relaySeen.checked ? 'Checking the printer PC…'
-                    : relaySeen.online ? 'Printer PC is online — ready to print'
-                    : 'Printer PC is offline — turn on the shop PC (the sticker helper starts with it). Jobs wait 10 minutes.'}
-                </div>
-              )}
+              {sendVia === 'online' && (() => {
+                // ready = laptop online and printer plugged in (or not reported by an older helper)
+                const state = !relaySeen.checked ? 'checking'
+                  : !relaySeen.online ? 'laptop-off'
+                  : relaySeen.queueFound === false ? 'no-queue'
+                  : relaySeen.printerConnected === false ? 'unplugged'
+                  : 'ready';
+                const tone = state === 'checking' ? 'border-white/10 bg-surface2 text-muted'
+                  : state === 'ready' ? 'border-success/30 bg-success/10 text-success'
+                  : state === 'unplugged' ? 'border-gold/30 bg-gold/10 text-gold'
+                  : 'border-danger/30 bg-danger/10 text-danger';
+                const dot = state === 'checking' ? 'bg-muted' : state === 'ready' ? 'bg-success' : state === 'unplugged' ? 'bg-gold' : 'bg-danger';
+                const text = {
+                  'checking':   'Checking the printer laptop…',
+                  'ready':      'Printer ready — laptop online, sticker printer connected',
+                  'unplugged':  'Laptop is online, but the sticker printer is not connected — plug in its USB cable',
+                  'no-queue':   'Laptop is online, but its sticker print queue is missing — run setup.ps1 on the laptop',
+                  'laptop-off': 'Printer laptop is offline — open the laptop and log in (the helper starts by itself). Jobs wait 10 minutes.',
+                }[state];
+                return (
+                  <div className={`mb-4 px-3 py-2 rounded-lg border text-[11px] font-semibold flex items-center gap-2 ${tone}`}>
+                    <span className={`w-2 h-2 rounded-full shrink-0 ${dot}`} />
+                    {text}
+                  </div>
+                );
+              })()}
 
               {/* Print as: pieces, boxes, or both (a box + a piece sticker per box) */}
               <label className="text-[11px] font-semibold text-muted mb-1 block">Print as</label>

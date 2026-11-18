@@ -75,7 +75,36 @@ const GAP_MM = 2; // gap between die-cut labels; use 0 for continuous/black-mark
 // USB mode: set the printer IP on the Label Printer page to "usb" and the job
 // is spooled RAW to this Windows print queue (see raw-print.ps1), which sits
 // on the printer's USB port with the "Generic / Text Only" driver.
-const USB_QUEUE = process.env.USB_QUEUE || 'XPrinter Label';
+// The Windows print queue for the USB sticker printer: USB_QUEUE env, else
+// relay-config.json "usbQueue", else 'XPrinter Label' (what setup.ps1 makes).
+const USB_QUEUE = process.env.USB_QUEUE || readConfig().usbQueue || 'XPrinter Label';
+
+// Is the USB sticker printer plugged in and its queue ready? The queue stays
+// even when the cable is out, so we look for the printer's own USB device
+// (a USB\ or USBPRINT\ device named after it, e.g. "XprinterXP-330B" — not
+// the "XPrinter Label" queue, which is a software device). Checked every 15 s and reported to
+// the website so the Labels page can say "printer connected". Override the
+// name pattern with relay-config.json "usbDeviceMatch" if yours differs.
+const PRINTER_MATCH = readConfig().usbDeviceMatch || 'xprinter|xp-?3[0-9]0';
+let printerState = { queueFound: false, connected: false, checkedAt: null };
+function checkUsbPrinter() {
+  // Queue present? Then is the printer's USB device actually plugged in?
+  const ps = `$q = Get-Printer -Name '${USB_QUEUE.replace(/'/g, "''")}' -ErrorAction SilentlyContinue; ` +
+             `if (-not $q) { 'missing' } else { ` +
+             `$d = Get-PnpDevice -PresentOnly -ErrorAction SilentlyContinue | Where-Object { $_.Status -eq 'OK' -and $_.InstanceId -match '^USB' -and $_.FriendlyName -match '${PRINTER_MATCH}' }; ` +
+             `if ($d) { 'ready' } else { 'offline' } }`;
+  return new Promise((resolve) => {
+    execFile('powershell.exe', ['-NoProfile', '-Command', ps], { timeout: 15000, windowsHide: true }, (err, stdout) => {
+      const s = String(stdout || '').trim();
+      printerState = {
+        queueFound: s === 'ready' || s === 'offline',
+        connected: s === 'ready',
+        checkedAt: new Date().toISOString(),
+      };
+      resolve(printerState);
+    });
+  });
+}
 
 // 2-up rolls: 25 x 25 mm labels come two per row, so pairs of labels are
 // stitched side by side into one row-wide bitmap. Offsets are whole bytes
@@ -190,7 +219,7 @@ function sendToUsb(buffers) {
       '-NoProfile', '-ExecutionPolicy', 'Bypass',
       '-File', path.join(__dirname, 'raw-print.ps1'),
       '-Printer', USB_QUEUE, '-Path', file,
-    ], (err, stdout, stderr) => {
+    ], { windowsHide: true }, (err, stdout, stderr) => {
       fs.unlink(file, () => {});
       if (err) reject(new Error((stderr || err.message).trim()));
       else resolve(stdout.trim());
@@ -205,8 +234,14 @@ async function printPayload(payload) {
   const buffers = expandTwoUp(jobs).map(buildTsplBuffer);
   const ip = String(printerIp || 'usb').trim();
   const usb = ip.toLowerCase() === 'usb';
-  if (usb) await sendToUsb(buffers);
-  else await sendToPrinter(ip, Number(printerPort) || 9100, buffers);
+  if (usb) {
+    // Don't hand the job to Windows while the printer is unplugged: it would
+    // sit in the queue and print by surprise whenever the cable goes back in.
+    const st = await checkUsbPrinter();
+    if (!st.queueFound) throw new Error(`Print queue "${USB_QUEUE}" not found on the laptop — run setup.ps1 in the sticker-relay folder`);
+    if (!st.connected) throw new Error('Sticker printer is not connected to the laptop — plug in its USB cable and print again');
+    await sendToUsb(buffers);
+  } else await sendToPrinter(ip, Number(printerPort) || 9100, buffers);
   return usb ? `USB printer "${USB_QUEUE}"` : `${ip}:${Number(printerPort) || 9100}`;
 }
 
@@ -255,6 +290,22 @@ function startQueue() {
   const secret = relaySecret();
   const hash = crypto.createHash('sha256').update(secret, 'utf8').digest('hex');
   console.log('Online queue ON. Helper id (sha256) for print_relays: ' + hash);
+
+  // Tell the website whether the sticker printer is plugged in (every 15 s,
+  // and right away on start), so the Labels page can show it on any device.
+  let lastReported = '';
+  async function report() {
+    const st = await checkUsbPrinter();
+    const info = { queue: USB_QUEUE, queueFound: st.queueFound, printerConnected: st.connected, host: os.hostname() };
+    try {
+      await rpc('relay_report', { p_secret: secret, p_info: info });
+      const line = st.connected ? 'Sticker printer connected.' : st.queueFound ? 'Sticker printer NOT connected (plug in the USB cable).' : `Print queue "${USB_QUEUE}" not found — run setup.ps1.`;
+      if (line !== lastReported) { console.log(line); lastReported = line; }
+    } catch (err) { /* the claim loop logs connection problems */ }
+  }
+  report();
+  setInterval(report, 15000);
+
   let busy = false;
   let lastError = '';
   setInterval(async () => {
