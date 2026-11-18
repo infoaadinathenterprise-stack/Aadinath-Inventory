@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef, useMemo } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -12,7 +12,7 @@ import { stockTxn, type StockOp } from '@/lib/stockActions';
 import { supabase } from '@/lib/supabase';
 import type { Product } from '@/lib/types';
 import { SESSION_KEY, ROLE_KEY, DEFAULT_COMPANY_ID } from '@/lib/types';
-import { boxBarcodeValue } from '@/lib/boxBarcode';
+import { savedBoxBarcode } from '@/lib/boxBarcode';
 
 type SortBy = 'recent' | 'name';
 
@@ -36,6 +36,18 @@ const LABEL_PRESETS = [
 type LabelPresetKey = typeof LABEL_PRESETS[number]['key'];
 
 type LabelBitmap = { widthPx: number; heightPx: number; bytesPerRow: number; rasterBase64: string };
+
+// Follows a print job until the printer PC reports done/failed (up to a
+// minute). null = no reply yet.
+async function waitForPrintJob(jobId: number): Promise<{ status: string; message: string | null } | null> {
+  const started = Date.now();
+  while (Date.now() - started < 60_000) {
+    await new Promise(r => setTimeout(r, 1500));
+    const { data: st } = await supabase.from('print_jobs').select('status, message').eq('job_id', jobId).single();
+    if (st && (st.status === 'done' || st.status === 'failed')) return st as { status: string; message: string | null };
+  }
+  return null;
+}
 
 function readLS(key: string, fallback: string): string {
   if (typeof window === 'undefined') return fallback;
@@ -150,7 +162,7 @@ async function renderLabelBitmap(
   widthMm: number,
   heightMm: number,
   variant: 'piece' | 'box' = 'piece',
-  opts: { boxPcs?: number; note?: string } = {},
+  opts: { boxPcs?: number; boxId?: number; note?: string } = {},
 ): Promise<LabelBitmap> {
   const boxPcs = Math.max(1, Math.round(opts.boxPcs ?? (product.pieces_per_box ?? 0) ?? 1));
   const bytesPerRow = Math.ceil(Math.round((widthMm / 25.4) * STICKER_DPI) / 8);
@@ -170,8 +182,10 @@ async function renderLabelBitmap(
 
   if (product.stock_keeping_unit) {
     const sku         = product.stock_keeping_unit;
-    const barcodeData = variant === 'box' ? boxBarcodeValue(sku, boxPcs) : sku;
-    const barcodeText = variant === 'box' ? `${sku}  ·  BOX` : sku;
+    // A box sticker's barcode is its saved box number (BX<id>); the POS looks
+    // the box up and sells all its pieces.
+    const barcodeData = variant === 'box' && opts.boxId ? savedBoxBarcode(opts.boxId) : sku;
+    const barcodeText = variant === 'box' && opts.boxId ? `${sku}  ·  BOX #${opts.boxId}` : sku;
     const barcodeCanvas = document.createElement('canvas');
     try {
       const JsBarcode = (await import('jsbarcode')).default;
@@ -299,6 +313,22 @@ function LabelsDashboard() {
   // Box mode: pcs in each box, comma-separated — "80, 75" = two boxes of 80
   // and 75. Blank = one box of the product's pieces_per_box.
   const [boxSizes,       setBoxSizes]       = useState<Record<number, string>>({});
+  // Saved, still-sealed boxes (product_boxes), and which products should
+  // reprint theirs in this batch.
+  type SavedBox = { box_id: number; product_id: number; location_id: number | null; pcs: number };
+  const [savedBoxes,     setSavedBoxes]     = useState<SavedBox[]>([]);
+  const [reprint,        setReprint]        = useState<Record<number, boolean>>({});
+  const loadSavedBoxes = useCallback(async () => {
+    const { data } = await supabase.from('product_boxes')
+      .select('box_id, product_id, location_id, pcs').eq('status', 'sealed').order('box_id');
+    setSavedBoxes((data ?? []) as SavedBox[]);
+  }, []);
+  useEffect(() => {
+    let cancelled = false;
+    supabase.from('product_boxes').select('box_id, product_id, location_id, pcs').eq('status', 'sealed').order('box_id')
+      .then(({ data }) => { if (!cancelled) setSavedBoxes((data ?? []) as SavedBox[]); });
+    return () => { cancelled = true; };
+  }, []);
   // Products already printed this batch — persisted so it survives the form-POST
   // navigation to the relay. Re-printing one asks for confirmation first.
   const [printed,        setPrinted]        = useState<Record<number, boolean>>(() => {
@@ -427,8 +457,10 @@ function LabelsDashboard() {
     });
   }
 
+  // Normal number field: clearing it means 0 (the product stays ticked but
+  // prints nothing until a number is typed).
   function setCopies(id: number, val: string) {
-    const n = Math.max(1, parseInt(val) || 1);
+    const n = Math.max(0, parseInt(val, 10) || 0);
     setSelected(sel => ({ ...sel, [id]: n }));
   }
 
@@ -447,7 +479,7 @@ function LabelsDashboard() {
   }
 
   const selectedProducts = useMemo(
-    () => products.filter(p => (selected[p.product_id] ?? 0) > 0),
+    () => products.filter(p => selected[p.product_id] != null),
     [products, selected],
   );
   const sizeSuggestion = useMemo(
@@ -458,18 +490,24 @@ function LabelsDashboard() {
   // Box mode: the boxes to print for a product — one entry (its piece count)
   // per physical box. Comes ONLY from the sizes typed for it, never from the
   // piece stock; blank = a single box of pieces_per_box. Empty = can't tell.
+  // NEW boxes to make and print. Blank = one box of pieces_per_box, unless
+  // this batch only reprints the product's saved boxes.
   function boxesFor(p: Product): number[] {
     const raw = (boxSizes[p.product_id] ?? '').trim();
     const sized = raw ? raw.split(/[,\s]+/).map(x => parseInt(x, 10)).filter(n => Number.isFinite(n) && n > 0) : [];
     if (sized.length) return sized;
+    if (reprint[p.product_id]) return [];
     const ppb = p.pieces_per_box ?? 0;
     return ppb > 0 ? [ppb] : [];
   }
+  // This product's sealed boxes at the current location.
+  const savedFor = (p: Product) => savedBoxes.filter(b => b.product_id === p.product_id && b.location_id === locationId);
+  const reprintFor = (p: Product) => (reprint[p.product_id] ? savedFor(p) : []);
   const unitOf = (id: number) => units[id] ?? 'pcs';
 
   // Stickers that will come out: piece copies, or one per box.
   const totalLabels = selectedProducts.reduce(
-    (n, p) => n + (unitOf(p.product_id) === 'box' ? boxesFor(p).length : (selected[p.product_id] ?? 0)),
+    (n, p) => n + (unitOf(p.product_id) === 'box' ? boxesFor(p).length + reprintFor(p).length : (selected[p.product_id] ?? 0)),
     0,
   );
 
@@ -486,7 +524,8 @@ function LabelsDashboard() {
     const heightMm = labelSize === 'custom' ? customHeightMm : preset?.heightMm ?? 30;
     if (widthMm <= 0 || heightMm <= 0) { showToast('Enter a valid label size', 'error'); return; }
 
-    const entries = Object.entries(selected).filter(([, copies]) => copies > 0);
+    // Pcs products print their copies (0 = skip); box products print boxes.
+    const entries = Object.entries(selected).filter(([pid, copies]) => unitOf(Number(pid)) === 'box' || copies > 0);
     if (entries.length === 0) { showToast('Select products to print first', 'error'); return; }
 
     // Guard against accidental double-printing: if any selected product was
@@ -511,16 +550,27 @@ function LabelsDashboard() {
           continue;
         }
 
-        // Box: one box sticker per physical box ("Box 1/2 · 80 pcs").
-        const boxes = boxesFor(product);
-        if (boxes.length === 0) { needInfo.push(product.product_name); continue; }
-        const n = boxes.length;
-        for (let i = 0; i < n; i++) {
-          const pcs = boxes[i];
-          const bmBox = await renderLabelBitmap(product, widthMm, heightMm, 'box', { boxPcs: pcs, note: `Box ${i + 1}/${n} · ${pcs} pcs` });
+        // Box: save each NEW box (its own number + pcs), then one sticker per
+        // box — new ones plus any saved boxes being reprinted.
+        const sizes = boxesFor(product);
+        const again = reprintFor(product);
+        if (sizes.length === 0 && again.length === 0) { needInfo.push(product.product_name); continue; }
+        let made: SavedBox[] = [];
+        if (sizes.length) {
+          const { data: rows, error: boxErr } = await supabase.from('product_boxes')
+            .insert(sizes.map(pcs => ({ product_id: product.product_id, location_id: locationId, pcs })))
+            .select('box_id, product_id, location_id, pcs');
+          if (boxErr || !rows) throw new Error(`Could not save the boxes for ${product.product_name}: ${boxErr?.message ?? 'no reply'}`);
+          made = rows as SavedBox[];
+        }
+        for (const b of [...again, ...made]) {
+          const bmBox = await renderLabelBitmap(product, widthMm, heightMm, 'box', { boxPcs: b.pcs, boxId: b.box_id, note: `Box #${b.box_id} · ${b.pcs} pcs` });
           jobs.push({ ...bmBox, widthMm, heightMm, copies: 1 });
         }
       }
+      // New boxes are saved now: clear the typed sizes so printing again
+      // doesn't make duplicates (saved boxes can be reprinted instead).
+      if (Object.values(units).includes('box')) { setBoxSizes({}); setReprint({}); loadSavedBoxes(); }
       if (needInfo.length > 0) {
         showToast(`Set pieces-per-box for: ${needInfo.slice(0, 3).join(', ')}${needInfo.length > 3 ? '…' : ''}`, 'error');
       }
@@ -537,13 +587,7 @@ function LabelsDashboard() {
 
         // Follow the job until the printer PC reports back (up to a minute).
         const jobId = (row as { job_id: number }).job_id;
-        const started = Date.now();
-        let finalStatus: { status: string; message: string | null } | null = null;
-        while (Date.now() - started < 60_000) {
-          await new Promise(r => setTimeout(r, 1500));
-          const { data: st } = await supabase.from('print_jobs').select('status, message').eq('job_id', jobId).single();
-          if (st && (st.status === 'done' || st.status === 'failed')) { finalStatus = st as { status: string; message: string | null }; break; }
-        }
+        const finalStatus = await waitForPrintJob(jobId);
         if (finalStatus?.status === 'done') {
           // Only now are these labels really printed — mark them, so a repeat
           // asks first. (A failed or unanswered job leaves them unmarked.)
@@ -680,11 +724,7 @@ function LabelsDashboard() {
         <AdminNavbar onLogout={() => { apiLogout(); window.location.href = '/admin'; }} />
       </div>
       <header className="print-hide shrink-0 bg-surface border-b border-white/8 px-4 flex items-center gap-3 h-14">
-        <Link href="/admin" className="text-muted hover:text-slate-100 text-sm px-3 py-1.5 rounded-lg bg-surface2 border border-white/8 transition-colors print-hide">
-          ← Back
-        </Link>
-        <h1 className="flex-1 text-sm font-bold text-slate-100">🏷️ Label Printer</h1>
-        <span className="text-xs text-muted font-mono whitespace-nowrap hidden sm:block">
+        <span className="flex-1 text-xs text-muted font-mono whitespace-nowrap">
           {totalLabels} label{totalLabels !== 1 ? 's' : ''}
         </span>
         <button
@@ -787,6 +827,9 @@ function LabelsDashboard() {
               const isSel    = copies != null;
               const unit     = unitOf(p.product_id);
               const boxes    = isSel && unit === 'box' ? boxesFor(p) : [];
+              const saved    = isSel && unit === 'box' ? savedFor(p) : [];
+              const again    = isSel && unit === 'box' ? reprintFor(p) : [];
+              const boxTotal = boxes.length + again.length;
               return (
                 <div
                   key={p.product_id}
@@ -841,11 +884,39 @@ function LabelsDashboard() {
                           )}
                         </div>
                         {unit === 'box' && (
-                          <p className={`text-[9px] mt-1 ${boxes.length ? 'text-muted' : 'text-danger'}`}>
+                          <p className={`text-[9px] mt-1 ${boxTotal ? 'text-muted' : 'text-danger'}`}>
                             {boxes.length
-                              ? `${boxes.length} box sticker${boxes.length === 1 ? '' : 's'}: ${boxes.join(' + ')} pcs`
-                              : 'Type the pcs in each box, e.g. 80, 75'}
+                              ? `New: ${boxes.length} box${boxes.length === 1 ? '' : 'es'} — ${boxes.join(' + ')} pcs (saved when printed)`
+                              : again.length ? 'No new boxes' : 'Type the pcs in each box, e.g. 20, 30, 20, 40, 50'}
                           </p>
+                        )}
+                        {unit === 'box' && saved.length > 0 && (
+                          <div className="mt-1.5 rounded-lg border border-white/8 bg-surface2/60 p-1.5">
+                            <label className="flex items-center gap-1.5 text-[10px] text-slate-200 font-semibold">
+                              <input
+                                type="checkbox"
+                                checked={!!reprint[p.product_id]}
+                                onChange={e => setReprint(r => ({ ...r, [p.product_id]: e.target.checked }))}
+                              />
+                              Reprint saved boxes ({saved.length})
+                            </label>
+                            <div className="flex flex-wrap gap-1 mt-1">
+                              {saved.map(b => (
+                                <span key={b.box_id} className="inline-flex items-center gap-1 text-[9px] font-mono px-1.5 py-0.5 rounded-md bg-surface border border-white/10 text-muted">
+                                  #{b.box_id} · {b.pcs} pcs
+                                  <button
+                                    title="Remove this box (made by mistake)"
+                                    onClick={async () => {
+                                      if (!window.confirm(`Remove box #${b.box_id} (${b.pcs} pcs)? Its sticker will no longer scan.`)) return;
+                                      const { error } = await supabase.rpc('void_box', { p_box_id: b.box_id });
+                                      if (error) showToast(error.message, 'error'); else loadSavedBoxes();
+                                    }}
+                                    className="text-danger/70 hover:text-danger font-bold"
+                                  >×</button>
+                                </span>
+                              ))}
+                            </div>
+                          </div>
                         )}
                       </div>
                     )}
@@ -853,15 +924,16 @@ function LabelsDashboard() {
 
                   {isSel && unit === 'box' ? (
                     <div className="shrink-0 mt-0.5 flex flex-col items-center gap-0.5" onClick={e => e.stopPropagation()}>
-                      <span className="text-xs font-bold text-teal px-2 py-1 rounded-lg border border-teal/30 bg-teal/10">📦 {boxes.length}</span>
+                      <span className="text-xs font-bold text-teal px-2 py-1 rounded-lg border border-teal/30 bg-teal/10">📦 {boxTotal}</span>
                       <span className="text-[9px] font-mono text-muted">/{stock} pcs</span>
                     </div>
                   ) : isSel ? (
                     <div className="shrink-0 mt-0.5 flex flex-col items-center gap-0.5" onClick={e => e.stopPropagation()}>
                       <input
                         type="number"
-                        value={copies}
-                        min={1}
+                        value={copies === 0 ? '' : copies}
+                        placeholder="0"
+                        min={0}
                         onChange={e => setCopies(p.product_id, e.target.value)}
                         onWheel={e => e.currentTarget.blur()}
                         className={`w-10 text-center text-xs font-bold rounded-lg border py-1 bg-surface2 text-slate-100 outline-none focus:border-teal/50 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none ${

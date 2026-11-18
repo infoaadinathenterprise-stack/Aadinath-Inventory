@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef, useMemo } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -51,7 +51,13 @@ interface CartItem {
   // adds its own piece count to qty and sells at the piece price, so the line
   // total is pieces × piece price; this is just shown as "N box(es)".
   boxCount?:       number;
+  // Saved boxes (product_boxes) sold whole on this line; marked sold after
+  // the sale goes through so they can't be sold again.
+  boxIds?:         number[];
 }
+
+// A saved, still-sealed box (see supabase/22_product_boxes.sql).
+type SealedBox = { box_id: number; product_id: number; location_id: number | null; pcs: number };
 
 // Does this product have a bulk unit (box/roll/etc.)? Gate on
 // pieces_per_box > 0 so it works for any unit_type that has a
@@ -123,6 +129,23 @@ interface ModalState {
 
 function PosDashboard() {
   const { products, locations, companies, stockByLoc, boxByLoc, stockByCompany, boxByCompany, loading, stale, error, refresh } = useProducts();
+
+  // Saved sealed boxes, so a whole box can be sold by scanning its sticker
+  // (BX<id>) or tapping it on the product card.
+  const [sealedBoxes, setSealedBoxes] = useState<SealedBox[]>([]);
+  const loadSealedBoxes = useCallback(async () => {
+    const { data } = await supabase.from('product_boxes')
+      .select('box_id, product_id, location_id, pcs').eq('status', 'sealed').order('box_id');
+    const rows = (data ?? []) as SealedBox[];
+    setSealedBoxes(rows);
+    return rows;
+  }, []);
+  useEffect(() => {
+    let cancelled = false;
+    supabase.from('product_boxes').select('box_id, product_id, location_id, pcs').eq('status', 'sealed').order('box_id')
+      .then(({ data }) => { if (!cancelled) setSealedBoxes((data ?? []) as SealedBox[]); });
+    return () => { cancelled = true; };
+  }, []);
   const { map: componentMap, refresh: refreshComponents } = useProductComponents();
 
   // locationId: default to first location once loaded
@@ -337,7 +360,7 @@ function PosDashboard() {
     if (wrote) refresh();
   }
 
-  function addToCart(product: Product, opts: { boxBundle?: number } = {}) {
+  function addToCart(product: Product, opts: { boxBundle?: number; boxId?: number } = {}) {
     // Saved numbers from last visit are still showing — wait for fresh stock.
     if (stale) { showToast('Loading the latest stock — try again in a moment', 'error'); return; }
 
@@ -372,9 +395,10 @@ function PosDashboard() {
                 ? (ppb > 0 ? Math.round((c.sellPrice / ppb) * 100) / 100 : defaultSellPrice(product, 'piece'))
                 : c.sellPrice,
             boxCount: (c.boxCount ?? 0) + 1,
+            boxIds: opts.boxId ? [...(c.boxIds ?? []), opts.boxId] : c.boxIds,
           });
         }
-        return [...prev, { product, qty: boxBundle, unit: 'piece' as CartUnit, sellPrice: defaultSellPrice(product, 'piece'), groupChoices: {}, companyId: company0, boxCount: 1 }];
+        return [...prev, { product, qty: boxBundle, unit: 'piece' as CartUnit, sellPrice: defaultSellPrice(product, 'piece'), groupChoices: {}, companyId: company0, boxCount: 1, boxIds: opts.boxId ? [opts.boxId] : undefined }];
       }
 
       // ── Plain piece scan / tap ──
@@ -396,7 +420,7 @@ function PosDashboard() {
         'error',
       );
     } else {
-      showToast(boxBundle ? `Added box: ${product.product_name} · ${boxBundle} pcs` : `Added: ${product.product_name}`, 'success');
+      showToast(boxBundle ? `Added box${opts.boxId ? ` #${opts.boxId}` : ''}: ${product.product_name} · ${boxBundle} pcs` : `Added: ${product.product_name}`, 'success');
       setCartOpen(true);
     }
   }
@@ -426,20 +450,51 @@ function PosDashboard() {
     return match;
   }
 
+  // Sell a whole saved box: all its pieces at the piece price.
+  function pickBox(box: SealedBox) {
+    if (cart.some(c => c.boxIds?.includes(box.box_id))) { showToast(`Box #${box.box_id} is already in the cart`, 'error'); return; }
+    const product = products.find(p => p.product_id === box.product_id);
+    if (!product) { showToast(`Box #${box.box_id}: product not found`, 'error'); return; }
+    addToCart(product, { boxBundle: box.pcs, boxId: box.box_id });
+  }
+
+  async function scanSavedBox(boxId: number) {
+    let box = sealedBoxes.find(b => b.box_id === boxId);
+    if (!box) box = (await loadSealedBoxes()).find(b => b.box_id === boxId);
+    if (box) { pickBox(box); return; }
+    const { data } = await supabase.from('product_boxes').select('status').eq('box_id', boxId).maybeSingle();
+    const st = (data as { status?: string } | null)?.status;
+    showToast(st === 'sold' ? `Box #${boxId} was already sold` : st === 'void' ? `Box #${boxId} was removed` : `No box #${boxId}`, 'error');
+  }
+
+  function handleCode(code: string) {
+    const scan = parseScan(code);
+    if (scan.kind === 'savedBox') { scanSavedBox(scan.boxId); return; }
+    const match = resolveScan(scan.value);
+    if (match) addToCart(match, scan.kind === 'box' && scan.boxPcs ? { boxBundle: scan.boxPcs } : {});
+  }
+
   function handleBarcodeKey(e: React.KeyboardEvent<HTMLInputElement>) {
     if (e.key !== 'Enter') return;
     const code = e.currentTarget.value.trim();
     e.currentTarget.value = '';
     if (!code) return;
-    const { value, isBox, boxPcs } = parseScan(code);
-    const match = resolveScan(value);
-    if (match) addToCart(match, isBox && boxPcs ? { boxBundle: boxPcs } : {});
+    handleCode(code);
   }
 
   function handleScan(code: string) {
-    const { value, isBox, boxPcs } = parseScan(code);
-    const match = resolveScan(value);
-    if (match) addToCart(match, isBox && boxPcs ? { boxBundle: boxPcs } : {});
+    handleCode(code);
+  }
+
+  // After a sale: mark its saved boxes sold so they can't be sold twice.
+  async function markBoxesSold(items: CartItem[]) {
+    const ids = items.flatMap(i => i.boxIds ?? []);
+    if (ids.length === 0) return;
+    const { data, error } = await supabase.rpc('sell_boxes', { p_box_ids: ids });
+    if (error || (typeof data === 'number' && data < ids.length)) {
+      showToast(`Sale saved, but ${error ? 'the boxes could not be marked sold' : 'some boxes were already marked sold'} — check boxes ${ids.map(i => '#' + i).join(', ')}`, 'error');
+    }
+    loadSealedBoxes();
   }
 
   function openModal(product: Product, direction: 'plus' | 'minus') {
@@ -743,7 +798,7 @@ function PosDashboard() {
           : buildTransferOps(item.product, item.qty, item.unit, item.transferDestId!, item.groupChoices, item.companyId)));
       }
       await stockTxn(ops, action === 'sold' ? buildSalePayload(cart) : null);
-      if (action === 'sold') { await rememberChoicePrices(cart); await rememberProductPrices(cart); }
+      if (action === 'sold') { await markBoxesSold(cart); await rememberChoicePrices(cart); await rememberProductPrices(cart); }
       showToast(`${action === 'sold' ? 'Sold' : 'Moved'} ${cart.length} item(s) ✓`, 'success');
       // Restock alert: after a sale, show items available elsewhere
       if (action === 'sold') {
@@ -785,7 +840,7 @@ function PosDashboard() {
         ? buildSellOps(item.product, item.qty, item.unit, item.sellPrice, item.groupChoices, item.companyId)
         : buildTransferOps(item.product, item.qty, item.unit, item.transferDestId!, item.groupChoices, item.companyId);
       await stockTxn(ops, action === 'sold' ? buildSalePayload([item]) : null);
-      if (action === 'sold') { await rememberChoicePrices([item]); await rememberProductPrices([item]); }
+      if (action === 'sold') { await markBoxesSold([item]); await rememberChoicePrices([item]); await rememberProductPrices([item]); }
       setCart(c => c.filter(i => i.product.product_id !== item.product.product_id));
       showToast(`${action === 'sold' ? 'Sold' : 'Moved'}: ${item.product.product_name} ✓`, 'success');
       if (action === 'sold') {
@@ -829,9 +884,6 @@ function PosDashboard() {
     <div className="h-screen pt-14 bg-navy flex flex-col overflow-hidden">
       <AdminNavbar onLogout={() => { apiLogout(); window.location.href = '/admin'; }} />
       <header className="shrink-0 glass border-b px-3 flex items-center gap-2 h-14">
-        <Link href="/admin" className="text-muted hover:text-slate-100 text-sm px-3 py-1.5 rounded-lg bg-surface2 border border-white/8 transition-colors shrink-0">
-          ← Back
-        </Link>
         <h1 className="text-sm font-bold text-slate-100 shrink-0 truncate">
           🏭 {locName || 'POS'}
         </h1>
@@ -1015,6 +1067,8 @@ function PosDashboard() {
               stockByLoc={stockByLoc}
               boxByLoc={boxByLoc}
               onAdjust={openModal}
+              sealedBoxes={sealedBoxes.filter(b => b.product_id === p.product_id && b.location_id === locationId && !cart.some(c => c.boxIds?.includes(b.box_id)))}
+              onPickBox={pickBox}
             />
           ))}
         </AnimatePresence>
@@ -1479,9 +1533,11 @@ interface CardProps {
   stockByLoc: Record<number, Record<number, number>>;
   boxByLoc:   Record<number, Record<number, number>>;
   onAdjust:   (product: Product, direction: 'plus' | 'minus') => void;
+  sealedBoxes?: SealedBox[];
+  onPickBox?:  (box: SealedBox) => void;
 }
 
-function PosProductCard({ product: p, index, locationId, locations, stockByLoc, boxByLoc, onAdjust }: CardProps) {
+function PosProductCard({ product: p, index, locationId, locations, stockByLoc, boxByLoc, onAdjust, sealedBoxes = [], onPickBox }: CardProps) {
   const ppb     = p.pieces_per_box || 0;
   const qty     = (stockByLoc[locationId] ?? {})[p.product_id] ?? 0;
   const bx      = (boxByLoc[locationId]   ?? {})[p.product_id] ?? 0;
@@ -1542,6 +1598,21 @@ function PosProductCard({ product: p, index, locationId, locations, stockByLoc, 
           <p className={`text-xs font-semibold ${stockCls}`}>{stockTxt}</p>
           {showOtherBadge && (
             <p className="text-[10px] text-gold/75 mt-0.5">📦 {otherTotal} elsewhere</p>
+          )}
+          {sealedBoxes.length > 0 && onPickBox && (
+            <div className="flex flex-wrap gap-1 mt-1.5" onClick={e => e.stopPropagation()}>
+              {sealedBoxes.slice(0, 8).map(b => (
+                <button
+                  key={b.box_id}
+                  onClick={() => onPickBox(b)}
+                  title={`Sell whole box #${b.box_id} (${b.pcs} pcs)`}
+                  className="text-[10px] font-bold px-2 py-1 rounded-lg border border-gold/30 bg-gold/10 text-gold hover:bg-gold hover:text-navy transition-all"
+                >
+                  📦 #{b.box_id} · {b.pcs}
+                </button>
+              ))}
+              {sealedBoxes.length > 8 && <span className="text-[10px] text-muted self-center">+{sealedBoxes.length - 8} more (scan)</span>}
+            </div>
           )}
         </div>
 

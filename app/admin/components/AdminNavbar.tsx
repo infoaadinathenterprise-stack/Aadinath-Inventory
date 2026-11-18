@@ -55,6 +55,18 @@ function NavLinks({ links, render, loc }: { links: NavLink[]; render: (l: NavLin
     : isActive(l.href, pathname, loc)))}</>;
 }
 
+// The page you're on, shown next to the menu button.
+function CurrentTitle({ links }: { links: NavLink[] }) {
+  return (
+    <Links links={links} render={(l, active) => active ? (
+      <span key={l.href} className="flex items-center gap-2 min-w-0">
+        <span className="shrink-0">{l.emoji}</span>
+        <span className="truncate">{l.label}</span>
+      </span>
+    ) : null} />
+  );
+}
+
 function Links(props: { links: NavLink[]; render: (l: NavLink, active: boolean) => ReactNode }) {
   return (
     <Suspense fallback={<NavLinks {...props} loc={undefined} />}>
@@ -93,7 +105,7 @@ export default function AdminNavbar({ onLogout }: Props) {
   return (
     <>
       <nav className="fixed top-0 inset-x-0 z-50 glass border-b shadow-[0_8px_32px_rgba(0,0,0,0.3)]">
-        <div className="max-w-7xl mx-auto px-4 h-14 flex items-center justify-between gap-3">
+        <div className="w-full px-3 sm:px-5 h-14 flex items-center gap-3">
           <button
             type="button"
             onClick={() => setOpen(o => !o)}
@@ -106,10 +118,14 @@ export default function AdminNavbar({ onLogout }: Props) {
             <span className="w-4 h-0.5 bg-slate-300 rounded-full" />
           </button>
 
-          <div className="flex items-center gap-2 min-w-0">
+          <div className="flex-1 min-w-0 text-sm font-bold text-slate-100" style={{ fontFamily: 'var(--font-display)' }}>
+            <CurrentTitle links={links} />
+          </div>
+
+          <div className="flex items-center gap-2 min-w-0 shrink-0">
             <button
               onClick={onLogout}
-              className="shrink-0 text-xs text-muted hover:text-danger transition-colors duration-200 px-3 py-1.5 rounded-lg hover:bg-danger/10 border border-transparent hover:border-danger/20"
+              className="hidden sm:inline-block shrink-0 text-xs text-muted hover:text-danger transition-colors duration-200 px-3 py-1.5 rounded-lg hover:bg-danger/10 border border-transparent hover:border-danger/20"
             >
               Sign out
             </button>
@@ -120,7 +136,7 @@ export default function AdminNavbar({ onLogout }: Props) {
               >
                 JA
               </span>
-              <span className="font-bold text-[15px] text-slate-100 tracking-tight leading-none truncate" style={{ fontFamily: 'var(--font-display)' }}>
+              <span className="hidden md:inline font-bold text-[15px] text-slate-100 tracking-tight leading-none truncate" style={{ fontFamily: 'var(--font-display)' }}>
                 Jay Aadinath
               </span>
               <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full border uppercase tracking-[0.14em] shrink-0 ${
