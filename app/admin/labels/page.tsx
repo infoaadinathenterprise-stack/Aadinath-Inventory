@@ -514,10 +514,6 @@ function LabelsDashboard() {
           .select('job_id').single();
         if (insErr || !row) throw new Error(insErr?.message ?? 'Could not send the job');
 
-        const printedNext = { ...printed };
-        for (const [pid] of entries) printedNext[Number(pid)] = true;
-        try { localStorage.setItem('sticker.printed', JSON.stringify(printedNext)); } catch { /* ignore */ }
-        setPrinted(printedNext);
         showToast(`Sent ${labelCount} label${labelCount === 1 ? '' : 's'} — waiting for the printer…`);
 
         // Follow the job until the printer PC reports back (up to a minute).
@@ -530,6 +526,14 @@ function LabelsDashboard() {
           if (st && (st.status === 'done' || st.status === 'failed')) { finalStatus = st as { status: string; message: string | null }; break; }
         }
         if (finalStatus?.status === 'done') {
+          // Only now are these labels really printed — mark them, so a repeat
+          // asks first. (A failed or unanswered job leaves them unmarked.)
+          setPrinted(prev => {
+            const next = { ...prev };
+            for (const [pid] of entries) next[Number(pid)] = true;
+            try { localStorage.setItem('sticker.printed', JSON.stringify(next)); } catch { /* ignore */ }
+            return next;
+          });
           showToast(`🖨️ Printed ${labelCount} label${labelCount === 1 ? '' : 's'}`);
           setStickerOpen(false);
         } else if (finalStatus?.status === 'failed') {

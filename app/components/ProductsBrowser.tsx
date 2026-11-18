@@ -5,6 +5,7 @@ import { supabase } from '@/lib/supabase';
 import type { Product } from '@/lib/types';
 import ProductGrid from './ProductGrid';
 import { readPageCache, writePageCache } from '@/lib/pageCache';
+import { PUBLIC_PRODUCT_COLUMNS, toPublicProduct } from '@/lib/publicProduct';
 
 interface StockRow { quantity: number | null; box_quantity: number | null; }
 
@@ -21,25 +22,28 @@ export default function ProductsBrowser({ initialProducts, initialCategories }: 
 
   useEffect(() => {
     // Last visit's catalogue shows instantly; the fresh one replaces it.
+    // Older caches may hold full rows (cost included) — strip them on read.
     const cached = readPageCache<{ products: Product[]; categories: string[] }>('storefront');
-    if (cached) { setProducts(cached.products); setCategories(cached.categories); }
+    if (cached) {
+      setProducts(cached.products.map(p => toPublicProduct(p, p.total_stock ?? 0)));
+      setCategories(cached.categories);
+    }
 
     async function load() {
       const { data, error } = await supabase
         .from('products')
-        .select('*, stock_by_location(quantity, box_quantity)')
+        .select(`${PUBLIC_PRODUCT_COLUMNS}, stock_by_location(quantity, box_quantity)`)
         .eq('active_status', true)
         .order('product_name');
 
       if (error || !data) return;
 
-      const mapped: Product[] = data
-        .map((row: Product & { stock_by_location?: StockRow[] }) => {
+      const mapped: Product[] = (data as unknown as (Product & { stock_by_location?: StockRow[] })[])
+        .map((row) => {
           const total_stock = (row.stock_by_location || []).reduce((sum, s) =>
             sum + (s.quantity || 0), 0
           );
-          const { stock_by_location: _omit, ...rest } = row as Product & { stock_by_location?: StockRow[] };
-          return { ...rest, total_stock };
+          return toPublicProduct(row, total_stock);
         })
         .filter(p => (p.total_stock ?? 0) > 0);
 

@@ -13,6 +13,7 @@
 
 import { supabase } from '@/lib/supabase';
 import type { Product } from '@/lib/types';
+import { PUBLIC_PRODUCT_COLUMNS, toPublicProduct } from '@/lib/publicProduct';
 
 interface StockRow { quantity: number | null; box_quantity: number | null; }
 
@@ -28,7 +29,7 @@ export function getCatalog(): Promise<Product[]> {
 async function loadCatalog(): Promise<Product[]> {
   const { data, error } = await supabase
     .from('products')
-    .select('*, stock_by_location(quantity, box_quantity)')
+    .select(`${PUBLIC_PRODUCT_COLUMNS}, stock_by_location(quantity, box_quantity)`)
     .eq('active_status', true)
     .order('product_name');
 
@@ -39,13 +40,12 @@ async function loadCatalog(): Promise<Product[]> {
     return [];
   }
 
-  return (data as (Product & { stock_by_location?: StockRow[] })[]).map((row) => {
+  return (data as unknown as (Product & { stock_by_location?: StockRow[] })[]).map((row) => {
     const total_stock = (row.stock_by_location || []).reduce(
       (sum, s) => sum + (s.quantity || 0) + (s.box_quantity || 0) * (row.pieces_per_box || 1),
       0,
     );
-    const { stock_by_location: _omit, ...rest } = row;
-    return { ...rest, total_stock } as Product;
+    return toPublicProduct(row, total_stock);
   });
 }
 

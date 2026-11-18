@@ -361,7 +361,16 @@ function PosDashboard() {
             ...c,
             unit: 'piece' as CartUnit,
             qty: curPieces + boxBundle,
-            sellPrice: (c.sellPrice == null || c.sellPrice === defaultSellPrice(product, c.unit)) ? defaultSellPrice(product, 'piece') : c.sellPrice,
+            // The line becomes a piece line, so its price must be a piece price:
+            //  • default price → the default piece price
+            //  • a hand-typed BOX price → spread over the pieces in a box
+            //    (never kept as-is, which would charge the box price per piece)
+            //  • a hand-typed piece price → kept
+            sellPrice: (c.sellPrice == null || c.sellPrice === defaultSellPrice(product, c.unit))
+              ? defaultSellPrice(product, 'piece')
+              : c.unit === 'box'
+                ? (ppb > 0 ? Math.round((c.sellPrice / ppb) * 100) / 100 : defaultSellPrice(product, 'piece'))
+                : c.sellPrice,
             boxCount: (c.boxCount ?? 0) + 1,
           });
         }
