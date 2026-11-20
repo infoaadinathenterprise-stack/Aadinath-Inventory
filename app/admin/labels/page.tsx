@@ -248,12 +248,13 @@ async function renderLabelBitmap(
     y += Math.round(heightPx * 0.2);
   }
 
-  // Small note — box numbering ("Box #12 · 80 pcs").
+  // Unit tag — bold and large so staff can tell a BOX sticker from a loose
+  // PCS sticker at a glance ("BOX #12 · 80 PCS" or "PCS").
   if (opts.note) {
-    const notePx = fitFont(opts.note, '700', Math.max(9, Math.round(heightPx * 0.09)), 8);
-    ctx.font = `700 ${notePx}px sans-serif`;
+    const notePx = fitFont(opts.note, '800', Math.max(11, Math.round(heightPx * 0.125)), 10);
+    ctx.font = `800 ${notePx}px sans-serif`;
     ctx.fillText(opts.note, centerX, y);
-    y += notePx + 4;
+    y += notePx + 5;
   }
 
   // Product name (no price on stickers): up to two lines in the space left.
@@ -566,7 +567,7 @@ function LabelsDashboard() {
         if (!product) continue;
 
         if (unitOf(product.product_id) === 'pcs') {
-          const bm = await renderLabelBitmap(product, widthMm, heightMm, 'piece');
+          const bm = await renderLabelBitmap(product, widthMm, heightMm, 'piece', { note: 'PCS' });
           jobs.push({ ...bm, widthMm, heightMm, copies });
           continue;
         }
@@ -585,7 +586,7 @@ function LabelsDashboard() {
           made = rows as SavedBox[];
         }
         for (const b of [...again, ...made]) {
-          const bmBox = await renderLabelBitmap(product, widthMm, heightMm, 'box', { boxPcs: b.pcs, boxId: b.box_id, note: `Box #${b.box_id} · ${b.pcs} pcs` });
+          const bmBox = await renderLabelBitmap(product, widthMm, heightMm, 'box', { boxPcs: b.pcs, boxId: b.box_id, note: `BOX #${b.box_id} · ${b.pcs} PCS` });
           jobs.push({ ...bmBox, widthMm, heightMm, copies: 1 });
         }
       }

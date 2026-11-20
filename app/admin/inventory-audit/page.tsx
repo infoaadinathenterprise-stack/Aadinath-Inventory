@@ -7,6 +7,7 @@ import { supabase } from '@/lib/supabase';
 import { SESSION_KEY, ROLE_KEY, USER_KEY, DEFAULT_COMPANY_ID, type UserRole } from '@/lib/types';
 import type { Product } from '@/lib/types';
 import { stockTxn, type StockOp } from '@/lib/stockActions';
+import { parseScan } from '@/lib/boxBarcode';
 import AdminNavbar from '../components/AdminNavbar';
 import CompanyLetterhead from '../components/CompanyLetterhead';
 import Toast, { type ToastState } from '../components/Toast';
@@ -161,6 +162,54 @@ function InventoryAuditDashboard() {
   function showToast(msg: string, type: ToastState['type']) {
     setToast({ msg, type, id: ++toastId.current });
   }
+
+  // ── Box-sticker scanning ─────────────────────────────────────────────────
+  // A handheld scan drops the code into the search box. A plain SKU already
+  // filters fine, but a BOX sticker scans as "BX<id>" (or the old
+  // "BX:<SKU>:<pcs>"), which matches no product name/SKU — so on the audit
+  // page box stickers used to find nothing even though the POS handled them.
+  // Here we detect a box code, resolve it to its product, and swap the search
+  // text to that product's SKU so the existing filter lands on it.
+  const resolvingScan = useRef(false);
+  useEffect(() => {
+    const code = search.trim();
+    if (!code) return;
+    const scan = parseScan(code);
+    if (scan.kind === 'piece') return;          // ordinary SKU / text search
+    if (resolvingScan.current) return;
+    resolvingScan.current = true;
+    let cancelled = false;
+    (async () => {
+      try {
+        let product: Product | undefined;
+        if (scan.kind === 'savedBox') {
+          const { data } = await supabase.from('product_boxes')
+            .select('product_id').eq('box_id', scan.boxId).maybeSingle();
+          if (!data) { if (!cancelled) showToast(`No box #${scan.boxId} found`, 'error'); return; }
+          product = allProducts.find(p => p.product_id === data.product_id);
+          if (!product) {
+            const { data: pr } = await supabase.from('products')
+              .select('*').eq('product_id', data.product_id).maybeSingle();
+            product = (pr ?? undefined) as Product | undefined;
+          }
+        } else {
+          // Old "BX:<SKU>:<pcs>" sticker — the SKU is embedded in the code.
+          const sku = scan.value.trim().toLowerCase();
+          product = allProducts.find(p => (p.stock_keeping_unit ?? '').trim().toLowerCase() === sku);
+        }
+        if (cancelled) return;
+        if (product) {
+          setSearch(product.stock_keeping_unit || product.product_name);
+          showToast(`📦 ${product.product_name}`, 'success');
+        } else {
+          showToast('Box product not found', 'error');
+        }
+      } finally {
+        resolvingScan.current = false;
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [search, allProducts]);
 
   function handleLogout() {
     localStorage.removeItem(SESSION_KEY);
