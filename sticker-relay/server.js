@@ -170,8 +170,8 @@ function buildTsplBuffer(job) {
     throw new Error('Malformed label job');
   }
   let source = Buffer.from(rasterBase64, 'base64');
+  const cfg = readConfig();
   if (!job.stitched) {
-    const cfg = readConfig();
     const dx = Math.round((Number(cfg.offsetXmm) || 0) * DOTS_PER_MM);
     const dy = Math.round((Number(cfg.offsetYmm) || 0) * DOTS_PER_MM);
     source = shiftRaster(source, bytesPerRow, heightPx, dx, dy);
@@ -182,6 +182,10 @@ function buildTsplBuffer(job) {
     `SIZE ${widthMm} mm,${heightMm} mm\r\n` +
     `GAP ${job.gapMm ?? GAP_MM} mm,0 mm\r\n` +
     (job.shiftDots ? `SHIFT ${job.shiftDots}\r\n` : '') +
+    // Print quality from relay-config.json: a slower SPEED (and, if set,
+    // DENSITY) keeps thin 1-dot barcode bars crisp. Unset = printer default.
+    (cfg.speed != null && Number.isFinite(Number(cfg.speed)) ? `SPEED ${Number(cfg.speed)}\r\n` : '') +
+    (cfg.density != null && Number.isFinite(Number(cfg.density)) ? `DENSITY ${Number(cfg.density)}\r\n` : '') +
     `DIRECTION 1\r\n` +
     `CLS\r\n` +
     `BITMAP 0,0,${bytesPerRow},${heightPx},0,`,
