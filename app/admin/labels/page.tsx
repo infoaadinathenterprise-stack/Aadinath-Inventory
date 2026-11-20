@@ -24,6 +24,9 @@ type SortBy = 'recent' | 'name';
 // navigation isn't subject to mixed-content blocking the way a fetch() would be).
 
 const STICKER_DPI = 203; // standard resolution for this printer family
+// The XP-330B can't print the leftmost ~2.75 mm of a 40 mm label (see
+// sticker-relay/relay-config.json); keep the barcode and text clear of it.
+const LEFT_UNPRINTABLE_MM = 3;
 
 const LABEL_PRESETS = [
   { key: '40x30',   label: '40 × 30 mm',   widthMm: 40,  heightMm: 30 },
@@ -164,7 +167,6 @@ async function renderLabelBitmap(
   variant: 'piece' | 'box' = 'piece',
   opts: { boxPcs?: number; boxId?: number; note?: string } = {},
 ): Promise<LabelBitmap> {
-  const boxPcs = Math.max(1, Math.round(opts.boxPcs ?? (product.pieces_per_box ?? 0) ?? 1));
   const bytesPerRow = Math.ceil(Math.round((widthMm / 25.4) * STICKER_DPI) / 8);
   const widthPx  = bytesPerRow * 8;
   const heightPx = Math.round((heightMm / 25.4) * STICKER_DPI);
@@ -180,73 +182,91 @@ async function renderLabelBitmap(
   ctx.fillStyle = '#000';
   ctx.textAlign = 'center';
 
+  // Printable area. The sticker printer can't reach the leftmost ~3 mm of the
+  // label (the helper shifts everything left to centre it, and what falls off
+  // the edge is lost), so nothing is drawn there. That strip is still white
+  // paper, so it doubles as the barcode's left quiet zone.
+  const safeLeft  = Math.round((LEFT_UNPRINTABLE_MM / 25.4) * STICKER_DPI);
+  const safeRight = widthPx - Math.round((0.5 / 25.4) * STICKER_DPI);
+  const centerX   = Math.round((safeLeft + safeRight) / 2);
+  const maxTextW  = safeRight - safeLeft - 4;
+  ctx.textAlign = 'center';
+
+  // Shrinks a font until the text fits the printable width.
+  function fitFont(text: string, weight: string, startPx: number, minPx: number, family = 'sans-serif'): number {
+    let px = startPx;
+    ctx!.font = `${weight} ${px}px ${family}`;
+    while (px > minPx && ctx!.measureText(text).width > maxTextW) { px -= 1; ctx!.font = `${weight} ${px}px ${family}`; }
+    return px;
+  }
+
+  let y = Math.round(heightPx * 0.04);
   if (product.stock_keeping_unit) {
     const sku         = product.stock_keeping_unit;
-    // A box sticker's barcode is its saved box number (BX<id>); the POS looks
-    // the box up and sells all its pieces.
+    // The barcode encodes EXACTLY the product's SKU (what the POS and stock
+    // pages look up). A box sticker's barcode is its saved box number
+    // (BX<id>); the POS looks the box up and sells all its pieces.
     const barcodeData = variant === 'box' && opts.boxId ? savedBoxBarcode(opts.boxId) : sku;
-    const barcodeText = variant === 'box' && opts.boxId ? `${sku}  ·  BOX #${opts.boxId}` : sku;
-    const barcodeCanvas = document.createElement('canvas');
+    const barcodeText = variant === 'box' && opts.boxId ? `${sku} · BOX #${opts.boxId}` : sku;
+    const barH        = Math.round(heightPx * 0.38);
     try {
       const JsBarcode = (await import('jsbarcode')).default;
-      JsBarcode(barcodeCanvas, barcodeData, {
-        format:       'CODE128',
-        width:        2,
-        height:       Math.round(heightPx * 0.4),
-        displayValue: true,
-        text:         barcodeText,
-        fontSize:     Math.max(10, Math.round(heightPx * 0.09)),
-        margin:       0,
-        background:   '#ffffff',
-        lineColor:    '#000000',
-      });
-      const scale = Math.min((widthPx * 0.92) / barcodeCanvas.width, 1);
-      const bw = barcodeCanvas.width * scale;
-      const bh = barcodeCanvas.height * scale;
-      ctx.drawImage(barcodeCanvas, (widthPx - bw) / 2, heightPx * 0.04, bw, bh);
+      // Scanners need every bar to be a whole number of printer dots, so the
+      // barcode is never scaled: pick the widest whole-dot bar (1–3 dots)
+      // that fits the printable width with a quiet zone of 10 bars each side.
+      let barcodeCanvas: HTMLCanvasElement | null = null;
+      for (const bar of [3, 2, 1]) {
+        const c = document.createElement('canvas');
+        JsBarcode(c, barcodeData, {
+          format: 'CODE128', width: bar, height: barH, displayValue: false,
+          margin: 0, background: '#ffffff', lineColor: '#000000',
+        });
+        if ((c.width <= safeRight - safeLeft && c.width + 20 * bar <= widthPx) || bar === 1) { barcodeCanvas = c; break; }
+      }
+      const bc = barcodeCanvas!;
+      const bx = Math.max(safeLeft, Math.min(safeRight - bc.width, Math.round(centerX - bc.width / 2)));
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(bc, bx, y);
+      y += barH + 4;
+      // The code in plain text under the bars.
+      const skuPx = fitFont(barcodeText, '600', Math.round(heightPx * 0.10), 9, 'monospace');
+      ctx.font = `600 ${skuPx}px monospace`;
+      ctx.textBaseline = 'top';
+      ctx.fillText(barcodeText, centerX, y);
+      y += skuPx + 6;
     } catch {
+      ctx.textBaseline = 'top';
       ctx.font = `${Math.round(heightPx * 0.16)}px monospace`;
-      ctx.fillText('BAD SKU', widthPx / 2, heightPx * 0.4);
+      ctx.fillText('BAD SKU', centerX, y);
+      y += Math.round(heightPx * 0.2);
     }
   } else {
+    ctx.textBaseline = 'top';
     ctx.font = `${Math.round(heightPx * 0.16)}px monospace`;
-    ctx.fillText(product.product_name.slice(0, 16), widthPx / 2, heightPx * 0.4);
+    ctx.fillText(product.product_name.slice(0, 16), centerX, y);
+    y += Math.round(heightPx * 0.2);
   }
 
-  const nameMaxWidth = widthPx * 0.94;
-  const { lines: nameLines, fontPx: nameFontPx } = fitNameLines(
-    ctx, product.product_name, nameMaxWidth,
-    Math.round(heightPx * 0.13), Math.max(8, Math.round(heightPx * 0.07)),
-  );
-  ctx.font = `600 ${nameFontPx}px sans-serif`;
-  if (nameLines.length === 1) {
-    ctx.fillText(nameLines[0], widthPx / 2, heightPx * 0.80);
-  } else {
-    ctx.fillText(nameLines[0], widthPx / 2, heightPx * 0.75);
-    ctx.fillText(nameLines[1], widthPx / 2, heightPx * 0.75 + nameFontPx * 1.15);
-  }
-
-  // Small note between the barcode and name — box numbering ("Box 1/2 · 80 pcs")
-  // or the box content on a piece sticker ("80 pcs/box").
+  // Small note — box numbering ("Box #12 · 80 pcs").
   if (opts.note) {
-    const noteFont = Math.max(9, Math.round(heightPx * 0.095));
-    ctx.font = `700 ${noteFont}px sans-serif`;
-    ctx.fillText(opts.note, widthPx / 2, heightPx * 0.58);
+    const notePx = fitFont(opts.note, '700', Math.max(9, Math.round(heightPx * 0.09)), 8);
+    ctx.font = `700 ${notePx}px sans-serif`;
+    ctx.fillText(opts.note, centerX, y);
+    y += notePx + 4;
   }
 
-  // A box is priced as pcs-in-this-box × piece price (box of 5 @ 10 = 50).
-  const linePrice = variant === 'box'
-    ? (product.selling_price != null ? product.selling_price * boxPcs : null)
-    : product.selling_price;
-  if (linePrice != null) {
-    const priceText = variant === 'box' ? `Ksh ${linePrice} / box (${boxPcs} pcs)` : `Ksh ${linePrice}`;
-    let priceFontPx = Math.round(heightPx * 0.14);
-    ctx.font = `700 ${priceFontPx}px sans-serif`;
-    while (priceFontPx > 8 && ctx.measureText(priceText).width > nameMaxWidth) {
-      priceFontPx -= 1;
-      ctx.font = `700 ${priceFontPx}px sans-serif`;
-    }
-    ctx.fillText(priceText, widthPx / 2, heightPx * 0.97);
+  // Product name (no price on stickers): up to two lines in the space left.
+  const room = heightPx - y - 4;
+  const { lines: nameLines, fontPx: nameFontPx } = fitNameLines(
+    ctx, product.product_name, maxTextW,
+    Math.min(Math.round(heightPx * 0.12), Math.floor(room / 2.3)), Math.max(8, Math.round(heightPx * 0.06)),
+  );
+  ctx.font = `700 ${nameFontPx}px sans-serif`;
+  const block = nameLines.length === 1 ? nameFontPx : nameFontPx * 2.15;
+  let ny = y + Math.max(0, (room - block) / 2);
+  for (const line of nameLines.slice(0, 2)) {
+    ctx.fillText(line, centerX, ny);
+    ny += nameFontPx * 1.15;
   }
 
   const imageData = ctx.getImageData(0, 0, widthPx, heightPx);
