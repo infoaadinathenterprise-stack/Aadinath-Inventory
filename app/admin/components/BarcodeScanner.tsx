@@ -25,7 +25,23 @@ export default function BarcodeScanner({ onScan, onClose, keepOpen = false }: Pr
     async function start() {
       try {
         const { BrowserMultiFormatReader } = await import('@zxing/browser');
-        const reader = new BrowserMultiFormatReader();
+        const { DecodeHintType, BarcodeFormat } = await import('@zxing/library');
+        // Live 1D scanning off a phone camera is far more reliable when zxing
+        // is told to TRY_HARDER and which symbologies to expect. Our stickers
+        // are CODE128; manufacturer product barcodes are EAN/UPC. Without these
+        // hints the reader spreads its effort across every format and often
+        // never locks onto a CODE128 code on a shaky, slightly-blurred frame.
+        const hints = new Map();
+        hints.set(DecodeHintType.TRY_HARDER, true);
+        hints.set(DecodeHintType.POSSIBLE_FORMATS, [
+          BarcodeFormat.CODE_128,
+          BarcodeFormat.CODE_39,
+          BarcodeFormat.EAN_13,
+          BarcodeFormat.EAN_8,
+          BarcodeFormat.UPC_A,
+          BarcodeFormat.UPC_E,
+        ]);
+        const reader = new BrowserMultiFormatReader(hints);
 
         const devices = await BrowserMultiFormatReader.listVideoInputDevices();
         const backCamera = devices.find(d =>
