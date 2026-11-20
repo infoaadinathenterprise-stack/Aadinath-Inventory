@@ -34,7 +34,9 @@ export default function BarcodeScanner({ onScan, onClose, keepOpen = false }: Pr
         const hints = new Map();
         hints.set(DecodeHintType.TRY_HARDER, true);
         hints.set(DecodeHintType.POSSIBLE_FORMATS, [
-          BarcodeFormat.CODE_128,
+          BarcodeFormat.DATA_MATRIX, // our sticker codes
+          BarcodeFormat.QR_CODE,
+          BarcodeFormat.CODE_128,    // older stickers still in circulation
           BarcodeFormat.CODE_39,
           BarcodeFormat.EAN_13,
           BarcodeFormat.EAN_8,

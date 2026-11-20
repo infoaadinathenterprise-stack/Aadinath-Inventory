@@ -208,27 +208,28 @@ async function renderLabelBitmap(
     // (BX<id>); the POS looks the box up and sells all its pieces.
     const barcodeData = variant === 'box' && opts.boxId ? savedBoxBarcode(opts.boxId) : sku;
     const barcodeText = variant === 'box' && opts.boxId ? `${sku} · BOX #${opts.boxId}` : sku;
-    const barH        = Math.round(heightPx * 0.38);
     try {
-      const JsBarcode = (await import('jsbarcode')).default;
-      // Scanners need every bar to be a whole number of printer dots, so the
-      // barcode is never scaled: pick the widest whole-dot bar (1–3 dots)
-      // that fits the printable width with a quiet zone of 10 bars each side.
-      let barcodeCanvas: HTMLCanvasElement | null = null;
-      for (const bar of [3, 2, 1]) {
+      // DataMatrix instead of a 1D barcode: it reads instantly on the shop's
+      // 2D imager (Syble XB-6221RB), packs a long SKU into a small square
+      // rather than the hair-thin 1D bars that overflowed a 40 mm label, and
+      // decodes to the exact same text (the SKU, or BX<id> for a box) so the
+      // POS lookup is unchanged.
+      const bwip = (await import('bwip-js/browser')).default;
+      // Render at a whole number of printer dots per module (never scaled) so
+      // the squares stay crisp on the thermal head. Use the largest module
+      // (scale 4→2 ≈ 1.0→0.5 mm) whose symbol still fits about half the label.
+      const maxDim = Math.round(heightPx * 0.5);
+      let dm: HTMLCanvasElement | null = null;
+      for (const sc of [4, 3, 2]) {
         const c = document.createElement('canvas');
-        JsBarcode(c, barcodeData, {
-          format: 'CODE128', width: bar, height: barH, displayValue: false,
-          margin: 0, background: '#ffffff', lineColor: '#000000',
-        });
-        if ((c.width <= safeRight - safeLeft && c.width + 20 * bar <= widthPx) || bar === 1) { barcodeCanvas = c; break; }
+        bwip.toCanvas(c, { bcid: 'datamatrix', text: barcodeData, scale: sc, backgroundcolor: 'ffffff', barcolor: '000000' });
+        if (c.width <= maxDim || sc === 2) { dm = c; break; }
       }
-      const bc = barcodeCanvas!;
-      const bx = Math.max(safeLeft, Math.min(safeRight - bc.width, Math.round(centerX - bc.width / 2)));
+      const d = dm!;
       ctx.imageSmoothingEnabled = false;
-      ctx.drawImage(bc, bx, y);
-      y += barH + 4;
-      // The code in plain text under the bars.
+      ctx.drawImage(d, Math.round(centerX - d.width / 2), y);
+      y += d.height + 6;
+      // The code in plain text under the square.
       const skuPx = fitFont(barcodeText, '600', Math.round(heightPx * 0.10), 9, 'monospace');
       ctx.font = `600 ${skuPx}px monospace`;
       ctx.textBaseline = 'top';
