@@ -619,7 +619,15 @@ function LabelsDashboard() {
             try { localStorage.setItem('sticker.printed', JSON.stringify(next)); } catch { /* ignore */ }
             return next;
           });
-          showToast(`🖨️ Printed ${labelCount} label${labelCount === 1 ? '' : 's'}`);
+          // Auto-uncheck everything that just printed so it can't be reprinted
+          // by mistake. It keeps its "✓ Printed" badge and can be re-selected
+          // by hand if another copy is genuinely needed.
+          setSelected(prev => {
+            const next = { ...prev };
+            for (const [pid] of entries) delete next[Number(pid)];
+            return next;
+          });
+          showToast(`🖨️ Printed ${labelCount} label${labelCount === 1 ? '' : 's'} — unchecked`);
           setStickerOpen(false);
         } else if (finalStatus?.status === 'failed') {
           showToast(`Print failed: ${finalStatus.message ?? 'unknown error'}`, 'error');
