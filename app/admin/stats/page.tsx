@@ -552,23 +552,54 @@ function StatsDashboard() {
       : { text: `Draft saved — ${selected.size} checked` });
   }
 
-  async function openLastDraft() {
-    setDraftBusy(true);
-    const { data: row, error } = await supabase.from('order_drafts')
-      .select('data, created_by, created_at').order('draft_id', { ascending: false }).limit(1).maybeSingle();
-    setDraftBusy(false);
-    if (error) { setNotice({ text: `Couldn't open draft: ${error.message}`, error: true }); return; }
-    if (!row) { setNotice({ text: 'No saved draft yet', error: true }); return; }
-    const when = new Date(row.created_at).toLocaleString('en-KE', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
+  type DraftRow = { draft_id: number; created_by: string | null; created_at: string; data: DraftData };
+  const draftWhen = (r: DraftRow) =>
+    new Date(r.created_at).toLocaleString('en-KE', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+
+  // Load a draft into the page. Returns false if the user said no.
+  function applyDraft(row: DraftRow): boolean {
     const hasWork = selected.size > 0 || Object.keys(orderInputs).length > 0;
-    if (hasWork && !window.confirm(`Replace what you have now with the draft saved ${when}?`)) return;
-    const d = row.data as DraftData;
+    if (hasWork && !window.confirm(`Replace what you have now with the draft saved ${draftWhen(row)}?`)) return false;
+    const d = row.data;
     setSelected(new Set(d.selected ?? []));
     setOrderInputs(d.orderInputs ?? {});
     setSupplierId(d.supplierId ?? '');
     setLowOnly(!!d.lowOnly);
     setAddedIds(new Set(d.addedIds ?? []));
-    setNotice({ text: `Opened draft from ${when}${row.created_by ? ` (${row.created_by})` : ''} — ${(d.selected ?? []).length} checked` });
+    setNotice({ text: `Opened draft from ${draftWhen(row)}${row.created_by ? ` (${row.created_by})` : ''} — ${(d.selected ?? []).length} checked` });
+    return true;
+  }
+
+  async function openLastDraft() {
+    setDraftBusy(true);
+    const { data: row, error } = await supabase.from('order_drafts')
+      .select('draft_id, data, created_by, created_at').order('draft_id', { ascending: false }).limit(1).maybeSingle();
+    setDraftBusy(false);
+    if (error) { setNotice({ text: `Couldn't open draft: ${error.message}`, error: true }); return; }
+    if (!row) { setNotice({ text: 'No saved draft yet', error: true }); return; }
+    applyDraft(row as DraftRow);
+  }
+
+  // ── Drafts list: open or delete any saved draft ──
+  const [drafts, setDrafts] = useState<DraftRow[] | null>(null);   // null = list closed
+  async function openDraftsList() {
+    setDraftBusy(true);
+    const { data, error } = await supabase.from('order_drafts')
+      .select('draft_id, data, created_by, created_at').order('draft_id', { ascending: false }).limit(200);
+    setDraftBusy(false);
+    if (error) { setNotice({ text: `Couldn't load drafts: ${error.message}`, error: true }); return; }
+    setDrafts((data ?? []) as DraftRow[]);
+  }
+  async function deleteDraft(row: DraftRow) {
+    if (!window.confirm(`Delete the draft saved ${draftWhen(row)}? This can't be undone.`)) return;
+    // .select() returns the deleted rows, so a delete the database refused shows up as 0 rows.
+    const { data, error } = await supabase.from('order_drafts').delete().eq('draft_id', row.draft_id).select('draft_id');
+    if (error || !data?.length) {
+      setNotice({ text: `Couldn't delete draft: ${error?.message ?? 'not allowed'}`, error: true });
+      return;
+    }
+    setDrafts(prev => prev?.filter(d => d.draft_id !== row.draft_id) ?? null);
+    setNotice({ text: `Draft from ${draftWhen(row)} deleted` });
   }
 
   // ── Place order: save it, then show its PDF ──
@@ -823,6 +854,7 @@ function StatsDashboard() {
               { label: '🔄 Refresh',         onClick: refreshAll,   disabled: busy,      title: 'Fetch the latest products, stock and orders — keeps what you checked and typed' },
               { label: '💾 Save draft',      onClick: saveDraft,    disabled: draftBusy, title: 'Save what is checked and typed so you can open it later' },
               { label: '📂 Open last draft', onClick: openLastDraft, disabled: draftBusy, title: 'Load the last saved draft' },
+              { label: '🗂 Drafts',          onClick: openDraftsList, disabled: draftBusy, title: 'See every saved draft — open or delete one' },
               { label: '🧾 Previous Orders', onClick: openPreviousOrders, disabled: false, title: undefined },
             ].map(b => (
               <button
@@ -1267,6 +1299,54 @@ function StatsDashboard() {
         onSaved={onOrderEdited}
         onClose={() => setEditingOrder(null)}
       />
+    )}
+
+    {drafts && (
+      <div className="print-hide fixed inset-0 z-150 bg-black/70 backdrop-blur-sm flex items-end sm:items-center justify-center" onClick={() => setDrafts(null)}>
+        <div
+          className="w-full max-w-xl max-h-[85vh] flex flex-col bg-surface border border-white/10 rounded-t-3xl sm:rounded-3xl"
+          onClick={e => e.stopPropagation()}
+        >
+          <div className="px-5 pt-5 pb-3 flex items-center justify-between gap-3">
+            <h3 className="text-base font-bold text-slate-100">🗂 Saved drafts ({drafts.length})</h3>
+            <button onClick={() => setDrafts(null)} className="px-3 py-1.5 rounded-lg bg-surface2 border border-white/10 text-slate-300 text-xs font-bold hover:border-white/25">Close</button>
+          </div>
+          <div className="flex-1 overflow-y-auto px-5 pb-5">
+            {drafts.length === 0 ? (
+              <p className="text-center text-sm text-muted py-10">No saved drafts.</p>
+            ) : (
+              <ul className="rounded-2xl border border-white/8 divide-y divide-white/5">
+                {drafts.map((d, i) => (
+                  <li key={d.draft_id} className="px-4 py-3 flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold text-slate-100">
+                        {draftWhen(d)}
+                        {i === 0 && <span className="ml-2 text-[9px] font-bold uppercase tracking-wide text-teal bg-teal/10 border border-teal/30 rounded px-1.5 py-0.5 align-middle">Latest</span>}
+                      </p>
+                      <p className="text-[11px] text-muted">
+                        {(d.data.selected ?? []).length} item{(d.data.selected ?? []).length === 1 ? '' : 's'}
+                        {d.data.supplierId !== '' && d.data.supplierId != null ? ` · ${suppliers.find(s => s.supplier_id === d.data.supplierId)?.supplier_name ?? 'supplier'}` : ''}
+                        {d.created_by ? ` · ${d.created_by}` : ''}
+                      </p>
+                    </div>
+                    <div className="flex gap-2 shrink-0">
+                      <button
+                        onClick={() => { if (applyDraft(d)) setDrafts(null); }}
+                        className="px-3 py-1.5 rounded-lg bg-teal/15 border border-teal/30 text-teal text-[11px] font-bold hover:bg-teal/25 transition-all"
+                      >Open</button>
+                      <button
+                        onClick={() => deleteDraft(d)}
+                        aria-label={`Delete draft from ${draftWhen(d)}`}
+                        className="px-3 py-1.5 rounded-lg bg-danger/10 border border-danger/30 text-danger text-[11px] font-bold hover:bg-danger/20 transition-all"
+                      >🗑 Delete</button>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </div>
+      </div>
     )}
 
     {ordersOpen && (
