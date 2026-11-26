@@ -1213,7 +1213,7 @@ function StatsDashboard() {
     )}
 
     {printItems && (
-      <div className="fixed inset-0 z-200 bg-white overflow-y-auto">
+      <div className="fixed inset-0 z-200 bg-white overflow-y-auto print:static print:overflow-visible">
         <div className="print-hide sticky top-0 bg-white border-b border-gray-200 px-4 py-3 flex items-center justify-between gap-3">
           <span className="text-sm font-semibold text-gray-700">
             Purchase Order — {printItems.length} item{printItems.length === 1 ? '' : 's'}
