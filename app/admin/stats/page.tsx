@@ -388,11 +388,27 @@ function StatsDashboard() {
     });
   }
 
-  // What an export contains: the checked rows, or the whole list if none.
+  // The "Your order" table: checked products in their sequence. A Set keeps
+  // insertion order, so ticking appends and moving rewrites the Set. Taken
+  // from every product, so a filter or search never drops a checked one.
+  const productById  = useMemo(() => new Map(products.map(p => [p.product_id, p])), [products]);
+  const selectedItems = [...activeSelected].map(id => productById.get(id)).filter((p): p is Product => !!p);
+
+  function moveSelected(pid: number, toIndex: number) {
+    setActiveSelected(prev => {
+      const arr = [...prev].filter(id => id !== pid);
+      arr.splice(Math.max(0, Math.min(toIndex, arr.length)), 0, pid);
+      return new Set(arr);
+    });
+  }
+  const [dragId, setDragId] = useState<number | null>(null);
+
+  // What an export contains: the "Your order" table in its sequence, or the
+  // whole list A–Z if nothing is checked.
   function orderItems(): Product[] {
-    return activeItems
-      .filter(p => activeSelected.size === 0 || activeSelected.has(p.product_id))
-      .sort((a, b) => a.product_name.localeCompare(b.product_name));
+    return activeSelected.size > 0
+      ? selectedItems
+      : [...activeItems].sort((a, b) => a.product_name.localeCompare(b.product_name));
   }
 
   function generatePdf() {
@@ -563,9 +579,7 @@ function StatsDashboard() {
   const [wizard, setWizard] = useState<{ items: Product[] } | null>(null);
 
   function placeOrder() {
-    const items = activeItems
-      .filter(p => activeSelected.has(p.product_id))
-      .sort((a, b) => a.product_name.localeCompare(b.product_name));
+    const items = selectedItems;
     if (items.length === 0) { setNotice({ text: 'Tick the products to order first.', error: true }); return; }
     setWizard({ items });
   }
@@ -709,7 +723,7 @@ function StatsDashboard() {
   // ── Running total for the order being built ──
   // Covers the checked rows, or the whole list when nothing is checked —
   // the same rows Print / Excel export.
-  const totalRows = activeItems.filter(p => activeSelected.size === 0 || activeSelected.has(p.product_id));
+  const totalRows = activeSelected.size > 0 ? selectedItems : activeItems;
   const totalQty    = totalRows.reduce((s, p) => s + toNum(orderInputs[p.product_id]?.qty), 0);
   const totalAmount = totalRows.reduce((s, p) => s + toNum(orderInputs[p.product_id]?.price) * toNum(orderInputs[p.product_id]?.qty), 0);
 
@@ -724,6 +738,72 @@ function StatsDashboard() {
     })
     .filter((x): x is { p: Product; others: PurchaseRecord[] } => x !== null)
     .sort((a, b) => a.p.product_name.localeCompare(b.p.product_name));
+
+  // Supplier name, last price, new price, quantity and unit cells — shared by
+  // the product list and the "Your order" table, so both edit the same values.
+  function orderCells(p: Product) {
+    const last = lastRecord(p.product_id);
+    const inp  = orderInputs[p.product_id];
+    return (
+      <>
+        <td className="px-2 py-2">
+          <input
+            type="text"
+            value={shownSupName(p.product_id)}
+            onChange={e => setInput(p.product_id, 'supName', e.target.value)}
+            // Saved per supplier as soon as you leave the box; with
+            // no supplier picked it's saved when the order is placed.
+            onBlur={e => { if (supplierActive) persistSupName(Number(supplierId), p.product_id, e.target.value); }}
+            placeholder="Same as ours"
+            aria-label={`Supplier's name for ${p.product_name}`}
+            title={supplierActive ? `Saved for ${selSupplierName}` : 'Saved for the supplier you place the order with'}
+            className="w-full min-w-40 px-2 py-1.5 rounded-lg bg-surface2 border border-white/10 text-sm text-slate-100 placeholder:text-muted/50 outline-none focus:border-teal/40"
+          />
+        </td>
+        <td className="px-2 py-2 text-right tabular-nums whitespace-nowrap">
+          {last?.price != null ? (
+            <>
+              <span className="block text-slate-300">{fmtKsh(last.price)}</span>
+              <span className="block text-[10px] text-muted">
+                {last.date ?? ''}{!supplierActive ? `${last.date ? ' · ' : ''}${last.supplierName}` : ''}{last.fromOrder ? ' · ordered' : ''}
+              </span>
+              </>
+            ) : <span className="text-muted">—</span>}
+          </td>
+          <td className="px-2 py-2 text-right">
+            <input
+              type="number" inputMode="decimal" min="0" placeholder="0"
+              value={inp?.price ?? ''}
+              onChange={e => setInput(p.product_id, 'price', e.target.value)}
+              onWheel={e => e.currentTarget.blur()}
+              aria-label={`New purchase price for ${p.product_name}`}
+              className={inputCls}
+            />
+          </td>
+          <td className="px-3 py-2 text-right">
+            <input
+              type="number" inputMode="numeric" min="0" placeholder="0"
+              value={inp?.qty ?? ''}
+              onChange={e => setInput(p.product_id, 'qty', e.target.value)}
+              onWheel={e => e.currentTarget.blur()}
+              aria-label={`Quantity for ${p.product_name}`}
+              className={inputCls}
+            />
+          </td>
+          <td className="px-3 py-2">
+            {/* Pcs, Boxes or Rolls */}
+            <select
+              value={inp?.unit ?? 'pc'}
+              onChange={e => setOrderInputs(prev => ({ ...prev, [p.product_id]: { ...(prev[p.product_id] ?? { price: '', qty: '' }), unit: e.target.value as OrderUnit } }))}
+              aria-label={`Unit for ${p.product_name}`}
+              className="w-24 px-2 py-1.5 rounded-lg bg-surface2 border border-white/10 text-sm text-slate-100 outline-none focus:border-teal/40"
+            >
+              {ORDER_UNITS.map(u => <option key={u} value={u}>{unitLabel(u)}</option>)}
+            </select>
+          </td>
+      </>
+    );
+  }
 
   const busy = loading || recordsLoading;
   const inputCls = 'w-24 px-2 py-1.5 rounded-lg bg-surface2 border border-white/10 text-sm text-slate-100 text-right tabular-nums outline-none focus:border-teal/40';
@@ -916,8 +996,6 @@ function StatsDashboard() {
                       </tr>
                       {items.map(p => {
                         const stock = totalForProduct(p.product_id, p.pieces_per_box ?? 0);
-                        const last  = lastRecord(p.product_id);
-                        const inp   = orderInputs[p.product_id];
                         return (
                           <tr key={p.product_id} className={`group border-t border-white/5 hover:bg-white/[0.02] ${stock > 0 ? 'bg-success/[0.03]' : 'bg-danger/[0.04]'}`}>
                             <td className={`px-3 py-2 border-l-4 ${stock > 0 ? 'border-l-success' : 'border-l-danger'}`}>
@@ -957,61 +1035,7 @@ function StatsDashboard() {
                                 ))}
                               </span>
                             </td>
-                            <td className="px-2 py-2">
-                              <input
-                                type="text"
-                                value={shownSupName(p.product_id)}
-                                onChange={e => setInput(p.product_id, 'supName', e.target.value)}
-                                // Saved per supplier as soon as you leave the box; with
-                                // no supplier picked it's saved when the order is placed.
-                                onBlur={e => { if (supplierActive) persistSupName(Number(supplierId), p.product_id, e.target.value); }}
-                                placeholder="Same as ours"
-                                aria-label={`Supplier's name for ${p.product_name}`}
-                                title={supplierActive ? `Saved for ${selSupplierName}` : 'Saved for the supplier you place the order with'}
-                                className="w-full min-w-40 px-2 py-1.5 rounded-lg bg-surface2 border border-white/10 text-sm text-slate-100 placeholder:text-muted/50 outline-none focus:border-teal/40"
-                              />
-                            </td>
-                            <td className="px-2 py-2 text-right tabular-nums whitespace-nowrap">
-                              {last?.price != null ? (
-                                <>
-                                  <span className="block text-slate-300">{fmtKsh(last.price)}</span>
-                                  <span className="block text-[10px] text-muted">
-                                    {last.date ?? ''}{!supplierActive ? `${last.date ? ' · ' : ''}${last.supplierName}` : ''}{last.fromOrder ? ' · ordered' : ''}
-                                  </span>
-                                </>
-                              ) : <span className="text-muted">—</span>}
-                            </td>
-                            <td className="px-2 py-2 text-right">
-                              <input
-                                type="number" inputMode="decimal" min="0" placeholder="0"
-                                value={inp?.price ?? ''}
-                                onChange={e => setInput(p.product_id, 'price', e.target.value)}
-                                onWheel={e => e.currentTarget.blur()}
-                                aria-label={`New purchase price for ${p.product_name}`}
-                                className={inputCls}
-                              />
-                            </td>
-                            <td className="px-3 py-2 text-right">
-                              <input
-                                type="number" inputMode="numeric" min="0" placeholder="0"
-                                value={inp?.qty ?? ''}
-                                onChange={e => setInput(p.product_id, 'qty', e.target.value)}
-                                onWheel={e => e.currentTarget.blur()}
-                                aria-label={`Quantity for ${p.product_name}`}
-                                className={inputCls}
-                              />
-                            </td>
-                            <td className="px-3 py-2">
-                              {/* Pcs, Boxes or Rolls */}
-                              <select
-                                value={inp?.unit ?? 'pc'}
-                                onChange={e => setOrderInputs(prev => ({ ...prev, [p.product_id]: { ...(prev[p.product_id] ?? { price: '', qty: '' }), unit: e.target.value as OrderUnit } }))}
-                                aria-label={`Unit for ${p.product_name}`}
-                                className="w-24 px-2 py-1.5 rounded-lg bg-surface2 border border-white/10 text-sm text-slate-100 outline-none focus:border-teal/40"
-                              >
-                                {ORDER_UNITS.map(u => <option key={u} value={u}>{unitLabel(u)}</option>)}
-                              </select>
-                            </td>
+                            {orderCells(p)}
                           </tr>
                         );
                       })}
@@ -1036,6 +1060,74 @@ function StatsDashboard() {
                 </table>
               )}
             </div>
+
+            {/* ── Your order: checked products, in the sequence PDF / Excel / Place Order use ── */}
+            {selectedItems.length > 0 && (
+              <div className="mb-3">
+                <div className="flex flex-wrap items-baseline justify-between gap-2 mb-2">
+                  <h3 className="text-sm font-bold text-slate-100">🧾 Your order — {selectedItems.length} item{selectedItems.length === 1 ? '' : 's'}</h3>
+                  <p className="text-[11px] text-muted">Drag ⠿ or use ▲ ▼ to set the order. PDF, Excel and Place Order follow this list.</p>
+                </div>
+                <div className="rounded-2xl border border-teal/30 max-h-[60vh] overflow-auto">
+                  <table className="w-full min-w-[900px] text-sm">
+                    <thead className="sticky top-0 z-10 bg-surface">
+                      <tr className="text-left text-[10px] font-bold uppercase tracking-wide text-muted border-b border-white/8">
+                        <th className="w-28 px-3 py-2">#</th>
+                        <th className="px-2 py-2">Product name</th>
+                        <th className="px-2 py-2 whitespace-nowrap">Supplier product name</th>
+                        <th className="px-2 py-2 text-right whitespace-nowrap">Last purchase price</th>
+                        <th className="px-2 py-2 text-right whitespace-nowrap">New purchase price</th>
+                        <th className="px-2 py-2 text-right">Quantity</th>
+                        <th className="px-3 py-2">Unit</th>
+                        <th className="w-10 px-2 py-2"></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {selectedItems.map((p, i) => (
+                        <tr
+                          key={p.product_id}
+                          onDragOver={e => { if (dragId !== null) e.preventDefault(); }}
+                          onDrop={e => { e.preventDefault(); if (dragId !== null) moveSelected(dragId, i); setDragId(null); }}
+                          className={`border-t border-white/5 ${dragId === p.product_id ? 'opacity-40' : ''}`}
+                        >
+                          <td className="px-3 py-2 whitespace-nowrap">
+                            <span
+                              draggable
+                              onDragStart={e => { setDragId(p.product_id); e.dataTransfer.effectAllowed = 'move'; }}
+                              onDragEnd={() => setDragId(null)}
+                              title="Drag to reorder"
+                              className="cursor-grab select-none text-muted mr-1.5"
+                            >⠿</span>
+                            <span className="inline-block w-6 text-slate-300 tabular-nums">{i + 1}</span>
+                            <button onClick={() => moveSelected(p.product_id, i - 1)} disabled={i === 0}
+                              aria-label={`Move ${p.product_name} up`}
+                              className="px-1.5 text-muted hover:text-teal disabled:opacity-25">▲</button>
+                            <button onClick={() => moveSelected(p.product_id, i + 1)} disabled={i === selectedItems.length - 1}
+                              aria-label={`Move ${p.product_name} down`}
+                              className="px-1.5 text-muted hover:text-teal disabled:opacity-25">▼</button>
+                          </td>
+                          <td className="px-2 py-2 text-slate-200">{p.product_name}</td>
+                          {orderCells(p)}
+                          <td className="px-2 py-2 text-center">
+                            <button onClick={() => toggleSelect(p.product_id)}
+                              aria-label={`Remove ${p.product_name} from the order`} title="Remove from the order"
+                              className="px-1.5 text-muted hover:text-danger">✕</button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    <tfoot className="sticky bottom-0 z-10 bg-surface">
+                      <tr className="border-t-2 border-white/15 text-sm font-bold">
+                        <td className="px-3 py-2.5" colSpan={4}><span className="text-slate-100">Total</span></td>
+                        <td className="px-2 py-2.5 text-right tabular-nums text-gold whitespace-nowrap">{fmtKsh(totalAmount)}</td>
+                        <td className="px-2 py-2.5 text-right tabular-nums text-slate-100">{totalQty.toLocaleString('en-KE')}</td>
+                        <td colSpan={2}></td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+              </div>
+            )}
 
             <div className="flex flex-wrap items-center justify-end gap-2 mb-8">
               <span className="text-[11px] text-muted mr-1">
