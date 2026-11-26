@@ -252,6 +252,38 @@ function StatsDashboard() {
     });
   }
 
+  // ── Products linked to a supplier by hand (supplier_products) ──
+  // "Add to <supplier>" on a searched product stores the link, so it shows
+  // in that supplier's list from then on even if never bought from them.
+  type SupplierLink = { supplier_id: number; product_id: number };
+  const [supplierLinks, setSupplierLinks] = useState<SupplierLink[]>(() => readPageCache<SupplierLink[]>('order:suplinks') ?? []);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const PAGE = 1000;
+      const rows: SupplierLink[] = [];
+      for (let from = 0; ; from += PAGE) {
+        const { data, error } = await supabase.from('supplier_products')
+          .select('supplier_id, product_id').order('supplier_id').order('product_id').range(from, from + PAGE - 1);
+        if (error || cancelled) return;
+        rows.push(...((data ?? []) as SupplierLink[]));
+        if ((data ?? []).length < PAGE) break;
+      }
+      if (!cancelled) { setSupplierLinks(rows); writePageCache('order:suplinks', rows); }
+    })();
+    return () => { cancelled = true; };
+  }, [reloadKey]);
+
+  async function linkToSupplier(sid: number, p: Product) {
+    const { error } = await supabase.from('supplier_products')
+      .upsert({ supplier_id: sid, product_id: p.product_id, created_by: localStorage.getItem(USER_KEY) },
+              { onConflict: 'supplier_id,product_id', ignoreDuplicates: true });
+    if (error) { setNotice({ text: `Couldn't add to supplier: ${error.message}`, error: true }); return; }
+    setSupplierLinks(prev => [...prev, { supplier_id: sid, product_id: p.product_id }]);
+    const name = suppliers.find(s => s.supplier_id === sid)?.supplier_name ?? 'this supplier';
+    setNotice({ text: `${p.product_name} added to ${name}` });
+  }
+
   // product_id → (supplierKey → latest record), plus latest from anyone.
   const { lastBySupplier, lastAny } = useMemo(() => {
     const pageAdded = new Map(products.filter(isPageAdded).map(p => [p.product_id, p]));
@@ -291,8 +323,15 @@ function StatsDashboard() {
       const key = `id:${sid}`;
       if (!m.has(key)) m.set(key, { productId: p.product_id, supplierKey: key, supplierName: supName.get(sid) ?? `Supplier #${sid}`, price: null, date: null, purchaseId: 0, fromOrder: true });
     }
+    // Linked by hand with "Add to <supplier>": in the list, no price yet.
+    for (const l of supplierLinks) {
+      let m = bySup.get(l.product_id);
+      if (!m) { m = new Map(); bySup.set(l.product_id, m); }
+      const key = `id:${l.supplier_id}`;
+      if (!m.has(key)) m.set(key, { productId: l.product_id, supplierKey: key, supplierName: supName.get(l.supplier_id) ?? `Supplier #${l.supplier_id}`, price: null, date: null, purchaseId: 0, fromOrder: false });
+    }
     return { lastBySupplier: bySup, lastAny: any };
-  }, [records, orderHistory, products, suppliers]);
+  }, [records, orderHistory, products, suppliers, supplierLinks]);
 
   const supplierActive = supplierId !== '';
   const selKey = supplierActive ? `id:${supplierId}` : '';
@@ -325,14 +364,13 @@ function StatsDashboard() {
   // Products typed in on this page have no purchase history yet, so they
   // stay visible whichever supplier is picked.
   const [addedIds, setAddedIds] = useState<Set<number>>(new Set());
-  const bySupplier = (list: Product[]) => supplierActive
-    ? list.filter(p => addedIds.has(p.product_id) || lastBySupplier.get(p.product_id)?.has(selKey))
-    : list;
+  const inSupplier = (p: Product) => addedIds.has(p.product_id) || !!lastBySupplier.get(p.product_id)?.has(selKey);
 
   // One list of every product, in stock or not; each row is marked green
   // (in stock) or red (out of stock) and shows its stock on hover.
-  const activeItems = bySupplier(products)
+  const lowFiltered = products
     .filter(p => !lowOnly || totalForProduct(p.product_id, p.pieces_per_box ?? 0) <= (p.reorder_level ?? 0));
+  const activeItems = supplierActive ? lowFiltered.filter(inSupplier) : lowFiltered;
   const inStockCount  = activeItems.filter(p => totalForProduct(p.product_id, p.pieces_per_box ?? 0) > 0).length;
   const activeSelected    = selected;
   const setActiveSelected = setSelected;
@@ -352,7 +390,9 @@ function StatsDashboard() {
   // order even while a search hides them.
   const [newName, setNewName] = useState('');
   const query        = newName.trim().replace(/\s+/g, ' ').toLowerCase();
-  const shownItems   = query ? activeItems.filter(p => matchesQuery(p, query)) : activeItems;
+  // Search looks through every product, not just the picked supplier's, so
+  // one never bought from them can be found and added to them.
+  const shownItems   = query ? lowFiltered.filter(p => matchesQuery(p, query)) : activeItems;
   const activeGroups = groupByType(shownItems);
   const anyMatch     = query !== '' && products.some(p => matchesQuery(p, query));
   const exactMatch   = query !== '' && products.some(p => p.product_name.trim().replace(/\s+/g, ' ').toLowerCase() === query);
@@ -762,7 +802,8 @@ function StatsDashboard() {
   // supplier (with a supplier picked), or from 2+ suppliers (no pick).
   const commonProducts = activeItems
     .map(p => {
-      const entries = Array.from(lastBySupplier.get(p.product_id)?.values() ?? []);
+      // Hand-made links (no bill, no order) aren't buying history.
+      const entries = Array.from(lastBySupplier.get(p.product_id)?.values() ?? []).filter(e => e.purchaseId !== 0 || e.fromOrder);
       const others  = supplierActive ? entries.filter(e => e.supplierKey !== selKey) : entries;
       const show    = supplierActive ? others.length >= 1 : entries.length >= 2;
       return show ? { p, others } : null;
@@ -1051,6 +1092,14 @@ function StatsDashboard() {
                                   <span className="ml-2 align-middle text-[9px] font-bold uppercase tracking-wide text-orange-500 bg-orange-500/10 border border-orange-500/30 rounded px-1.5 py-0.5">Added here</span>
                                 )}
                               </span>
+                              {/* Found by search but not on the picked supplier's list yet */}
+                              {supplierActive && !inSupplier(p) && (
+                                <button
+                                  onClick={e => { e.stopPropagation(); linkToSupplier(Number(supplierId), p); }}
+                                  title={`Show this product under ${selSupplierName} from now on`}
+                                  className="mt-1 px-2 py-0.5 rounded-md bg-teal/15 border border-teal/30 text-teal text-[10px] font-bold hover:bg-teal/25 transition-all"
+                                >➕ Add to {selSupplierName}</button>
+                              )}
                               {stock === 0 && lastChanged(p) && (
                                 <span className="block text-[10px] text-muted">Last changed: {lastChanged(p)}</span>
                               )}
