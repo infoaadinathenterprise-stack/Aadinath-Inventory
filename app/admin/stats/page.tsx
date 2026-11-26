@@ -789,31 +789,42 @@ function StatsDashboard() {
               </p>
             )}
 
-            <div className="flex items-center justify-between mb-2 gap-3">
+            <div className="flex flex-wrap items-center justify-between mb-2 gap-3">
               <p className="text-[11px] text-muted">
                 {activeSelected.size > 0
                   ? `${activeSelected.size} checked — only these go in the order`
                   : 'Nothing checked — Print / Excel will include everything below'}
               </p>
-              <div className="flex gap-2 shrink-0">
+              <div className="flex flex-wrap gap-2">
                 <button
                   onClick={() => setActiveSelected(prev => new Set([...(query ? prev : []), ...shownItems.map(i => i.product_id)]))}
                   className="px-3 py-1.5 rounded-lg bg-teal/15 border border-teal/30 text-teal text-[11px] font-bold hover:bg-teal/25 transition-all"
                 >Select all</button>
-                {(() => {
-                  // Only the red (out of stock) rows currently shown.
-                  const outIds = shownItems
-                    .filter(i => totalForProduct(i.product_id, i.pieces_per_box ?? 0) <= 0)
+                {/* Check only the shown rows in one stock state. Low = in stock but at or below its reorder level. */}
+                {([
+                  { label: 'in stock',     tone: 'success', match: (s: number) => s > 0 },
+                  { label: 'low stock',    tone: 'gold',    match: (s: number, p: Product) => s > 0 && s <= (p.reorder_level ?? 0) },
+                  { label: 'out of stock', tone: 'danger',  match: (s: number) => s <= 0 },
+                ] as const).map(({ label, tone, match }) => {
+                  const ids = shownItems
+                    .filter(i => match(totalForProduct(i.product_id, i.pieces_per_box ?? 0), i))
                     .map(i => i.product_id);
+                  const cls = {
+                    success: 'bg-success/10 border-success/30 text-success hover:bg-success/20',
+                    gold:    'bg-gold/10 border-gold/40 text-gold hover:bg-gold/20',
+                    danger:  'bg-danger/10 border-danger/30 text-danger hover:bg-danger/20',
+                  }[tone];
+                  const dot = { success: 'bg-success', gold: 'bg-gold', danger: 'bg-danger' }[tone];
                   return (
                     <button
-                      onClick={() => setActiveSelected(prev => new Set([...(query ? prev : []), ...outIds]))}
-                      disabled={outIds.length === 0}
-                      title="Check only the out-of-stock (red) products in the list"
-                      className="px-3 py-1.5 rounded-lg bg-danger/10 border border-danger/30 text-danger text-[11px] font-bold hover:bg-danger/20 transition-all disabled:opacity-40 flex items-center gap-1.5"
-                    ><span className="w-2 h-2 rounded-full bg-danger" />Select out of stock ({outIds.length})</button>
+                      key={label}
+                      onClick={() => setActiveSelected(prev => new Set([...(query ? prev : []), ...ids]))}
+                      disabled={ids.length === 0}
+                      title={`Check only the ${label} products in the list`}
+                      className={`px-3 py-1.5 rounded-lg border text-[11px] font-bold transition-all disabled:opacity-40 flex items-center gap-1.5 ${cls}`}
+                    ><span className={`w-2 h-2 rounded-full ${dot}`} />Select {label} ({ids.length})</button>
                   );
-                })()}
+                })}
                 <button
                   onClick={() => setActiveSelected(new Set())}
                   disabled={activeSelected.size === 0}
