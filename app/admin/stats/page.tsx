@@ -132,6 +132,10 @@ export default function StatsPage() {
 
 function StatsDashboard() {
   const { products, locations, stockByLoc, boxByLoc, loading, refresh } = useProducts({ includeOrderOnly: true });
+  // Bumped by the Refresh button: re-runs every data load below. What's
+  // checked / typed is separate state, so it survives.
+  const [reloadKey, setReloadKey] = useState(0);
+  function refreshAll() { refresh(); setReloadKey(k => k + 1); }
 
   function handleLogout() {
     localStorage.removeItem(SESSION_KEY);
@@ -177,7 +181,7 @@ function StatsDashboard() {
       }
     })();
     return () => { cancelled = true; };
-  }, []);
+  }, [reloadKey]);
 
   // Placed orders count as buying history too: every product in an order
   // to a supplier is listed under that supplier afterwards, with the
@@ -193,7 +197,7 @@ function StatsDashboard() {
         writePageCache('order:orders', data ?? []);
       });
     return () => { cancelled = true; };
-  }, []);
+  }, [reloadKey]);
 
   // ── What each supplier calls our products (supplier_product_names) ──
   type SupNameRow = { supplier_id: number; product_id: number; supplier_product_name: string; updated_at: string };
@@ -214,7 +218,7 @@ function StatsDashboard() {
       if (!cancelled) { setSupNameRows(rows); writePageCache('order:supnames', rows); }
     })();
     return () => { cancelled = true; };
-  }, []);
+  }, [reloadKey]);
   const { supNameByKey, supNameLatest } = useMemo(() => {
     const byKey = new Map<string, string>();
     const latest = new Map<number, SupNameRow>();
@@ -515,6 +519,42 @@ function StatsDashboard() {
       : { text: `Deleted ${gone.size} of ${ids.length} — the rest changed since you checked them.`, error: true });
   }
 
+  // ── Drafts (order_drafts): save the order being built, reopen the last one ──
+  interface DraftData {
+    selected: number[]; orderInputs: Record<number, OrderInput>;
+    supplierId: number | ''; lowOnly: boolean; addedIds: number[];
+  }
+  const [draftBusy, setDraftBusy] = useState(false);
+
+  async function saveDraft() {
+    setDraftBusy(true);
+    const data: DraftData = { selected: [...selected], orderInputs, supplierId, lowOnly, addedIds: [...addedIds] };
+    const { error } = await supabase.from('order_drafts').insert({ created_by: localStorage.getItem(USER_KEY), data });
+    setDraftBusy(false);
+    setNotice(error
+      ? { text: `Couldn't save draft: ${error.message}`, error: true }
+      : { text: `Draft saved — ${selected.size} checked` });
+  }
+
+  async function openLastDraft() {
+    setDraftBusy(true);
+    const { data: row, error } = await supabase.from('order_drafts')
+      .select('data, created_by, created_at').order('draft_id', { ascending: false }).limit(1).maybeSingle();
+    setDraftBusy(false);
+    if (error) { setNotice({ text: `Couldn't open draft: ${error.message}`, error: true }); return; }
+    if (!row) { setNotice({ text: 'No saved draft yet', error: true }); return; }
+    const when = new Date(row.created_at).toLocaleString('en-KE', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
+    const hasWork = selected.size > 0 || Object.keys(orderInputs).length > 0;
+    if (hasWork && !window.confirm(`Replace what you have now with the draft saved ${when}?`)) return;
+    const d = row.data as DraftData;
+    setSelected(new Set(d.selected ?? []));
+    setOrderInputs(d.orderInputs ?? {});
+    setSupplierId(d.supplierId ?? '');
+    setLowOnly(!!d.lowOnly);
+    setAddedIds(new Set(d.addedIds ?? []));
+    setNotice({ text: `Opened draft from ${when}${row.created_by ? ` (${row.created_by})` : ''} — ${(d.selected ?? []).length} checked` });
+  }
+
   // ── Place order: save it, then show its PDF ──
   const [placing, setPlacing] = useState(false);
 
@@ -658,7 +698,7 @@ function StatsDashboard() {
       if (!cancelled) { setStockChangedAt(latest); writePageCache('order:changed', [...latest]); }
     })();
     return () => { cancelled = true; };
-  }, []);
+  }, [reloadKey]);
 
   function lastChanged(p: Product): string | null {
     const iso = stockChangedAt.get(p.product_id) ?? (p as Product & { created_at?: string | null }).created_at ?? null;
@@ -698,12 +738,22 @@ function StatsDashboard() {
             <h2 className="text-base font-bold text-slate-100">Place an Order</h2>
             <p className="text-xs text-muted mt-0.5">Pick a supplier, tick products, enter the new price and quantity, then place the order. Blank price or quantity counts as 0.</p>
           </div>
-          <button
-            onClick={openPreviousOrders}
-            className="shrink-0 px-4 py-2.5 rounded-xl bg-surface2 border border-white/10 text-slate-100 text-xs font-bold hover:border-teal/40 transition-colors"
-          >
-            🧾 Previous Orders
-          </button>
+          <div className="flex flex-wrap gap-2">
+            {[
+              { label: '🔄 Refresh',         onClick: refreshAll,   disabled: busy,      title: 'Fetch the latest products, stock and orders — keeps what you checked and typed' },
+              { label: '💾 Save draft',      onClick: saveDraft,    disabled: draftBusy, title: 'Save what is checked and typed so you can open it later' },
+              { label: '📂 Open last draft', onClick: openLastDraft, disabled: draftBusy, title: 'Load the last saved draft' },
+              { label: '🧾 Previous Orders', onClick: openPreviousOrders, disabled: false, title: undefined },
+            ].map(b => (
+              <button
+                key={b.label}
+                onClick={b.onClick}
+                disabled={b.disabled}
+                title={b.title}
+                className="shrink-0 px-4 py-2.5 rounded-xl bg-surface2 border border-white/10 text-slate-100 text-xs font-bold hover:border-teal/40 transition-colors disabled:opacity-40"
+              >{b.label}</button>
+            ))}
+          </div>
         </div>
 
         {/* ── Supplier filter ──────────────────────────────────────── */}
