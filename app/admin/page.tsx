@@ -142,7 +142,7 @@ function LoginForm({ onSuccess }: { onSuccess: () => void }) {
               JA
             </span>
             <p className="font-extrabold text-2xl text-slate-100 tracking-tight" style={{ fontFamily: 'var(--font-display)' }}>
-              Jay Aadinath
+              Jay Aadinath Enterprises Ltd
             </p>
             <span className="text-[10px] font-bold px-2.5 py-1 rounded-full bg-gold/12 border border-gold/30 text-gold uppercase tracking-[0.16em] mt-2 inline-block">Staff Panel</span>
           </div>
@@ -180,13 +180,12 @@ function LoginForm({ onSuccess }: { onSuccess: () => void }) {
 // ── Add/Edit Product Modal ────────────────────────────────────────────────────
 
 function ProductModal({
-  editing, products, locations, companies, stockByCompany, boxByCompany, initialCompanyId,
+  editing, products, locations, stockByCompany, boxByCompany, initialCompanyId,
   onClose, onSaved, onError,
 }: {
   editing:        Product | null;
   products:       Product[];
   locations:      LocationInfo[];
-  companies:      Company[];
   stockByCompany: StockByCompany;
   boxByCompany:   StockByCompany;
   initialCompanyId: number;
@@ -196,10 +195,7 @@ function ProductModal({
 }) {
   type CompEntry = { component_id: number; component_product_id: number; quantity: number; name: string; choice_group: string | null; price: number | null };
 
-  // Which firm's stock this modal is viewing / editing. New products are
-  // stocked into this firm; editing shows and adjusts this firm's stock.
-  const [companyId, setCompanyId] = useState<number>(initialCompanyId);
-  // Per-company stock maps for the selected firm.
+  const companyId = initialCompanyId;
   const stockByLoc: StockByLoc = stockByCompany[companyId] ?? {};
   const boxByLoc:   StockByLoc = boxByCompany[companyId]   ?? {};
 
@@ -572,35 +568,6 @@ function ProductModal({
         <h3 className="text-base font-bold text-slate-100 mb-4">{editing ? 'Edit Product' : 'Add Product'}</h3>
 
         <div className="flex flex-col gap-3">
-          {/* Firm (company) this stock belongs to. New products stock into
-              the chosen firm; editing shows and adjusts that firm's stock. */}
-          {companies.length > 1 && (
-            <div>
-              <label className="text-[10px] font-bold text-muted uppercase tracking-widest block mb-1">
-                Firm {editing ? '(showing this firm’s stock)' : '(stock goes to)'}
-              </label>
-              <div className="flex gap-2">
-                {companies.map(c => (
-                  <button
-                    key={c.company_id}
-                    type="button"
-                    onClick={() => setCompanyId(c.company_id)}
-                    className={`flex-1 py-2.5 rounded-xl border text-sm font-bold transition-all ${
-                      companyId === c.company_id
-                        ? (c.company_id === DEFAULT_COMPANY_ID ? 'border-teal bg-teal/10 text-teal' : 'border-gold bg-gold/10 text-gold')
-                        : 'border-white/8 bg-surface2 text-muted hover:border-white/20'
-                    }`}
-                  >{c.company_name.replace(/\s*Enterprise$/i, '')}</button>
-                ))}
-              </div>
-              {editing && (
-                <p className="text-[10px] text-muted/70 mt-1 leading-relaxed">
-                  Switch the firm to view or adjust its stock separately. Product details (name, price, image) are shared across firms.
-                </p>
-              )}
-            </div>
-          )}
-
           {/* Image uploader */}
           <div>
             <label className="text-[10px] font-bold text-muted uppercase tracking-widest block mb-1">Product Image (optional)</label>
@@ -751,11 +718,6 @@ function ProductModal({
           <div>
             <label className="text-[10px] font-bold text-muted uppercase tracking-widest block mb-2">
               Stock by Location{isBox && ppb > 0 ? (editing ? ' (total pieces)' : ' (boxes)') : ''}
-              {companies.length > 1 && (
-                <span className="ml-1 text-teal/80 normal-case tracking-normal font-semibold">
-                  · {(companies.find(c => c.company_id === companyId)?.company_name ?? '').replace(/\s*Enterprise$/i, '')}
-                </span>
-              )}
             </label>
             <div className="flex flex-col gap-2.5">
               {locations.map(loc => {
@@ -1015,18 +977,16 @@ function FormField({ label, children }: { label: string; children: React.ReactNo
 
 function Dashboard({ role }: { role: UserRole }) {
   const { products, locations, companies, stockByLoc, boxByLoc, stockByCompany, boxByCompany, loading, stale, error, refresh } = useProducts();
-  const [companyFilter, setCompanyFilter] = useState<'all' | number>('all');
   const [modal,        setModal]        = useState<ModalState | null>(null);
   const [productModal, setProductModal] = useState<{ editing: Product | null } | null>(null);
   const [toast,        setToast]        = useState<ToastState | null>(null);
   const toastId      = useRef(0);
   const { map: componentMap } = useProductComponents();
 
-  // With a company selected, the cards show — and the +/- modal adjusts —
-  // only that company's stock. "All" shows the combined totals.
-  const effStock = companyFilter === 'all' ? stockByLoc : (stockByCompany[companyFilter] ?? {});
-  const effBox   = companyFilter === 'all' ? boxByLoc   : (boxByCompany[companyFilter] ?? {});
-  const modalCompanyId = companyFilter === 'all' ? DEFAULT_COMPANY_ID : companyFilter;
+  // One company (Jay Aadinath Enterprises Ltd): its stock is the whole stock.
+  const effStock = stockByLoc;
+  const effBox   = boxByLoc;
+  const modalCompanyId = DEFAULT_COMPANY_ID;
 
   function showToast(msg: string, type: ToastState['type']) {
     setToast({ msg, type, id: ++toastId.current });
@@ -1085,21 +1045,6 @@ function Dashboard({ role }: { role: UserRole }) {
               </button>
             )}
           </div>
-          {companies.length > 1 && (
-            <div className="px-4 pb-2 flex gap-2 overflow-x-auto scrollbar-none">
-              {[{ id: 'all' as 'all' | number, name: 'All companies' },
-                ...companies.map(c => ({ id: c.company_id as 'all' | number, name: c.company_name.replace(/\s*Enterprise$/i, '') }))
-              ].map(opt => (
-                <button
-                  key={String(opt.id)}
-                  onClick={() => setCompanyFilter(opt.id)}
-                  className={`shrink-0 px-3 py-1.5 rounded-lg border text-[11px] font-semibold whitespace-nowrap transition-all ${
-                    companyFilter === opt.id ? 'bg-teal/10 border-teal/30 text-teal' : 'border-white/8 bg-surface2 text-muted hover:border-white/20'
-                  }`}
-                >{opt.name}</button>
-              ))}
-            </div>
-          )}
         </div>
 
         <Suspense fallback={null}>
@@ -1149,7 +1094,6 @@ function Dashboard({ role }: { role: UserRole }) {
             editing={productModal.editing}
             products={products}
             locations={locations}
-            companies={companies}
             stockByCompany={stockByCompany}
             boxByCompany={boxByCompany}
             initialCompanyId={modalCompanyId}
@@ -1192,7 +1136,7 @@ export default function AdminPage() {
 // Lives in its own component so it can call useSearchParams (which Next
 // requires be inside a Suspense boundary in static export mode).
 
-import type { StockByLoc, LocationInfo, Company, StockByCompany } from '@/lib/types';
+import type { StockByLoc, LocationInfo, StockByCompany } from '@/lib/types';
 import type { StockFilter } from './components/ProductList';
 
 function InventoryListWithFilter(props: {
