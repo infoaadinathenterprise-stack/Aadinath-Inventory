@@ -39,12 +39,19 @@ export default function PosPage() {
 
 type CartUnit = 'piece' | 'box';
 
+// Running stock per "company:location:product" while one cart is turned into
+// stock changes, so two lines that use the same product (e.g. a shared
+// component) don't both take the same unit from the same spot.
+type StockWork = Map<string, { pcs: number; bx: number }>;
+
 interface CartItem {
   product:         Product;
   qty:             number;
   unit:            CartUnit;
   sellPrice:       number | null;
-  groupChoices:    Record<string, number>;
+  // Components NOT to deduct for this line (component_product_id). Every
+  // component — fixed or in a group — starts ticked; unticking adds it here.
+  unticked:        number[];
   companyId:       number;  // which company's stock this line sells from
   transferDestId?: number;  // selected destination for → Move action
   // How many BOX barcodes were scanned into this (piece-unit) line. Each box
@@ -291,17 +298,37 @@ function PosDashboard() {
     return p.selling_price ?? null;
   }
 
+  // Components that will be deducted for a line: every component of the
+  // product (fixed or in a group) except the ones unticked in the cart.
+  function tickedComps(pid: number, unticked: number[]) {
+    return (componentMap[pid] ?? []).filter(c => !unticked.includes(c.component_product_id));
+  }
+
+  // The "picked" option of each group = its only ticked member. A group with
+  // several members still ticked has no single pick (so no option price).
+  function pickedOptions(pid: number, unticked: number[]) {
+    const byGroup: Record<string, ReturnType<typeof tickedComps>> = {};
+    for (const c of tickedComps(pid, unticked)) if (c.choice_group) (byGroup[c.choice_group] ??= []).push(c);
+    return Object.values(byGroup).filter(g => g.length === 1).map(g => g[0]);
+  }
+
+  // Stock at one spot (company, location, product), after whatever earlier
+  // lines of the same cart already took — `work` holds those running values.
+  function stockAt(work: StockWork, coId: number, lId: number, prodId: number): { pcs: number; bx: number } {
+    return work.get(`${coId}:${lId}:${prodId}`) ?? {
+      pcs: ((stockByCompany[coId] ?? {})[lId] ?? {})[prodId] ?? 0,
+      bx:  ((boxByCompany[coId]   ?? {})[lId] ?? {})[prodId] ?? 0,
+    };
+  }
+
   // Choice-group options can each carry their own sell price (e.g. the same
   // product "with motor A" vs "with motor B" costs differently). When such an
   // option is picked, its saved price becomes the line's sell price. Returns
   // null when no picked option has a price, so the caller keeps the base
   // price. Applies to the piece unit (box uses box_selling_price).
-  function choiceSellPrice(p: Product, groupChoices: Record<string, number>, unit: CartUnit): number | null {
+  function choiceSellPrice(p: Product, unticked: number[], unit: CartUnit): number | null {
     if (unit === 'box') return null;
-    const comps = componentMap[p.product_id] ?? [];
-    const pricedPicked = comps.filter(c =>
-      c.choice_group != null && groupChoices[c.choice_group] === c.component_product_id && c.price != null,
-    );
+    const pricedPicked = pickedOptions(p.product_id, unticked).filter(c => c.price != null);
     if (pricedPicked.length === 0) return null;
     return pricedPicked.reduce((s, c) => s + (c.price ?? 0), 0);
   }
@@ -313,8 +340,7 @@ function PosDashboard() {
     let wrote = false;
     for (const it of items) {
       if (it.sellPrice == null || it.unit === 'box') continue;
-      const comps = componentMap[it.product.product_id] ?? [];
-      const picked = comps.filter(c => c.choice_group != null && it.groupChoices[c.choice_group!] === c.component_product_id);
+      const picked = pickedOptions(it.product.product_id, it.unticked);
       if (picked.length !== 1) continue;               // ambiguous → skip
       const chosen = picked[0];
       if (chosen.price === it.sellPrice) continue;      // unchanged
@@ -343,7 +369,7 @@ function PosDashboard() {
       const pid = p.product_id;
       if (it.sellPrice == null || it.sellPrice <= 0 || done.has(pid)) continue;
       // If a priced choice option drove the price, that's saved on the option.
-      if (choiceSellPrice(p, it.groupChoices, it.unit) != null) continue;
+      if (choiceSellPrice(p, it.unticked, it.unit) != null) continue;
 
       const patch: Record<string, number> = {};
       if (it.unit === 'box') {
@@ -398,7 +424,7 @@ function PosDashboard() {
             boxIds: opts.boxId ? [...(c.boxIds ?? []), opts.boxId] : c.boxIds,
           });
         }
-        return [...prev, { product, qty: boxBundle, unit: 'piece' as CartUnit, sellPrice: defaultSellPrice(product, 'piece'), groupChoices: {}, companyId: company0, boxCount: 1, boxIds: opts.boxId ? [opts.boxId] : undefined }];
+        return [...prev, { product, qty: boxBundle, unit: 'piece' as CartUnit, sellPrice: defaultSellPrice(product, 'piece'), unticked: [], companyId: company0, boxCount: 1, boxIds: opts.boxId ? [opts.boxId] : undefined }];
       }
 
       // ── Plain piece scan / tap ──
@@ -409,7 +435,7 @@ function PosDashboard() {
       }
       const max = maxForProduct(product, 'piece', company0);
       if (max < 1) { blocked = true; blockedMax = 0; return prev; }
-      return [...prev, { product, qty: 1, unit: 'piece' as CartUnit, sellPrice: defaultSellPrice(product, 'piece'), groupChoices: {}, companyId: company0 }];
+      return [...prev, { product, qty: 1, unit: 'piece' as CartUnit, sellPrice: choiceSellPrice(product, [], 'piece') ?? defaultSellPrice(product, 'piece'), unticked: [], companyId: company0 }];
     });
     barcodeRef.current?.focus();
     if (blocked) {
@@ -534,8 +560,9 @@ function PosDashboard() {
     qty: number,
     unit: CartUnit,
     sellPrice: number | null,
-    groupChoices: Record<string, number> = {},
+    unticked: number[] = [],
     companyId = DEFAULT_COMPANY_ID,
+    work: StockWork = new Map(),
   ): StockOp[] {
     // The two companies are just billing labels over ONE shared physical
     // stock, sold from the same locations. So BOTH the product and its
@@ -556,26 +583,15 @@ function PosDashboard() {
     const companyOrder = [companyId, ...companies.map(c => c.company_id).filter(cid => cid !== companyId)];
     const companyShort = (cid: number) => (companies.find(c => c.company_id === cid)?.company_name ?? '').replace(/\s*Enterprise$/i, '');
 
+    const at = (coId: number, lId: number, prodId: number) => stockAt(work, coId, lId, prodId);
+
     // Total of a product across ALL companies and ALL locations.
     const totalAllCompanies = (prodId: number, prodPpb: number): number =>
-      companyOrder.reduce((sum, cid) => {
-        const sc = stockByCompany[cid] ?? {}; const bc = boxByCompany[cid] ?? {};
-        return sum + locations.reduce((s, l) =>
-          s + ((sc[l.location_id] ?? {})[prodId] ?? 0)
-            + ((bc[l.location_id] ?? {})[prodId] ?? 0) * prodPpb, 0);
-      }, 0);
+      companyOrder.reduce((sum, cid) =>
+        sum + locations.reduce((s, l) => { const x = at(cid, l.location_id, prodId); return s + x.pcs + x.bx * prodPpb; }, 0), 0);
 
-    // ── Build active component list (needed for validation + deduction) ──
-    const productComps = componentMap[pid] ?? [];
-    const alwaysComps = productComps.filter(c => !c.choice_group);
-    const cgMap: Record<string, typeof productComps> = {};
-    for (const c of productComps) {
-      if (c.choice_group) (cgMap[c.choice_group] ??= []).push(c);
-    }
-    const pickedFromGroups = Object.keys(cgMap)
-      .map(g => cgMap[g].find(c => c.component_product_id === groupChoices[g]))
-      .filter((c): c is NonNullable<typeof c> => Boolean(c));
-    const activeComps = [...alwaysComps, ...pickedFromGroups];
+    // Every ticked component (fixed or in a group) is deducted.
+    const activeComps = tickedComps(pid, unticked);
 
     // ── Validate the main product across ALL companies + locations ──
     const grandTotal = totalAllCompanies(pid, ppb);
@@ -612,18 +628,15 @@ function PosDashboard() {
       let need = needPieces;
       for (const coId of companyOrder) {
         if (need <= 0) break;
-        const sc = stockByCompany[coId] ?? {};
-        const bc = boxByCompany[coId]   ?? {};
         const others = locations
           .filter(l => l.location_id !== locId)
-          .map(l => ({ id: l.location_id, tot: ((sc[l.location_id] ?? {})[prodId] ?? 0) + ((bc[l.location_id] ?? {})[prodId] ?? 0) * prodPpb }))
+          .map(l => { const x = at(coId, l.location_id, prodId); return { id: l.location_id, tot: x.pcs + x.bx * prodPpb }; })
           .filter(l => l.tot > 0)
           .sort((a, b) => b.tot - a.tot)
           .map(l => l.id);
         for (const lId of [locId, ...others]) {
           if (need <= 0) break;
-          const pcs = (sc[lId] ?? {})[prodId] ?? 0;
-          const bx  = (bc[lId] ?? {})[prodId] ?? 0;
+          const { pcs, bx } = at(coId, lId, prodId);
           const locTotal = pcs + bx * prodPpb;
           if (locTotal <= 0) continue;
           const take = Math.min(need, locTotal);
@@ -632,6 +645,7 @@ function PosDashboard() {
           const newState = asWholeBoxes
             ? deductFromLocation(pcs, bx, qty, 'box', prodPpb)
             : deductFromLocation(pcs, bx, take, 'piece', prodPpb);
+          work.set(`${coId}:${lId}:${prodId}`, { pcs: newState.quantity, bx: newState.box_quantity });
           const sameSpot = lId === locId && coId === companyId;
           const from = `${locNameOf(lId)}${coId !== companyId ? ' · ' + companyShort(coId) : ''}`;
           ops.push(onOp({ lId, coId, take, dq: newState.quantity - pcs, db: newState.box_quantity - bx, sameSpot, from }));
@@ -672,12 +686,11 @@ function PosDashboard() {
     qty: number,
     unit: CartUnit,
     destLocationId: number,
-    groupChoices: Record<string, number> = {},
+    unticked: number[] = [],
     companyId = DEFAULT_COMPANY_ID,
+    work: StockWork = new Map(),
   ): StockOp[] {
-    // Transfer within the chosen company's stock.
-    const stockByLoc = stockByCompany[companyId] ?? {};
-    const boxByLoc   = boxByCompany[companyId]   ?? {};
+    // Transfer within the chosen company's stock (read through stockAt).
     const ops: StockOp[] = [];
     const pid = p.product_id;
     const ppb = p.pieces_per_box ?? 0;
@@ -686,10 +699,8 @@ function PosDashboard() {
     const srcName = locName;
     const dstName = locations.find(l => l.location_id === dstId)?.location_name ?? 'Destination';
 
-    const srcPcs = (stockByLoc[srcId] ?? {})[pid] ?? 0;
-    const srcBx  = (boxByLoc[srcId]   ?? {})[pid] ?? 0;
-    const dstPcs = (stockByLoc[dstId] ?? {})[pid] ?? 0;
-    const dstBx  = (boxByLoc[dstId]   ?? {})[pid] ?? 0;
+    const { pcs: srcPcs, bx: srcBx } = stockAt(work, companyId, srcId, pid);
+    const { pcs: dstPcs, bx: dstBx } = stockAt(work, companyId, dstId, pid);
 
     const movPieces = unit === 'box' && ppb > 0 ? qty * ppb : qty;
     const srcTotal  = srcPcs + srcBx * ppb;
@@ -699,6 +710,8 @@ function PosDashboard() {
 
     const newSrc = deductFromLocation(srcPcs, srcBx, qty, unit, ppb);
     const newDst = addToLocation(dstPcs, dstBx, qty, unit);
+    work.set(`${companyId}:${srcId}:${pid}`, { pcs: newSrc.quantity, bx: newSrc.box_quantity });
+    work.set(`${companyId}:${dstId}:${pid}`, { pcs: newDst.quantity, bx: newDst.box_quantity });
     ops.push({
       product_id: pid, location_id: srcId, company_id: companyId,
       dq: newSrc.quantity - srcPcs, db: newSrc.box_quantity - srcBx,
@@ -710,26 +723,25 @@ function PosDashboard() {
       dq: newDst.quantity - dstPcs, db: newDst.box_quantity - dstBx,
     });
 
-    // Move components with the product
-    const productComps = componentMap[pid] ?? [];
-    if (productComps.length > 0) {
-      const alwaysComps = productComps.filter(c => !c.choice_group);
-      const cgMap: Record<string, typeof productComps> = {};
-      for (const c of productComps) {
-        if (c.choice_group) (cgMap[c.choice_group] ??= []).push(c);
-      }
-      const pickedFromGroups = Object.keys(cgMap)
-        .map(g => cgMap[g].find(c => c.component_product_id === groupChoices[g]))
-        .filter((c): c is NonNullable<typeof c> => Boolean(c));
-      for (const comp of [...alwaysComps, ...pickedFromGroups]) {
+    // Move every ticked component with the product. The source must really
+    // have it: no clamping (that used to add stock at the destination that
+    // never left the source).
+    {
+      for (const comp of tickedComps(pid, unticked)) {
         const cid     = comp.component_product_id;
         const cPpb    = products.find(pr => pr.product_id === cid)?.pieces_per_box ?? 0;
         const movComp = movPieces * comp.quantity;
-        const cSrcPcs = (stockByLoc[srcId] ?? {})[cid] ?? 0;
-        const cSrcBx  = (boxByLoc[srcId]   ?? {})[cid] ?? 0;
+        const { pcs: cSrcPcs, bx: cSrcBx } = stockAt(work, companyId, srcId, cid);
+        if (cSrcPcs + cSrcBx * cPpb < movComp) {
+          const compName = products.find(pr => pr.product_id === cid)?.product_name ?? `#${cid}`;
+          throw new Error(`${srcName} only has ${cSrcPcs + cSrcBx * cPpb} of "${compName}" (need ${movComp}) — untick it to move without it`);
+        }
         const rawSrc = deductFromLocation(cSrcPcs, cSrcBx, movComp, 'piece', cPpb);
-        const newSrcQ = Math.max(0, rawSrc.quantity);
-        const newSrcB = Math.max(0, rawSrc.box_quantity);
+        const newSrcQ = rawSrc.quantity;
+        const newSrcB = rawSrc.box_quantity;
+        const dst = stockAt(work, companyId, dstId, cid);
+        work.set(`${companyId}:${srcId}:${cid}`, { pcs: newSrcQ, bx: newSrcB });
+        work.set(`${companyId}:${dstId}:${cid}`, { pcs: dst.pcs + movComp, bx: dst.bx });
         ops.push({
           product_id: cid, location_id: srcId, company_id: companyId,
           dq: newSrcQ - cSrcPcs, db: newSrcB - cSrcBx,
@@ -766,21 +778,9 @@ function PosDashboard() {
     };
   }
 
-  function getMissingChoices(item: CartItem): string[] {
-    const comps = componentMap[item.product.product_id] ?? [];
-    const groups = [...new Set(comps.filter(c => c.choice_group).map(c => c.choice_group!))];
-    return groups.filter(g => item.groupChoices[g] == null);
-  }
-
   async function processCart(action: 'sold' | 'move') {
     if (cart.length === 0) return;
     for (const item of cart) {
-      const missing = getMissingChoices(item);
-      if (missing.length > 0) {
-        showToast(`Pick a ${missing[0]} for ${item.product.product_name}`, 'error');
-        setCartOpen(true);
-        return;
-      }
       if (action === 'move' && !item.transferDestId) {
         showToast(`Select a destination location for ${item.product.product_name}`, 'error');
         setCartOpen(true);
@@ -792,10 +792,11 @@ function PosDashboard() {
       // Build every stock change for the whole cart, then apply them in ONE
       // atomic transaction (with the sale). Nothing is half-written.
       const ops: StockOp[] = [];
+      const work: StockWork = new Map();   // shared so lines sharing a component don't double-count stock
       for (const item of cart) {
         ops.push(...(action === 'sold'
-          ? buildSellOps(item.product, item.qty, item.unit, item.sellPrice, item.groupChoices, item.companyId)
-          : buildTransferOps(item.product, item.qty, item.unit, item.transferDestId!, item.groupChoices, item.companyId)));
+          ? buildSellOps(item.product, item.qty, item.unit, item.sellPrice, item.unticked, item.companyId, work)
+          : buildTransferOps(item.product, item.qty, item.unit, item.transferDestId!, item.unticked, item.companyId, work)));
       }
       await stockTxn(ops, action === 'sold' ? buildSalePayload(cart) : null);
       if (action === 'sold') { await markBoxesSold(cart); await rememberChoicePrices(cart); await rememberProductPrices(cart); }
@@ -825,11 +826,6 @@ function PosDashboard() {
   }
 
   async function processItem(item: CartItem, action: 'sold' | 'move') {
-    const missing = getMissingChoices(item);
-    if (missing.length > 0) {
-      showToast(`Pick a ${missing[0]} for ${item.product.product_name}`, 'error');
-      return;
-    }
     if (action === 'move' && !item.transferDestId) {
       showToast('Select a destination location first', 'error');
       return;
@@ -837,8 +833,8 @@ function PosDashboard() {
     setProcessing(true);
     try {
       const ops = action === 'sold'
-        ? buildSellOps(item.product, item.qty, item.unit, item.sellPrice, item.groupChoices, item.companyId)
-        : buildTransferOps(item.product, item.qty, item.unit, item.transferDestId!, item.groupChoices, item.companyId);
+        ? buildSellOps(item.product, item.qty, item.unit, item.sellPrice, item.unticked, item.companyId)
+        : buildTransferOps(item.product, item.qty, item.unit, item.transferDestId!, item.unticked, item.companyId);
       await stockTxn(ops, action === 'sold' ? buildSalePayload([item]) : null);
       if (action === 'sold') { await markBoxesSold([item]); await rememberChoicePrices([item]); await rememberProductPrices([item]); }
       setCart(c => c.filter(i => i.product.product_id !== item.product.product_id));
@@ -1201,73 +1197,42 @@ function PosDashboard() {
                       </div>
                     )}
 
-                    {/* Component deduction info + choice group pickers */}
-                    {(() => {
-                      const comps = componentMap[item.product.product_id] ?? [];
-                      if (comps.length === 0) return null;
-                      const always = comps.filter(c => !c.choice_group);
-                      const groups: Record<string, typeof comps> = {};
-                      for (const c of comps) {
-                        if (c.choice_group) (groups[c.choice_group] ??= []).push(c);
-                      }
-                      const groupNames = Object.keys(groups);
-                      return (
-                        <div className="mb-2 flex flex-col gap-1.5">
-                          {always.length > 0 && (
-                            <div className="rounded-lg bg-surface border border-white/8 px-2.5 py-2">
-                              <p className="text-[9px] font-bold text-muted uppercase tracking-widest mb-1">🔧 Deducts:</p>
-                              <ul className="flex flex-col gap-0.5">
-                                {always.map(c => {
-                                  const name = products.find(pr => pr.product_id === c.component_product_id)?.product_name ?? `#${c.component_product_id}`;
-                                  return (
-                                    <li key={c.component_product_id} className="text-[10px] text-slate-300">
-                                      • {name} ×{c.quantity * item.qty}
-                                    </li>
-                                  );
-                                })}
-                              </ul>
-                            </div>
-                          )}
-                          {groupNames.map(groupName => {
-                            const members = groups[groupName];
-                            const picked  = item.groupChoices[groupName];
+                    {/* Components: every one (fixed or in a group) starts ticked; only ticked ones are deducted */}
+                    {(componentMap[item.product.product_id] ?? []).length > 0 && (
+                      <div className="mb-2 rounded-lg bg-surface border border-white/8 px-2.5 py-2">
+                        <p className="text-[9px] font-bold text-muted uppercase tracking-widest mb-1">🔧 Also deducts (untick to skip):</p>
+                        <div className="flex flex-col gap-1">
+                          {(componentMap[item.product.product_id] ?? []).map(c => {
+                            const name = products.find(pr => pr.product_id === c.component_product_id)?.product_name ?? `#${c.component_product_id}`;
+                            const ticked = !item.unticked.includes(c.component_product_id);
                             return (
-                              <div key={groupName} className="rounded-lg bg-gold/5 border border-gold/30 px-2.5 py-2">
-                                <p className="text-[9px] font-bold text-gold uppercase tracking-widest mb-1.5">
-                                  Pick {groupName}
-                                </p>
-                                <div className="flex flex-col gap-1">
-                                  {members.map(c => {
-                                    const name     = products.find(pr => pr.product_id === c.component_product_id)?.product_name ?? `#${c.component_product_id}`;
-                                    const isPicked = picked === c.component_product_id;
-                                    return (
-                                      <button
-                                        key={c.component_product_id}
-                                        onClick={() => setCart(prev => prev.map(i => {
-                                          if (i.product.product_id !== item.product.product_id) return i;
-                                          const newChoices = { ...i.groupChoices, [groupName]: c.component_product_id };
-                                          // Pull the sell price for the newly picked option (if it has one).
-                                          const cp = choiceSellPrice(i.product, newChoices, i.unit);
-                                          return { ...i, groupChoices: newChoices, sellPrice: cp != null ? cp : i.sellPrice };
-                                        }))}
-                                        className={`text-left px-2 py-1.5 rounded border text-[10px] font-semibold transition-all ${
-                                          isPicked
-                                            ? 'border-gold bg-gold/15 text-gold'
-                                            : 'border-white/8 bg-surface2 text-slate-300 hover:border-gold/40'
-                                        }`}
-                                      >
-                                        {isPicked && '✓ '}{name} <span className="text-muted font-normal">×{c.quantity}/unit</span>
-                                        {c.price != null && <span className="float-right font-bold text-gold">Ksh {c.price.toLocaleString('en-KE')}</span>}
-                                      </button>
-                                    );
-                                  })}
-                                </div>
-                              </div>
+                              <label key={c.component_product_id} className="flex items-center gap-2 cursor-pointer select-none text-[10px]">
+                                <input
+                                  type="checkbox"
+                                  checked={ticked}
+                                  onChange={() => setCart(prev => prev.map(i => {
+                                    if (i.product.product_id !== item.product.product_id) return i;
+                                    const unticked = ticked
+                                      ? [...i.unticked, c.component_product_id]
+                                      : i.unticked.filter(id => id !== c.component_product_id);
+                                    // A priced option that is now the only one ticked in its group sets the price.
+                                    const cp = choiceSellPrice(i.product, unticked, i.unit);
+                                    return { ...i, unticked, sellPrice: cp != null ? cp : i.sellPrice };
+                                  }))}
+                                  aria-label={`Deduct ${name}`}
+                                  className="accent-teal w-3.5 h-3.5 shrink-0"
+                                />
+                                <span className={ticked ? 'text-slate-200' : 'text-muted line-through'}>
+                                  {name} ×{c.quantity * item.qty}
+                                  {c.choice_group && <span className="ml-1 text-gold">· {c.choice_group}</span>}
+                                </span>
+                                {c.price != null && <span className="ml-auto font-bold text-gold">Ksh {c.price.toLocaleString('en-KE')}</span>}
+                              </label>
                             );
                           })}
                         </div>
-                      );
-                    })()}
+                      </div>
+                    )}
 
                     <div className="flex items-center gap-2 mb-2">
                       <button
@@ -1336,12 +1301,6 @@ function PosDashboard() {
                       </div>
                     )}
 
-                    {(() => {
-                      const missing = getMissingChoices(item);
-                      return missing.length > 0 ? (
-                        <p className="text-[9px] text-gold mb-1.5">⚠ Pick {missing.join(', ')} to sell</p>
-                      ) : null;
-                    })()}
                     {/* Destination picker for Move action */}
                     {locations.filter(l => l.location_id !== locationId).length > 0 && (
                       <div className="mb-1.5">
@@ -1370,7 +1329,7 @@ function PosDashboard() {
                     <div className="flex gap-1.5">
                       <button
                         onClick={() => processItem(item, 'sold')}
-                        disabled={processing || getMissingChoices(item).length > 0}
+                        disabled={processing}
                         className="flex-1 py-1 rounded-lg bg-danger/10 border border-danger/20 text-danger text-[10px] font-bold hover:bg-danger/20 disabled:opacity-50 transition-all"
                       >Sold</button>
                       {item.transferDestId && (
