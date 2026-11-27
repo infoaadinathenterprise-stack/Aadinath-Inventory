@@ -11,7 +11,7 @@ import { useProducts } from '@/lib/hooks/useProducts';
 import { stockTxn, type StockOp } from '@/lib/stockActions';
 import { supabase } from '@/lib/supabase';
 import type { Product } from '@/lib/types';
-import { SESSION_KEY, ROLE_KEY, DEFAULT_COMPANY_ID } from '@/lib/types';
+import { SESSION_KEY, ROLE_KEY, USER_KEY, DEFAULT_COMPANY_ID } from '@/lib/types';
 import { savedBoxBarcode } from '@/lib/boxBarcode';
 
 type SortBy = 'recent' | 'name';
@@ -351,11 +351,36 @@ function LabelsDashboard() {
       .then(({ data }) => { if (!cancelled) setSavedBoxes((data ?? []) as SavedBox[]); });
     return () => { cancelled = true; };
   }, []);
-  // Products already printed this batch — persisted so it survives the form-POST
-  // navigation to the relay. Re-printing one asks for confirmation first.
-  const [printed,        setPrinted]        = useState<Record<number, boolean>>(() => {
-    try { return JSON.parse(readLS('sticker.printed', '{}')); } catch { return {}; }
-  });
+  // Products already printed this batch. Shared in the database
+  // (labels_printed) so a label printed from the phone shows "✓ Printed" on
+  // the PC too. Re-printing one asks for confirmation first.
+  const [printed,        setPrinted]        = useState<Record<number, boolean>>({});
+  const loadPrinted = useCallback(async (): Promise<Record<number, boolean> | null> => {
+    const { data, error } = await supabase.from('labels_printed').select('product_id');
+    if (error) return null;   // couldn't read: keep what's on screen
+    const next: Record<number, boolean> = {};
+    for (const r of (data ?? []) as { product_id: number }[]) next[r.product_id] = true;
+    setPrinted(next);
+    return next;
+  }, []);
+  // Pick up marks made on other devices: on open, every 5 s while visible, and on return to the tab.
+  useEffect(() => {
+    try { localStorage.removeItem('sticker.printed'); } catch { /* old per-browser copy */ }
+    const first = setTimeout(loadPrinted, 0);
+    const t = setInterval(() => { if (document.visibilityState === 'visible') loadPrinted(); }, 5000);
+    const onShow = () => { if (document.visibilityState === 'visible') loadPrinted(); };
+    document.addEventListener('visibilitychange', onShow);
+    window.addEventListener('focus', onShow);
+    return () => { clearTimeout(first); clearInterval(t); document.removeEventListener('visibilitychange', onShow); window.removeEventListener('focus', onShow); };
+  }, [loadPrinted]);
+  async function markPrinted(ids: number[]) {
+    setPrinted(prev => { const next = { ...prev }; for (const id of ids) next[id] = true; return next; });
+    const by = (() => { try { return localStorage.getItem(USER_KEY); } catch { return null; } })();
+    const { error } = await supabase.from('labels_printed').upsert(
+      ids.map(product_id => ({ product_id, printed_by: by, printed_at: new Date().toISOString() })),
+    );
+    if (error) showToast('Printed, but the ✓ mark could not be saved for other devices: ' + error.message, 'error');
+  }
   const [relayHost,      setRelayHost]      = useState<string>(() => readLS('sticker.relayHost', ''));
   const [printerIp,      setPrinterIp]      = useState<string>(() => readLS('sticker.printerIp', ''));
   const [printerPort,    setPrinterPort]    = useState<string>(() => readLS('sticker.printerPort', '9100'));
@@ -497,7 +522,9 @@ function LabelsDashboard() {
     setUnits({});
     setBoxSizes({});
     setPrinted({});
-    try { localStorage.removeItem('sticker.printed'); } catch { /* ignore */ }
+    // Clear the shared marks too, so every device starts a fresh batch.
+    supabase.from('labels_printed').delete().gte('product_id', 0)
+      .then(({ error }) => { if (error) { showToast('Could not clear printed marks: ' + error.message, 'error'); loadPrinted(); } });
   }
 
   const selectedProducts = useMemo(
@@ -552,7 +579,9 @@ function LabelsDashboard() {
 
     // Guard against accidental double-printing: if any selected product was
     // already printed this batch, ask before printing it again.
-    const already = entries.map(([pid]) => Number(pid)).filter(id => printed[id]);
+    // Fresh from the database, so a label just printed on another device counts.
+    const printedNow = (await loadPrinted()) ?? printed;
+    const already = entries.map(([pid]) => Number(pid)).filter(id => printedNow[id]);
     if (already.length > 0) {
       const names = already.map(id => products.find(p => p.product_id === id)?.product_name).filter(Boolean) as string[];
       if (!window.confirm(`Already printed: ${names.slice(0, 5).join(', ')}${names.length > 5 ? '…' : ''}\n\nPrint these again?`)) return;
@@ -613,12 +642,7 @@ function LabelsDashboard() {
         if (finalStatus?.status === 'done') {
           // Only now are these labels really printed — mark them, so a repeat
           // asks first. (A failed or unanswered job leaves them unmarked.)
-          setPrinted(prev => {
-            const next = { ...prev };
-            for (const [pid] of entries) next[Number(pid)] = true;
-            try { localStorage.setItem('sticker.printed', JSON.stringify(next)); } catch { /* ignore */ }
-            return next;
-          });
+          await markPrinted(entries.map(([pid]) => Number(pid)));
           // Auto-uncheck everything that just printed so it can't be reprinted
           // by mistake. It keeps its "✓ Printed" badge and can be re-selected
           // by hand if another copy is genuinely needed.
@@ -652,12 +676,9 @@ function LabelsDashboard() {
       form.appendChild(input);
       document.body.appendChild(form);
 
-      // Mark everything in this batch as printed (persisted so it survives the
-      // navigation to the relay and back), so a repeat needs confirmation.
-      const printedNext = { ...printed };
-      for (const [pid] of entries) printedNext[Number(pid)] = true;
-      try { localStorage.setItem('sticker.printed', JSON.stringify(printedNext)); } catch { /* ignore */ }
-      setPrinted(printedNext);
+      // Mark everything in this batch as printed (saved before the page
+      // navigates to the relay), so a repeat needs confirmation on any device.
+      await markPrinted(entries.map(([pid]) => Number(pid)));
 
       form.submit();
     } catch (e) {
