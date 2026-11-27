@@ -17,7 +17,7 @@ interface Props {
   componentMap?: ComponentMap;
   allProducts?:  Product[];
   userRole?:    UserRole;
-  companyId?:   number;   // which company's stock to adjust (default Jay Aadinath)
+  companyId?:   number;   // which company's stock to adjust (always Jay Aadinath Enterprises Ltd)
   // Per-company stock maps + company list. When present, auto-deducted
   // components are pulled from ANY company that has them (stock is shared
   // across companies). Absent → components fall back to companyId only.

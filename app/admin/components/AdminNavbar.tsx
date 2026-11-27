@@ -137,7 +137,7 @@ export default function AdminNavbar({ onLogout }: Props) {
                 JA
               </span>
               <span className="hidden md:inline font-bold text-[15px] text-slate-100 tracking-tight leading-none truncate" style={{ fontFamily: 'var(--font-display)' }}>
-                Jay Aadinath
+                Jay Aadinath Enterprises Ltd
               </span>
               <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full border uppercase tracking-[0.14em] shrink-0 ${
                 isAdmin
@@ -175,7 +175,7 @@ export default function AdminNavbar({ onLogout }: Props) {
                   >
                     JA
                   </span>
-                  <span className="font-bold text-slate-100 text-sm" style={{ fontFamily: 'var(--font-display)' }}>Jay Aadinath</span>
+                  <span className="font-bold text-slate-100 text-sm" style={{ fontFamily: 'var(--font-display)' }}>Jay Aadinath Enterprises Ltd</span>
                   <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded-full border uppercase tracking-widest ${
                     isAdmin
                       ? 'bg-gold/12 border-gold/30 text-gold'
