@@ -799,7 +799,9 @@ function PosDashboard() {
           : buildTransferOps(item.product, item.qty, item.unit, item.transferDestId!, item.unticked, item.companyId, work)));
       }
       await stockTxn(ops, action === 'sold' ? buildSalePayload(cart) : null);
-      if (action === 'sold') { await markBoxesSold(cart); await rememberChoicePrices(cart); await rememberProductPrices(cart); }
+      // Saved: empty the cart now, so a hiccup in the extras below can never invite a second (double) sale.
+      setCart([]);
+      if (action === 'sold') { try { await markBoxesSold(cart); await rememberChoicePrices(cart); await rememberProductPrices(cart); } catch { /* sale is already saved */ } }
       showToast(`${action === 'sold' ? 'Sold' : 'Moved'} ${cart.length} item(s) ✓`, 'success');
       // Restock alert: after a sale, show items available elsewhere
       if (action === 'sold') {
@@ -813,7 +815,6 @@ function PosDashboard() {
           .map(item => item.product.product_name);
         if (names.length > 0) setRestockSaleAlert(names);
       }
-      setCart([]);
       setCartOpen(false);
       refresh();
       setTimeout(() => barcodeRef.current?.focus(), 100);
@@ -836,8 +837,9 @@ function PosDashboard() {
         ? buildSellOps(item.product, item.qty, item.unit, item.sellPrice, item.unticked, item.companyId)
         : buildTransferOps(item.product, item.qty, item.unit, item.transferDestId!, item.unticked, item.companyId);
       await stockTxn(ops, action === 'sold' ? buildSalePayload([item]) : null);
-      if (action === 'sold') { await markBoxesSold([item]); await rememberChoicePrices([item]); await rememberProductPrices([item]); }
+      // Saved: drop the line now, so a hiccup in the extras below can never invite a second (double) sale.
       setCart(c => c.filter(i => i.product.product_id !== item.product.product_id));
+      if (action === 'sold') { try { await markBoxesSold([item]); await rememberChoicePrices([item]); await rememberProductPrices([item]); } catch { /* sale is already saved */ } }
       showToast(`${action === 'sold' ? 'Sold' : 'Moved'}: ${item.product.product_name} ✓`, 'success');
       if (action === 'sold') {
         const ppb     = item.product.pieces_per_box ?? 0;
