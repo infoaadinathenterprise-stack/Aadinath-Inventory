@@ -120,7 +120,7 @@ export function productImageSvg(p: Product): string {
 <g transform="translate(200 168) scale(6.1) translate(-12 -12)" fill="none" stroke="#7dd3fc" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">${icon}</g>
 ${type ? `<text x="200" y="299" text-anchor="middle" fill="#f6c453" font-family="Arial, Helvetica, sans-serif" font-size="15" font-weight="700" letter-spacing="2.5">${xesc(type)}</text>` : ''}
 ${nameSvg}
-<text x="200" y="384" text-anchor="middle" fill="#5b6b85" font-family="Arial, Helvetica, sans-serif" font-size="10" font-weight="700" letter-spacing="3">JAY AADINATH</text>
+<text x="200" y="384" text-anchor="middle" fill="#5b6b85" font-family="Arial, Helvetica, sans-serif" font-size="10" font-weight="700" letter-spacing="2">JAY AADINATH ENTERPRISES LTD</text>
 </svg>`;
 }
 

@@ -14,7 +14,7 @@ function currentUser(): string {
 export interface StockOp {
   product_id:  number;
   location_id: number;
-  company_id?: number;               // which company's stock (defaults to Jay Aadinath = 2)
+  company_id?: number;               // which company's stock (always 2 = Jay Aadinath Enterprises Ltd)
   dq:          number;               // delta to loose pieces (can be negative)
   db:          number;               // delta to whole boxes  (can be negative)
   mov_type?:   string;               // SALE | TRANSFER | ADJUSTMENT_IN | ADJUSTMENT_OUT | AUTO_DEDUCT
