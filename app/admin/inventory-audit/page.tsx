@@ -24,8 +24,8 @@ interface CompanyStock { quantity: number; box_quantity: number }
 
 interface AuditRow {
   product:      Product;
-  quantity:     number;   // loose pieces, SUMMED across Aadinath + Jay Aadinath
-  box_quantity: number;   // whole boxes,  SUMMED across Aadinath + Jay Aadinath
+  quantity:     number;   // loose pieces at this location
+  box_quantity: number;   // whole boxes at this location
   perCompany:   Record<number, CompanyStock>; // company_id → this location's stock, for edit-time deltas
 }
 
@@ -371,7 +371,7 @@ function InventoryAuditDashboard() {
   // spilling into the other firm only if it alone doesn't have enough.
   function buildEditOps(row: AuditRow, delta: number, ppb: number): StockOp[] {
     const co = (cid: number): CompanyStock => row.perCompany[cid] ?? { quantity: 0, box_quantity: 0 };
-    // Every company holding stock here, default (Jay Aadinath) first.
+    // Stock rows here (all Jay Aadinath Enterprises Ltd).
     const companyIds = Array.from(new Set([DEFAULT_COMPANY_ID, ...Object.keys(row.perCompany).map(Number)]));
     const totals = companyIds.map(cid => ({ cid, ...co(cid), total: co(cid).quantity + co(cid).box_quantity * ppb }));
     const primary = [...totals].sort((a, b) => b.total - a.total)[0];
