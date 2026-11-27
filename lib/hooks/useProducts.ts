@@ -11,7 +11,7 @@ import { readPageCache, writePageCache } from '@/lib/pageCache';
 interface ProductsData {
   products:    Product[];
   locations:   LocationInfo[];          // all active locations from DB
-  companies:   Company[];               // Jay Aadinath (Aadinath was merged in)
+  companies:   Company[];               // the one company: Jay Aadinath Enterprises Ltd
   stockByLoc:  StockByLoc;              // location_id → product_id → pieces (ALL companies combined)
   boxByLoc:    StockByLoc;              // location_id → product_id → boxes  (ALL companies combined)
   stockByCompany: StockByCompany;       // company_id → location_id → product_id → pieces
@@ -97,7 +97,7 @@ export function useProducts({ includeOrderOnly = false }: { includeOrderOnly?: b
 
       // Companies fallback so the UI still works before the table is populated.
       const companyList = comps.length > 0 ? comps
-        : [{ company_id: 2, company_name: 'Jay Aadinath Enterprise', active_status: true }];
+        : [{ company_id: 2, company_name: 'Jay Aadinath Enterprises Ltd', active_status: true }];
 
       const totalStock = (p: Product) => Object.keys(sbl).reduce((s, lid) =>
         s + (sbl[+lid][p.product_id] ?? 0) + (bbl[+lid][p.product_id] ?? 0) * (p.pieces_per_box || 1), 0);
