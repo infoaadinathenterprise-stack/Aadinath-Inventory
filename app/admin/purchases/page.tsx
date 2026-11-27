@@ -22,13 +22,21 @@ function fmtDate(iso: string) {
 
 function fmtKsh(n: number | null | undefined) {
   if (n == null) return '—';
-  return 'Ksh ' + Number(n).toLocaleString('en-KE');
+  return 'Ksh ' + fmtMoney(Number(n));
 }
+
+// Whole amounts as "59,485"; amounts with cents always as "59,485.40".
+function fmtMoney(n: number) {
+  return n.toLocaleString('en-KE', Number.isInteger(n) ? {} : { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+// Money is kept to 2 decimals (cents) everywhere on this page.
+const r2 = (n: number) => Math.round(n * 100) / 100;
 
 // Kenya VAT 16% — prices in DB are already tax-inclusive.
 function splitVAT(totalIncl: number) {
-  const vat  = Math.round(totalIncl * 16 / 116);
-  const base = totalIncl - vat;
+  const vat  = r2(totalIncl * 16 / 116);
+  const base = r2(totalIncl - vat);
   return { base, vat };
 }
 
@@ -46,7 +54,7 @@ function lineInclusive(qty: number, unitPrice: number | null, taxInclusive: bool
   if (unitPrice == null) return 0;
   const d = Math.min(100, Math.max(0, discountPct || 0));
   const base = qty * unitPrice * (1 - d / 100);
-  return taxInclusive ? Math.round(base) : Math.round(base * (1 + VAT_RATE));
+  return taxInclusive ? r2(base) : r2(base * (1 + VAT_RATE));
 }
 
 // The purchase_items primary-key column name varies by deployment —
@@ -773,7 +781,7 @@ function ProductPurchaseResults({ query, lines, purchases, names, supplierName, 
             <td className="px-3 py-2 text-slate-100" colSpan={3}>Total</td>
             <td className="px-2 py-2 text-right tabular-nums text-slate-100">{totalQty}</td>
             <td className="px-2 py-2 text-right tabular-nums text-muted text-xs whitespace-nowrap">
-              {totalQty > 0 ? `avg ${fmtKsh(Math.round(totalCost / totalQty))}` : ''}
+              {totalQty > 0 ? `avg ${fmtKsh(r2(totalCost / totalQty))}` : ''}
             </td>
             <td className="px-3 py-2 text-right tabular-nums text-teal whitespace-nowrap">{fmtKsh(totalCost)}</td>
           </tr>
@@ -813,8 +821,8 @@ async function loadPriceLines(): Promise<PriceLine[]> {
 // What one unit really cost: line total / quantity (so tax-exclusive entry
 // and discounts compare fairly), else the typed unit price.
 function unitCost(l: PriceLine): number | null {
-  if (l.total_price != null && l.quantity) return Math.round(l.total_price / l.quantity);
-  return l.unit_price != null && l.unit_price > 0 ? Math.round(l.unit_price) : null;
+  if (l.total_price != null && l.quantity) return r2(l.total_price / l.quantity);
+  return l.unit_price != null && l.unit_price > 0 ? r2(l.unit_price) : null;
 }
 
 // purchase_items' key column is item_id (the PurchaseItem type calls it id).
@@ -825,7 +833,7 @@ function itemKey(it: PurchaseItem): number {
 function median(xs: number[]): number {
   const v = [...xs].sort((a, b) => a - b);
   const m = Math.floor(v.length / 2);
-  return v.length % 2 ? v[m] : Math.round((v[m - 1] + v[m]) / 2);
+  return v.length % 2 ? v[m] : r2((v[m - 1] + v[m]) / 2);
 }
 
 // purchase_id → its lines that cost more than the product's regular price:
@@ -1556,10 +1564,10 @@ function EditPurchaseModal({
                     <div className="grid grid-cols-2 gap-2 items-end">
                       <div>
                         <label className="text-[9px] font-bold text-muted uppercase block mb-0.5">Qty</label>
-                        <input
-                          type="text" inputMode="numeric" value={row.qty}
+                        <NumField
+                          decimals={0} value={row.qty}
                           onFocus={e => e.currentTarget.select()}
-                          onChange={e => updateRow(row.rowKey, { qty: Math.max(1, parseInt(e.target.value) || 1) })}
+                          onValue={n => updateRow(row.rowKey, { qty: n ?? 0 })}
                           onWheel={e => e.currentTarget.blur()}
                           className="w-full px-2 py-1.5 rounded-lg bg-surface border border-white/8 text-slate-100 text-xs outline-none focus:border-teal/40"
                         />
@@ -1571,22 +1579,22 @@ function EditPurchaseModal({
                       </div>
                       <div>
                         <label className="text-[9px] font-bold text-muted uppercase block mb-0.5">Unit Price (Ksh)</label>
-                        <input
-                          type="text" inputMode="decimal" value={row.unitPrice ?? ''}
+                        <NumField
+                          decimals={2} value={row.unitPrice}
                           placeholder="0.00"
                           onFocus={e => e.currentTarget.select()}
-                          onChange={e => updateRow(row.rowKey, { unitPrice: e.target.value ? parseFloat(e.target.value) : null })}
+                          onValue={n => updateRow(row.rowKey, { unitPrice: n })}
                           onWheel={e => e.currentTarget.blur()}
                           className="w-full px-2 py-1.5 rounded-lg bg-surface border border-white/8 text-slate-100 text-xs outline-none focus:border-teal/40"
                         />
                       </div>
                       <div>
                         <label className="text-[9px] font-bold text-muted uppercase block mb-0.5">Discount %</label>
-                        <input
-                          type="text" inputMode="decimal" value={row.discountPct || ''}
+                        <NumField
+                          decimals={2} value={row.discountPct || null}
                           placeholder="0"
                           onFocus={e => e.currentTarget.select()}
-                          onChange={e => updateRow(row.rowKey, { discountPct: Math.min(100, Math.max(0, parseFloat(e.target.value) || 0)) })}
+                          onValue={n => updateRow(row.rowKey, { discountPct: Math.min(100, n ?? 0) })}
                           onWheel={e => e.currentTarget.blur()}
                           className="w-full px-2 py-1.5 rounded-lg bg-surface border border-white/8 text-slate-100 text-xs outline-none focus:border-gold/50"
                         />
@@ -1594,7 +1602,7 @@ function EditPurchaseModal({
                       <div>
                         <label className="text-[9px] font-bold text-muted uppercase block mb-0.5">Line (incl. tax)</label>
                         <div className="px-2 py-1.5 rounded-lg bg-surface border border-white/8 text-teal text-xs font-bold tabular-nums text-right">
-                          {row.unitPrice != null ? Number(lineInclusive(row.qty, row.unitPrice, row.taxInclusive, row.discountPct)).toLocaleString('en-KE') : '—'}
+                          {row.unitPrice != null ? fmtMoney(lineInclusive(row.qty, row.unitPrice, row.taxInclusive, row.discountPct)) : '—'}
                         </div>
                       </div>
                     </div>
@@ -2552,10 +2560,10 @@ function ItemRowEditor({
       <div className="grid grid-cols-2 gap-2 items-end">
         <div>
           <label className="text-[9px] font-bold text-muted uppercase block mb-0.5">Qty</label>
-          <input
-            type="text" inputMode="numeric" value={row.qty}
+          <NumField
+            decimals={0} value={row.qty}
             onFocus={e => e.currentTarget.select()}
-            onChange={e => onChange({ qty: Math.max(1, parseInt(e.target.value) || 1) })}
+            onValue={n => onChange({ qty: n ?? 0 })}
             onWheel={e => e.currentTarget.blur()}
             onKeyDown={enterNext}
             className="w-full px-2 py-1.5 rounded-lg bg-surface border border-white/8 text-slate-100 text-xs outline-none focus:border-teal/40"
@@ -2563,11 +2571,11 @@ function ItemRowEditor({
         </div>
         <div>
           <label className="text-[9px] font-bold text-muted uppercase block mb-0.5">Unit Price (Ksh)</label>
-          <input
-            type="text" inputMode="decimal" value={row.unitPrice ?? ''}
+          <NumField
+            decimals={2} value={row.unitPrice}
             placeholder="0.00"
             onFocus={e => e.currentTarget.select()}
-            onChange={e => onChange({ unitPrice: e.target.value ? parseFloat(e.target.value) : null })}
+            onValue={n => onChange({ unitPrice: n })}
             onWheel={e => e.currentTarget.blur()}
             onKeyDown={enterNext}
             className="w-full px-2 py-1.5 rounded-lg bg-surface border border-white/8 text-slate-100 text-xs outline-none focus:border-teal/40"
@@ -2575,11 +2583,11 @@ function ItemRowEditor({
         </div>
         <div>
           <label className="text-[9px] font-bold text-muted uppercase block mb-0.5">Discount %</label>
-          <input
-            type="text" inputMode="decimal" value={row.discountPct || ''}
+          <NumField
+            decimals={2} value={row.discountPct || null}
             placeholder="0"
             onFocus={e => e.currentTarget.select()}
-            onChange={e => onChange({ discountPct: Math.min(100, Math.max(0, parseFloat(e.target.value) || 0)) })}
+            onValue={n => onChange({ discountPct: Math.min(100, n ?? 0) })}
             onWheel={e => e.currentTarget.blur()}
             onKeyDown={enterNext}
             className="w-full px-2 py-1.5 rounded-lg bg-surface border border-white/8 text-slate-100 text-xs outline-none focus:border-gold/50"
@@ -2588,7 +2596,7 @@ function ItemRowEditor({
         <div>
           <label className="text-[9px] font-bold text-muted uppercase block mb-0.5">Line (incl. tax)</label>
           <div className="px-2 py-1.5 rounded-lg bg-surface border border-white/8 text-teal text-xs font-bold tabular-nums text-right">
-            {lineTotal != null ? Number(lineTotal).toLocaleString('en-KE') : '—'}
+            {lineTotal != null ? fmtMoney(Number(lineTotal)) : '—'}
           </div>
         </div>
       </div>
@@ -2623,6 +2631,37 @@ function ItemRowEditor({
   );
 }
 
+// ─── Number box for qty / price / discount ────────────────────────────────────
+// Keeps exactly what's typed ("", "0", "12.", "59485.4") so you can clear the
+// box, type 0, or type decimals; accepts digits and up to `decimals` decimal
+// places, and passes the parsed number (null when empty) to onValue. A value
+// changed from outside (e.g. a scanned bill) still shows.
+function NumField({ value, onValue, decimals, ...rest }: {
+  value: number | null; onValue: (n: number | null) => void; decimals: number;
+} & Omit<React.InputHTMLAttributes<HTMLInputElement>, 'value' | 'onChange' | 'type'>) {
+  const [text, setText] = useState(value == null ? '' : String(value));
+  const [shown, setShown] = useState(value);
+  const parse = (t: string) => (t === '' || t === '.' ? null : Number(t));
+  if (value !== shown) {           // outside change: show it unless it's what we already have
+    setShown(value);
+    // An empty box the parent stores as 0 (qty) stays empty.
+    if (value !== parse(text) && !(value === 0 && text === '')) setText(value == null ? '' : String(value));
+  }
+  const ok = decimals > 0 ? new RegExp(`^\\d*(\\.\\d{0,${decimals}})?$`) : /^\d*$/;
+  return (
+    <input
+      {...rest}
+      type="text" inputMode={decimals > 0 ? 'decimal' : 'numeric'} value={text}
+      onChange={e => {
+        const t = e.target.value.replace(/,/g, '').trim().replace(/^0+(?=\d)/, '');   // "023" → "23", keeps "0" and "0.5"
+        if (!ok.test(t)) return;       // ignore letters / a 3rd decimal
+        const n = parse(t);
+        setText(t); setShown(n); onValue(n);
+      }}
+    />
+  );
+}
+
 // ─── Tax-inclusive checkbox (shared by new + existing item rows) ───────────────
 
 function TaxCheckbox({
@@ -2642,11 +2681,11 @@ function TaxCheckbox({
     const base = qty * unitPrice * (1 - d / 100);
     const discNote = d > 0 ? `after ${d}% disc · ` : '';
     if (checked) {
-      const vat = Math.round(base * 16 / 116);
+      const vat = r2(base * 16 / 116);
       return `${discNote}incl. tax · VAT ${fmtKsh(vat)}`;
     }
-    const vat = Math.round(base * VAT_RATE);
-    return `${discNote}+16% tax (${fmtKsh(vat)}) → ${fmtKsh(Math.round(base) + vat)}`;
+    const vat = r2(base * VAT_RATE);
+    return `${discNote}+16% tax (${fmtKsh(vat)}) → ${fmtKsh(r2(base + vat))}`;
   })();
 
   return (
