@@ -5,8 +5,8 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import { supabase } from '@/lib/supabase';
-import type { Sale, SaleItem, Withdrawal, Company } from '@/lib/types';
-import { SESSION_KEY, USER_KEY, ROLE_KEY, DEFAULT_COMPANY_ID } from '@/lib/types';
+import type { Sale, SaleItem, Withdrawal } from '@/lib/types';
+import { SESSION_KEY, USER_KEY, ROLE_KEY } from '@/lib/types';
 import AdminNavbar from '../components/AdminNavbar';
 import Toast, { type ToastState } from '../components/Toast';
 import { readPageCache, writePageCache } from '@/lib/pageCache';
@@ -66,7 +66,6 @@ function SalesDashboard() {
   const [sales,       setSales]       = useState<Sale[]>([]);
   const [items,       setItems]       = useState<Record<number, SaleItem[]>>({});
   const [withdrawals, setWithdrawals] = useState<Withdrawal[]>([]);
-  const [companies,   setCompanies]   = useState<Company[]>([]);
   // Map of product_id → current buying_price, used to back-fill the
   // cost column for sales saved before the Purchases page started
   // pushing buying_price into products. Live value, not snapshot — if
@@ -91,33 +90,28 @@ function SalesDashboard() {
   // post-save refreshes update in place without blanking the page.
   const firstLoad = useRef(true);
   // Last visit's figures for this day show instantly; fresh ones replace them.
-  type SalesCache = { sales: Sale[]; withdrawals: Withdrawal[]; items: Record<number, SaleItem[]>; buyMap: Record<number, number>; companies: Company[]; locNames: Record<number, string> };
+  type SalesCache = { sales: Sale[]; withdrawals: Withdrawal[]; items: Record<number, SaleItem[]>; buyMap: Record<number, number>; locNames: Record<number, string> };
   const load = useCallback(async () => {
     const cacheKey = `sales:${day}`;
     const cached = readPageCache<SalesCache>(cacheKey);
     if (cached) {
       Object.assign(LOC_NAME, cached.locNames);
       setSales(cached.sales); setWithdrawals(cached.withdrawals); setItems(cached.items);
-      setBuyMap(cached.buyMap); setCompanies(cached.companies);
+      setBuyMap(cached.buyMap);
       setLoading(false);
     } else if (firstLoad.current) setLoading(true);
     setError(null);
-    const snap: SalesCache = { sales: [], withdrawals: [], items: {}, buyMap: {}, companies: [], locNames: {} };
+    const snap: SalesCache = { sales: [], withdrawals: [], items: {}, buyMap: {}, locNames: {} };
 
-    const [salesRes, withdrawRes, locRes, compRes] = await Promise.all([
+    const [salesRes, withdrawRes, locRes] = await Promise.all([
       supabase.from('sales').select('*').eq('sale_date', day).order('created_at', { ascending: false }),
       supabase.from('withdrawals').select('*').eq('withdrawal_date', day).order('created_at', { ascending: false }),
       supabase.from('locations').select('location_id, location_name'),
-      supabase.from('companies').select('company_id, company_name, active_status').order('company_id'),
     ]);
     for (const loc of locRes.data ?? []) {
       LOC_NAME[loc.location_id as number] = loc.location_name as string;
       snap.locNames[loc.location_id as number] = loc.location_name as string;
     }
-    snap.companies = (compRes.data as Company[] | null)?.length
-      ? (compRes.data as Company[])
-      : [{ company_id: 2, company_name: 'Jay Aadinath Enterprise', active_status: true }];
-    setCompanies(snap.companies);
 
     if (salesRes.error) {
       setError('Sales: ' + salesRes.error.message);
@@ -201,35 +195,25 @@ function SalesDashboard() {
     let voidedSales   = 0;
     let salesNoItems  = 0;  // sales without line items — counted as "incomplete" for profit
 
-    // Per-company tallies (keyed by company_id).
-    type Tally = { revenue: number; cost: number; qty: number; known: number; total: number };
-    const byCompanyRaw: Record<number, Tally> = {};
-    const bump = (cid: number): Tally => (byCompanyRaw[cid] ??= { revenue: 0, cost: 0, qty: 0, known: 0, total: 0 });
-
     for (const s of sales) {
       if (s.status === 'VOIDED') { voidedSales++; continue; }
       const its = items[s.sale_id] ?? [];
       if (its.length === 0) {
         // No line items found — fall back to the sales row totals so
         // revenue reflects this sale. Profit can't be computed without
-        // the line breakdown, so it stays incomplete. Attribute to the default company.
+        // the line breakdown, so it stays incomplete.
         if (s.total_amount) {
           revenue += s.total_amount;
           qtySold += s.item_count;
           totalLines += Math.max(s.item_count, 1);
           salesNoItems++;
-          const t = bump(DEFAULT_COMPANY_ID);
-          t.revenue += s.total_amount; t.qty += s.item_count; t.total += Math.max(s.item_count, 1);
         }
         continue;
       }
       for (const it of its) {
         totalLines++;
         qtySold += it.quantity;
-        const cid = it.company_id ?? DEFAULT_COMPANY_ID;
-        const t = bump(cid);
-        t.total++; t.qty += it.quantity;
-        if (it.unit_price != null) { revenue += it.unit_price * it.quantity; t.revenue += it.unit_price * it.quantity; }
+        if (it.unit_price != null) revenue += it.unit_price * it.quantity;
         // Cost preference: snapshot on the line (most accurate at time
         // of sale) → fall back to the product's current buying_price
         // when the snapshot is missing.
@@ -237,7 +221,6 @@ function SalesDashboard() {
         if (it.unit_price != null && effectiveCost != null) {
           knownLines++;
           cost += effectiveCost * it.quantity;
-          t.known++; t.cost += effectiveCost * it.quantity;
         }
       }
     }
@@ -245,15 +228,7 @@ function SalesDashboard() {
     const profit = (knownLines === totalLines && totalLines > 0) ? revenue - cost : null;
     const netCash = revenue - withdrawTotal;
 
-    // Finalize per-company rows: profit only when every line has a cost.
-    const byCompany = Object.entries(byCompanyRaw).map(([cid, t]) => ({
-      companyId: Number(cid),
-      revenue:   t.revenue,
-      qty:       t.qty,
-      profit:    (t.known === t.total && t.total > 0) ? t.revenue - t.cost : null,
-    })).sort((a, b) => a.companyId - b.companyId);
-
-    return { revenue, cost, profit, qtySold, knownLines, totalLines, voidedSales, salesNoItems, withdrawTotal, netCash, byCompany };
+    return { revenue, cost, profit, qtySold, knownLines, totalLines, voidedSales, salesNoItems, withdrawTotal, netCash };
   }, [sales, items, withdrawals, buyMap]);
 
   async function addWithdrawal() {
@@ -355,33 +330,6 @@ function SalesDashboard() {
           <SummaryCell label="Net cash"    value={summary.revenue === 0 && summary.withdrawTotal === 0 ? DASH : fmtSignedKsh(summary.netCash)} tone={summary.netCash >= 0 ? 'success' : 'danger'} sub="Revenue − Withdrawals" />
         </div>
 
-        {/* ── Per-company revenue / profit ── */}
-        {companies.length > 1 && summary.byCompany.length > 0 && (
-          <div className="mb-4">
-            <h3 className="text-[10px] font-bold text-muted uppercase tracking-widest mb-2">By company</h3>
-            <div className="grid grid-cols-2 gap-2">
-              {summary.byCompany.map(c => {
-                const name = companies.find(x => x.company_id === c.companyId)?.company_name?.replace(/\s*Enterprise$/i, '')
-                  ?? (c.companyId === DEFAULT_COMPANY_ID ? 'Jay Aadinath' : `Company ${c.companyId}`);
-                return (
-                  <div key={c.companyId} className="rounded-xl bg-surface border border-white/8 px-3.5 py-2.5">
-                    <div className={`text-[11px] font-bold ${c.companyId === DEFAULT_COMPANY_ID ? 'text-teal' : 'text-gold'}`}>{name}</div>
-                    <div className="flex items-center justify-between mt-1">
-                      <span className="text-[10px] text-muted">Revenue</span>
-                      <span className="text-xs font-bold text-slate-100 tabular-nums">{c.revenue > 0 ? fmtKsh(c.revenue) : DASH}</span>
-                    </div>
-                    <div className="flex items-center justify-between mt-0.5">
-                      <span className="text-[10px] text-muted">Profit</span>
-                      <span className={`text-xs font-bold tabular-nums ${c.profit == null ? 'text-muted' : c.profit >= 0 ? 'text-success' : 'text-danger'}`}>
-                        {c.profit == null ? DASH : fmtSignedKsh(c.profit)}
-                      </span>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
 
         {/* ── Withdrawals strip ── */}
         <div className="mb-4 rounded-xl bg-surface border border-white/8 p-3">
