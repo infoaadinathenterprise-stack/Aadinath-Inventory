@@ -120,7 +120,7 @@ export default function AboutSection() {
 
         <FadeIn delay={0.4}>
           <p className="text-center text-muted/50 text-xs mt-12">
-            © {new Date().getFullYear()} Jay Aadinath Enterprises LTD. All rights reserved.
+            © {new Date().getFullYear()} Jay Aadinath Enterprises Ltd. All rights reserved.
           </p>
         </FadeIn>
       </div>

@@ -62,7 +62,7 @@ export default function Navbar() {
           <Link href="/" className="flex items-center gap-3 group min-w-0">
             <BrandMark />
             <span className="font-bold text-base sm:text-lg text-slate-100 tracking-tight truncate" style={{ fontFamily: 'var(--font-display)' }}>
-              Jay Aadinath<span className="text-gradient"> Enterprises</span>
+              Jay Aadinath<span className="text-gradient"> Enterprises Ltd</span>
             </span>
           </Link>
 
@@ -130,7 +130,7 @@ export default function Navbar() {
                 <div className="flex items-center gap-2.5">
                   <BrandMark />
                   <span className="font-bold text-slate-100 text-sm tracking-tight" style={{ fontFamily: 'var(--font-display)' }}>
-                    Jay Aadinath
+                    Jay Aadinath Enterprises Ltd
                   </span>
                 </div>
                 <button
@@ -165,7 +165,7 @@ export default function Navbar() {
 
               <div className="px-6 py-4 border-t border-white/5">
                 <p className="text-xs text-muted/50 text-center">
-                  © {new Date().getFullYear()} Jay Aadinath Enterprises LTD
+                  © {new Date().getFullYear()} Jay Aadinath Enterprises Ltd
                 </p>
               </div>
             </motion.div>
