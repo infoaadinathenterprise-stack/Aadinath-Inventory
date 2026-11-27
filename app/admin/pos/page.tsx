@@ -223,24 +223,10 @@ function PosDashboard() {
     return withStock[0] ?? (companies[0]?.company_id ?? DEFAULT_COMPANY_ID);
   }
 
-  // Max sellable of a product. The two companies are just billing labels over
-  // ONE shared physical stock, so the max is the COMBINED total across every
-  // company and location — the company only decides which bill it goes on.
-  // (companyId is accepted for call-site compatibility but no longer limits
-  // the amount.)
+  // Max sellable of a product: its total across every location.
   function maxForProduct(p: Product, unit: CartUnit = 'piece', _companyId = DEFAULT_COMPANY_ID): number {
     const ppb = p.pieces_per_box ?? 0;
     const pool = companies.reduce((s, c) => s + companyTotalPieces(p, c.company_id), 0);
-    if (unit === 'box' && ppb > 0) return Math.floor(pool / ppb);
-    return pool;
-  }
-
-  // Per-company availability (for display only) — how much of the product is
-  // physically tagged to ONE company, so the cart can show "2 Aadinath /
-  // 5 Jay Aadinath" even though a sale can draw from the combined pool.
-  function companyMax(p: Product, unit: CartUnit, companyId: number): number {
-    const ppb = p.pieces_per_box ?? 0;
-    const pool = companyTotalPieces(p, companyId);
     if (unit === 'box' && ppb > 0) return Math.floor(pool / ppb);
     return pool;
   }
@@ -564,12 +550,8 @@ function PosDashboard() {
     companyId = DEFAULT_COMPANY_ID,
     work: StockWork = new Map(),
   ): StockOp[] {
-    // The two companies are just billing labels over ONE shared physical
-    // stock, sold from the same locations. So BOTH the product and its
-    // components deduct from whichever company's stock actually has them —
-    // the chosen company only decides which company the SALE/bill is
-    // attributed to (see buildSalePayload). Search the chosen company first,
-    // then the other; within each, the sale location first, then the rest.
+    // Stock is drawn from the sale location first, then the other locations.
+    // (Stock rows still carry a company_id — always Jay Aadinath Enterprises Ltd.)
     const ops: StockOp[] = [];
     const pid = p.product_id;
     const ppb = p.pieces_per_box ?? 0;
@@ -1164,35 +1146,6 @@ function PosDashboard() {
                               <span className="text-[8px] font-normal opacity-70 leading-tight">
                                 {u === 'box' ? `×${ppb} pcs` : '×1 pc'}
                               </span>
-                            </button>
-                          );
-                        })}
-                      </div>
-                    )}
-
-                    {/* Company toggle — sets which company this sale is BILLED
-                        to. Stock is shared, so a sale can draw from either; the
-                        count under each name shows how much is physically tagged
-                        to that company (e.g. 2 Aadinath / 5 Jay Aadinath). */}
-                    {companies.length > 1 && (
-                      <div className="flex gap-1 mb-2">
-                        {companies.map(co => {
-                          const avail = companyMax(item.product, item.unit, co.company_id);
-                          const isSel = item.companyId === co.company_id;
-                          return (
-                            <button
-                              key={co.company_id}
-                              onClick={() => setCart(c => c.map(i =>
-                                i.product.product_id !== item.product.product_id ? i : { ...i, companyId: co.company_id },
-                              ))}
-                              className={`flex-1 py-1.5 rounded flex flex-col items-center text-[10px] font-bold border transition-all ${
-                                isSel
-                                  ? 'border-teal/50 bg-teal/15 text-teal'
-                                  : 'border-white/10 bg-surface text-muted hover:text-slate-100'
-                              }`}
-                            >
-                              <span className="truncate max-w-full">{co.company_name.replace(/\s*Enterprise$/i, '')}</span>
-                              <span className="text-[8px] font-normal opacity-70 leading-tight">{avail} in stock</span>
                             </button>
                           );
                         })}
